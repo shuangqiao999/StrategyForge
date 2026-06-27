@@ -68,9 +68,10 @@ class DeductionEngine:
     def delete_session(self, session_id: str) -> None:
         existing = self.session_store.get(session_id)
         if existing and existing.get("status") in (
-            "ontology_running", "graph_running", "agents_running", "simulating", "reporting",
+            "ontology_running", "graph_running", "agents_running",
+            "simulating", "reporting", "optimizing",
         ):
-            raise ValueError("推演进行中，无法删除该会话")
+            raise ValueError("推演/优化进行中，无法删除该会话")
         self.close_graph()
         self.session_store.delete(session_id)
         # 清理 LanceDB 向量表 (物理回收磁盘空间)

@@ -1,0 +1,309 @@
+"""策略优化器 (Optimizer) — 蒙特卡洛多方案对比层。
+
+在推演引擎之上增加一层：对同一种子材料，针对多个“策略指令(方案)”各运行 N 次
+隔离的并行推演（每次微调温度/随机种子），用 LLM 依据统一“胜利条件”评估每次结局，
+统计胜率均值/置信区间/成功率/成本，并通过帕累托前沿筛选推荐方案。
+
+设计要点：
+- 自建基线：优化器自己跑一次 Phase1-3（本体→图谱→智能体），M 个方案共享该基线。
+- 隔离：每次模拟使用 persist_events=False 的 SimulationEngine（纯内存，不写库），
+  保证 M×N 次相互隔离、可并发、不污染主会话数据。
+- 失败传播：基线构建失败或产出 0 智能体时抛出明确错误，绝不静默返回空统计。
+- 统计仅用标准库 statistics，无第三方依赖。
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+import random
+import statistics
+from dataclasses import dataclass
+from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SimulationOutcome:
+    success: bool
+    win_score: float   # 0-1，达成胜利条件的程度
+    cost: float        # 0-1，付出的代价/风险（越高越差）
+    rationale: str
+
+
+@dataclass
+class RunResult:
+    scenario: str
+    iteration: int
+    seed: int
+    temperature: float
+    outcome: SimulationOutcome
+    action_count: int
+
+
+_EVAL_PROMPT = """你是战略推演裁判。请依据“胜利条件”评估本次推演结局，并量化打分。
+
+## 胜利条件（唯一判定标准）
+{win_condition}
+
+## 本方案所采取的策略指令
+{directive}
+
+## 本次推演的关键动作（按时间顺序）
+{events}
+
+## 输出 JSON（仅输出 JSON，无任何解释/markdown）
+{{"success": true 或 false, "win_score": 0.0到1.0之间的小数, "cost": 0.0到1.0之间的小数, "rationale": "30字以内的判定理由"}}
+- success: 是否达成胜利条件
+- win_score: 达成胜利条件的程度（越高越好）
+- cost: 为达成所付出的代价/承担的风险（越高越差）
+"""
+
+
+class StrategyOptimizer:
+    def __init__(self, engine: Any) -> None:
+        self.engine = engine
+
+    async def run_monte_carlo(
+        self,
+        session_id: str,
+        scenarios: list[dict[str, str]],
+        win_condition: str,
+        iterations: int = 20,
+        objective: str = "balanced",
+        max_concurrent: int | None = None,
+        cancel_event: asyncio.Event | None = None,
+        progress_cb: Callable[[int, int, str, SimulationOutcome], None] | None = None,
+    ) -> dict[str, Any]:
+        from strategy_forge.core.config import config
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        from strategy_forge.engine.agent_factory import create_agents_from_graph
+        from strategy_forge.engine.graph_builder import build_graph
+        from strategy_forge.engine.ontology import generate_ontology
+        from strategy_forge.engine.preprocessor import DeductionPreprocessor
+        from strategy_forge.engine.simulator import SimulationEngine
+
+        def olog(msg: str) -> None:
+            self.engine.log(session_id, "optimize", msg)
+
+        session = self.engine.get_session(session_id)
+        if session is None:
+            raise RuntimeError("会话不存在，无法启动优化器")
+        source = session.source_material or ""
+        if not source.strip():
+            raise RuntimeError("种子材料为空，无法进行推演优化")
+        total_rounds = session.total_rounds or config.deduction_default_rounds
+        max_concurrent = max_concurrent or config.deduction_max_concurrent
+
+        # ── 1. 自建基线：一次 Phase1-3（失败必须传播） ──
+        olog("优化器启动：构建基线（本体 → 图谱 → 智能体）...")
+        try:
+            ontology = await generate_ontology(source)
+            preprocessor = DeductionPreprocessor(config.project_root, session_id)
+            preprocessor.preprocess(source)
+            graph = self.engine.get_graph(session_id)
+            await build_graph(
+                source=source, graph=graph, ontology=ontology,
+                log_fn=lambda _p, m: olog(m), preprocessor=preprocessor,
+            )
+            agents = await create_agents_from_graph(
+                graph=graph, source_material=source,
+                log_fn=lambda _p, m: olog(m), preprocessor=preprocessor,
+            )
+        except Exception as e:
+            logger.exception("[Optimizer] baseline build failed")
+            raise RuntimeError(f"优化器基线构建失败：{e}") from e
+
+        if not agents:
+            raise RuntimeError("基线构建完成但未产生任何智能体，请检查种子材料是否包含人物(Person)实体")
+
+        total = len(scenarios) * iterations
+        olog(f"基线就绪：{len(agents)} 个智能体；开始 {len(scenarios)} 个方案 × {iterations} 次蒙特卡洛（共 {total} 次推演）")
+
+        # ── 2. M×N 隔离模拟 + LLM 评估 ──
+        eval_client = LLMClient()
+        sem = asyncio.Semaphore(max(1, max_concurrent))
+        results: list[RunResult] = []
+        done = 0
+        best_win = 0.0
+
+        async def one_run(sc: dict[str, str], i: int) -> RunResult | None:
+            nonlocal done, best_win
+            if cancel_event is not None and cancel_event.is_set():
+                return None
+            seed = random.randint(1, 10_000_000)
+            temp = round(random.uniform(0.3, 0.9), 2)  # 温度抖动，增加结局多样性
+            async with sem:
+                if cancel_event is not None and cancel_event.is_set():
+                    return None
+                sim = SimulationEngine(
+                    agents=agents, graph=graph, total_rounds=total_rounds,
+                    log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                    pre_goals=[sc["directive"]] if sc.get("directive") else [],
+                    seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
+                )
+                actions: list[Any] = []
+                for rnd in range(1, total_rounds + 1):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    rd = await sim.run_round(rnd)
+                    actions.extend(rd.actions)
+                outcome = await self._evaluate_outcome(
+                    eval_client, win_condition, sc.get("directive", ""), actions,
+                )
+            done += 1
+            best_win = max(best_win, outcome.win_score)
+            if progress_cb is not None:
+                progress_cb(done, total, sc.get("name", "方案"), outcome)
+            olog(
+                f"[{done}/{total}] {sc.get('name','方案')} 第{i+1}次: "
+                f"{'达成' if outcome.success else '未达成'} 胜分{outcome.win_score:.2f} "
+                f"成本{outcome.cost:.2f}（当前最高胜分 {best_win:.2f}）"
+            )
+            return RunResult(
+                scenario=sc.get("name", "方案"), iteration=i, seed=seed,
+                temperature=temp, outcome=outcome, action_count=len(actions),
+            )
+
+        tasks = []
+        for sc in scenarios:
+            for i in range(iterations):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                tasks.append(asyncio.create_task(one_run(sc, i)))
+
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+        for g in gathered:
+            if isinstance(g, RunResult):
+                results.append(g)
+            elif isinstance(g, Exception):
+                logger.warning("[Optimizer] run failed: %s", g)
+
+        cancelled = bool(cancel_event is not None and cancel_event.is_set())
+
+        # ── 3. 统计与帕累托分析 ──
+        report = self._analyze(results, scenarios, objective, win_condition)
+        report["cancelled"] = cancelled
+        report["completed_runs"] = len(results)
+        report["total_runs"] = total
+        report["iterations"] = iterations
+        olog(
+            ("优化已取消，" if cancelled else "优化完成，")
+            + f"有效结果 {len(results)}/{total}"
+            + (f"，推荐方案：{report['recommended']['name']}" if report.get("recommended") else "")
+        )
+        return report
+
+    async def _evaluate_outcome(
+        self, client: Any, win_condition: str, directive: str, actions: list[Any],
+    ) -> SimulationOutcome:
+        from strategy_forge.core.llm_client import Message
+        from strategy_forge.engine._utils import extract_text
+        from strategy_forge.engine.graph_builder import try_extract_json
+
+        events = "\n".join(
+            f"- {getattr(a, 'agent_id', '')[:8]} {getattr(a, 'action_type', '')}: "
+            f"{getattr(a, 'content', '')[:80]}"
+            for a in actions[-30:]
+        ) or "（本次推演未产生有效动作）"
+
+        prompt = _EVAL_PROMPT.format(
+            win_condition=win_condition or "（未指定，默认评估对主要角色是否有利）",
+            directive=directive or "（无特定策略指令，自主行动）",
+            events=events,
+        )
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是战略推演裁判，只输出 JSON。",
+                temperature=0.1,
+            )
+            data = try_extract_json(extract_text(resp))
+            if isinstance(data, dict):
+                return SimulationOutcome(
+                    success=bool(data.get("success", False)),
+                    win_score=_clamp(data.get("win_score", 0.5)),
+                    cost=_clamp(data.get("cost", 0.5)),
+                    rationale=str(data.get("rationale", ""))[:120],
+                )
+        except Exception as e:
+            logger.warning("[Optimizer] 结局评估失败: %s", e)
+        return SimulationOutcome(success=False, win_score=0.5, cost=0.5, rationale="评估失败，取中值")
+
+    def _analyze(
+        self, results: list[RunResult], scenarios: list[dict[str, str]],
+        objective: str, win_condition: str,
+    ) -> dict[str, Any]:
+        directive_map = {s.get("name", "方案"): s.get("directive", "") for s in scenarios}
+        grouped: dict[str, list[RunResult]] = {}
+        for r in results:
+            grouped.setdefault(r.scenario, []).append(r)
+
+        stats_list: list[dict[str, Any]] = []
+        for name, runs in grouped.items():
+            wins = [r.outcome.win_score for r in runs]
+            costs = [r.outcome.cost for r in runs]
+            n = len(runs)
+            succ = sum(1 for r in runs if r.outcome.success)
+            mean = statistics.mean(wins) if wins else 0.0
+            sd = statistics.pstdev(wins) if n > 1 else 0.0
+            ci = 1.96 * sd / math.sqrt(n) if n > 0 else 0.0
+            cost_mean = statistics.mean(costs) if costs else 0.0
+            stats_list.append({
+                "name": name,
+                "directive": directive_map.get(name, ""),
+                "runs": n,
+                "success_rate": round(succ / n, 4) if n else 0.0,
+                "win_mean": round(mean, 4),
+                "win_stdev": round(sd, 4),
+                "win_ci95": [round(max(0.0, mean - ci), 4), round(min(1.0, mean + ci), 4)],
+                "cost_mean": round(cost_mean, 4),
+                "is_pareto": False,
+                "samples": [r.outcome.rationale for r in runs[:3] if r.outcome.rationale],
+            })
+
+        # 帕累托前沿：高 win_mean + 低 cost_mean 为优；非被支配者入选
+        for a in stats_list:
+            dominated = False
+            for b in stats_list:
+                if b is a:
+                    continue
+                better_or_equal = b["win_mean"] >= a["win_mean"] and b["cost_mean"] <= a["cost_mean"]
+                strictly_better = b["win_mean"] > a["win_mean"] or b["cost_mean"] < a["cost_mean"]
+                if better_or_equal and strictly_better:
+                    dominated = True
+                    break
+            a["is_pareto"] = not dominated
+
+        recommended = None
+        if stats_list:
+            if objective == "max_win_rate":
+                best = max(stats_list, key=lambda x: x["win_mean"])
+            elif objective == "min_cost":
+                best = min(stats_list, key=lambda x: x["cost_mean"])
+            else:  # balanced: 帕累托前沿上 (胜率-成本) 最大
+                front = [s for s in stats_list if s["is_pareto"]] or stats_list
+                best = max(front, key=lambda x: x["win_mean"] - x["cost_mean"])
+            recommended = {
+                "name": best["name"],
+                "win_mean": best["win_mean"],
+                "win_ci95": best["win_ci95"],
+                "success_rate": best["success_rate"],
+                "cost_mean": best["cost_mean"],
+            }
+
+        return {
+            "objective": objective,
+            "win_condition": win_condition,
+            "scenarios": sorted(stats_list, key=lambda x: x["win_mean"], reverse=True),
+            "pareto_front": [s["name"] for s in stats_list if s["is_pareto"]],
+            "recommended": recommended,
+        }
+
+
+def _clamp(v: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(v)))
+    except (TypeError, ValueError):
+        return 0.5

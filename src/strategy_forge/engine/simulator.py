@@ -78,17 +78,30 @@ class SimulationEngine:
         preprocessor: DeductionPreprocessor | None = None,
         chat_fn: Any = None,
         pre_goals: list[str] | None = None,
+        *,
+        seed: int | None = None,
+        temperature: float = 0.7,
+        persist_events: bool = True,
+        max_concurrent: int | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
         self.total_rounds = total_rounds
         self._log = log_fn or (lambda p, m: None)
         self._event_history: list[dict[str, Any]] = []
-        self._max_concurrent = 10
         self._preprocessor = preprocessor
         self._chat_fn = chat_fn
         self._immutable_goals: list[str] = list(pre_goals or [])
+        # 蒙特卡洛隔离与可控性参数
+        self._persist_events = persist_events
+        self._temperature = temperature
+        self._rng = random.Random(seed)
         from strategy_forge.core.config import config
+
+        self._max_concurrent = (
+            max_concurrent if max_concurrent is not None
+            else config.deduction_max_concurrent
+        )
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
@@ -96,6 +109,7 @@ class SimulationEngine:
             preprocessor=preprocessor,
             chat_fn=chat_fn,
             immutable_goals=self._immutable_goals,
+            temperature=temperature,
         )
 
     async def run_round(self, round_number: int) -> SimulationRound:
@@ -105,7 +119,7 @@ class SimulationEngine:
         client = LLMClient()
 
         ordered = list(self.agents)
-        random.shuffle(ordered)
+        self._rng.shuffle(ordered)
 
         sem = asyncio.Semaphore(self._max_concurrent)
 
@@ -135,26 +149,29 @@ class SimulationEngine:
             self._event_history = self._event_history[-200:]
 
         # Write round events to Kuzu graph + LanceDB dynamic event table
-        for action in sim_round.actions:
-            event_id = f"evt-{uuid.uuid4().hex[:8]}"
-            self.graph.add_event(
-                event_id, action.content[:200], action.action_type,
-                action.timestamp, action.agent_id,
-            )
-            self.graph.add_acted(action.agent_id, event_id, action.action_type, action.timestamp)
+        # 蒙特卡洛隔离模式 (persist_events=False): 不落盘、不写向量库，仅保留内存事件历史，
+        # 保证 M×N 次模拟相互隔离、可并发，且不污染主会话数据。
+        if self._persist_events:
+            for action in sim_round.actions:
+                event_id = f"evt-{uuid.uuid4().hex[:8]}"
+                self.graph.add_event(
+                    event_id, action.content[:200], action.action_type,
+                    action.timestamp, action.agent_id,
+                )
+                self.graph.add_acted(action.agent_id, event_id, action.action_type, action.timestamp)
 
-            # ★ 动态事件写入 LanceDB (下一轮决策即可语义召回)
-            if self._preprocessor is not None:
-                try:
-                    self._preprocessor.add_event_memory(
-                        content=action.content,
-                        agent_id=action.agent_id,
-                        round_number=round_number,
-                        event_type=action.action_type,
-                    )
-                except Exception as e:
-                    logger.warning("[Simulator] Event memory write failed for %s: %s",
-                                 action.agent_id, e)
+                # ★ 动态事件写入 LanceDB (下一轮决策即可语义召回)
+                if self._preprocessor is not None:
+                    try:
+                        self._preprocessor.add_event_memory(
+                            content=action.content,
+                            agent_id=action.agent_id,
+                            round_number=round_number,
+                            event_type=action.action_type,
+                        )
+                    except Exception as e:
+                        logger.warning("[Simulator] Event memory write failed for %s: %s",
+                                     action.agent_id, e)
 
         return sim_round
 
@@ -183,10 +200,11 @@ class SimulationEngine:
             except Exception as e:
                 logger.warning("[Simulator] Static recall failed for %s: %s", agent.name, e)
 
-        # ── Path B: 动态模拟事件检索 ★ ──
+        # ── Path B: 动态模拟事件检索 ──
         dynamic_text = "无近期模拟事件"
-        if self._preprocessor is not None:
+        if self._persist_events and self._preprocessor is not None:
             try:
+                from strategy_forge.core.config import config
                 aliases: set[str] = set()
                 if self._preprocessor.result:
                     aliases = self._preprocessor.result.high_freq_entities.get(agent.name, set())
@@ -195,12 +213,18 @@ class SimulationEngine:
                 query = agent.name + " " + " ".join(aliases - {agent.name})
                 dynamic_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_dynamic_events,
-                    query, top_k=3, min_similarity=0.4,
+                    query, top_k=3, min_similarity=config.deduction_similarity_threshold,
                 )
                 if dynamic_frags:
                     dynamic_text = "\n---\n".join(dynamic_frags)
             except Exception as e:
                 logger.warning("[Simulator] Dynamic recall failed for %s: %s", agent.name, e)
+        elif not self._persist_events:
+            # 隔离模式(蒙特卡洛): 仅用内存事件历史, 不触碰 LanceDB
+            mem = [e for e in self._event_history[-20:]
+                   if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
+            if mem:
+                dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
 
         # ── Strategic Reasoning (primary path) ──
         world = {"recent_events": recent_text, "static_knowledge": static_text,

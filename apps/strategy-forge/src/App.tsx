@@ -49,6 +49,7 @@ const PHASE_LABELS: Record<string, string> = {
   agents_running: "智能体生成中...",
   simulating: "模拟推演中...",
   reporting: "报告生成中...",
+  optimizing: "策略优化中...",
   complete: "已完成",
   failed: "失败",
   paused: "已暂停",
@@ -64,7 +65,18 @@ export default function App() {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [report, setReport] = useState<ReportData | null>(null);
-  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs">("graph");
+  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "optimize">("graph");
+
+  // ── 策略优化器 ──
+  const [optEnabled, setOptEnabled] = useState(false);
+  const [optIterations, setOptIterations] = useState(20);
+  const [optObjective, setOptObjective] = useState("balanced");
+  const [optWinCondition, setOptWinCondition] = useState("");
+  const [optScenarios, setOptScenarios] = useState<Array<{ name: string; directive: string }>>([{ name: "方案 1", directive: "" }]);
+  const [optRunning, setOptRunning] = useState(false);
+  const [optProgress, setOptProgress] = useState<{ done: number; total: number; current: string; best_win: number } | null>(null);
+  const [optReport, setOptReport] = useState<any>(null);
+  const optPollRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -297,6 +309,60 @@ export default function App() {
     }
   }, [selectedId, fetchSessions]);
 
+  // ── 策略优化器函数 ──
+  const addScenario = useCallback(() => {
+    setOptScenarios(prev => [...prev, { name: `方案 ${prev.length + 1}`, directive: "" }]);
+  }, []);
+  const removeScenario = useCallback((idx: number) => {
+    setOptScenarios(prev => prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx));
+  }, []);
+  const updateScenario = useCallback((idx: number, field: "name" | "directive", val: string) => {
+    setOptScenarios(prev => prev.map((s, i) => i === idx ? { ...s, [field]: val } : s));
+  }, []);
+
+  const pollOptimize = useCallback((id: string) => {
+    if (optPollRef.current) window.clearInterval(optPollRef.current);
+    optPollRef.current = window.setInterval(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/session/${id}/optimize/result`);
+        if (!r.ok) return;
+        const d = await r.json();
+        setOptProgress(d.progress || null);
+        if (d.report && Object.keys(d.report).length) setOptReport(d.report);
+        if (!d.running) {
+          if (optPollRef.current) { window.clearInterval(optPollRef.current); optPollRef.current = null; }
+          setOptRunning(false);
+          fetchSessions();
+          fetchLogs(id);
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+  }, [fetchSessions, fetchLogs]);
+
+  const startOptimize = useCallback(async () => {
+    if (!selectedId) return;
+    const scenarios = optScenarios.filter(s => s.directive.trim());
+    if (scenarios.length === 0) { alert("请至少填写一个方案的策略指令"); return; }
+    if (!optWinCondition.trim() && !window.confirm("未填写胜利条件，将尝试使用会话的推演前目标(pre-goal)。是否继续？")) return;
+    setOptRunning(true); setOptReport(null); setOptProgress(null); setMainTab("optimize"); setLogs([]);
+    try {
+      const r = await fetch(`${API_BASE}/session/${selectedId}/optimize`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarios, win_condition: optWinCondition, iterations: optIterations, objective: optObjective }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      pollOptimize(selectedId);
+    } catch (e: any) {
+      setOptRunning(false);
+      alert("优化启动失败: " + (e.message || "未知错误"));
+    }
+  }, [selectedId, optScenarios, optWinCondition, optIterations, optObjective, pollOptimize]);
+
+  const cancelOptimize = useCallback(async () => {
+    if (!selectedId) return;
+    try { await fetch(`${API_BASE}/session/${selectedId}/optimize/cancel`, { method: "POST" }); } catch { /* ignore */ }
+  }, [selectedId]);
+
   const sendPreGoal = useCallback(async () => {
     if (!selectedId || !preGoal.trim()) return;
     try {
@@ -330,7 +396,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedId) return;
     const selected = sessions.find(s => s.id === selectedId);
-    if (!selected || selected.status !== "simulating") return;
+    if (!selected || (selected.status !== "simulating" && selected.status !== "optimizing")) return;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
     es.onmessage = (ev: MessageEvent) => {
       if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); return; }
@@ -399,6 +465,53 @@ export default function App() {
           </button>
         </div>
 
+        {/* ── 策略优化器面板（高级，默认关闭） ── */}
+        <div style={{ marginBottom: 10, background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#e2e8f0" }}>
+            <input type="checkbox" checked={optEnabled} onChange={e => setOptEnabled(e.target.checked)} />
+            策略优化器
+            <span style={{ fontSize: 10, color: "#94a3b8", background: "#1e293b", borderRadius: 8, padding: "1px 6px" }}>Beta</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: optEnabled ? "#34d399" : "#64748b" }}>{optEnabled ? "已启用" : "默认关闭"}</span>
+          </label>
+          {optEnabled && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div>
+                <label style={lbl}>每方案模拟次数：{optIterations}</label>
+                <input type="range" min={2} max={100} step={1} value={optIterations} onChange={e => setOptIterations(parseInt(e.target.value))} style={{ width: "100%" }} />
+              </div>
+              <div>
+                <label style={lbl}>优化目标</label>
+                <select value={optObjective} onChange={e => setOptObjective(e.target.value)} style={{ ...inp, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6 }}>
+                  <option value="max_win_rate">📈 最高胜率</option>
+                  <option value="min_cost">💰 最低成本/风险</option>
+                  <option value="balanced">⚖️ 平衡（帕累托最优）</option>
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>胜利条件（统一判定标准）</label>
+                <textarea value={optWinCondition} onChange={e => setOptWinCondition(e.target.value)} placeholder="例：核心势力长期存续且主要人物善终（留空则用会话的推演前目标）" style={{ height: 50, fontSize: 12, width: "100%" }} />
+              </div>
+              <div>
+                <label style={lbl}>候选方案（不同战略指令，逐一对比）</label>
+                {optScenarios.map((s, i) => (
+                  <div key={i} style={{ marginBottom: 6, background: "#1e293b", borderRadius: 6, padding: 6 }}>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                      <input value={s.name} onChange={e => updateScenario(i, "name", e.target.value)} placeholder="方案名" style={{ flex: 1, height: 26, fontSize: 12 }} />
+                      <button onClick={() => removeScenario(i)} disabled={optScenarios.length <= 1} style={{ ...btn, height: 26, background: "transparent", color: optScenarios.length <= 1 ? "#475569" : "#f87171", border: "none", cursor: optScenarios.length <= 1 ? "not-allowed" : "pointer" }}>✕</button>
+                    </div>
+                    <textarea value={s.directive} onChange={e => updateScenario(i, "directive", e.target.value)} placeholder="该方案的战略指令（如：坚决反对招安，独立发展）" style={{ height: 44, fontSize: 12, width: "100%" }} />
+                  </div>
+                ))}
+                <button onClick={addScenario} style={{ ...btn, width: "100%", background: "#1e293b", color: "#cbd5e1" }}>＋ 添加方案</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>
+                ⏱ 共 {optScenarios.length} 方案 × {optIterations} 次 = {optScenarios.length * optIterations} 次完整推演
+                <span style={{ display: "block", fontSize: 10, color: "#475569" }}>本地 LM Studio 串行排队，单次约数分钟，建议先用小次数试跑</span>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>会话列表（历史推演记录）</div>
         {sessions.length === 0 && (
           <div style={{ color: "#94a3b8", fontSize: 12, textAlign: "center", padding: 20 }}>
@@ -454,20 +567,33 @@ export default function App() {
                 {selected.current_round > 0 && <span className="pill">{selected.current_round}/{selected.total_rounds} 轮</span>}
               </div>
               <div>
-                <button
-                  className="btnSmall btnSmallPrimary"
-                  style={{ marginRight: 6 }}
-                  onClick={handleStart}
-                  disabled={loading || selected.status === "simulating"}
-                >
-                  {selected.status === "complete" ? "重新推演" : loading ? "运行中..." : "启动推演"}
-                </button>
+                {optEnabled ? (
+                  optRunning ? (
+                    <button className="btnSmall" style={{ marginRight: 6, background: "#ef4444", color: "#fff", border: "none" }} onClick={cancelOptimize}>
+                      取消优化
+                    </button>
+                  ) : (
+                    <button className="btnSmall btnSmallPrimary" style={{ marginRight: 6 }} onClick={startOptimize}
+                      disabled={selected.status === "simulating" || selected.status === "optimizing"}>
+                      启动优化
+                    </button>
+                  )
+                ) : (
+                  <button
+                    className="btnSmall btnSmallPrimary"
+                    style={{ marginRight: 6 }}
+                    onClick={handleStart}
+                    disabled={loading || selected.status === "simulating"}
+                  >
+                    {selected.status === "complete" ? "重新推演" : loading ? "运行中..." : "启动推演"}
+                  </button>
+                )}
               </div>
             </div>
 
             {/* 主区标签切换: 图谱 / 报告 / 日志 */}
             <div style={{ display: "flex", gap: 4, padding: "6px 12px 0" }}>
-              {(["graph", "report", "logs"] as const).map(k => (
+              {(["graph", "report", "logs", "optimize"] as const).map(k => (
                 <button
                   key={k}
                   onClick={() => setMainTab(k)}
@@ -477,7 +603,7 @@ export default function App() {
                     background: mainTab === k ? "#3b82f6" : "#0f172a",
                     color: mainTab === k ? "#fff" : "#94a3b8",
                   }}
-                >{k === "graph" ? "图谱" : k === "report" ? "报告" : "日志"}</button>
+                >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : "优化"}</button>
               ))}
             </div>
 
@@ -567,6 +693,80 @@ export default function App() {
                       {l.message}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {mainTab === "optimize" && (
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13 }}>
+                  {optRunning && optProgress && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ marginBottom: 4 }}>
+                        进行中：{optProgress.current}（{optProgress.done}/{optProgress.total}，当前最高胜分 {optProgress.best_win.toFixed(2)}）
+                      </div>
+                      <div style={{ height: 8, background: "#0f172a", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${optProgress.total ? (optProgress.done / optProgress.total * 100) : 0}%`, background: "#3b82f6" }} />
+                      </div>
+                    </div>
+                  )}
+                  {!optReport && !optRunning && (
+                    <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
+                      在左侧启用“策略优化器”，配置胜利条件与多个方案后点“启动优化”。
+                    </div>
+                  )}
+                  {optReport && (
+                    <>
+                      {optReport.cancelled && (
+                        <div style={{ color: "#f59e0b", marginBottom: 8 }}>
+                          ⚠ 优化已取消，以下为已完成部分（{optReport.completed_runs}/{optReport.total_runs}）
+                        </div>
+                      )}
+                      {optReport.recommended && (
+                        <div style={{ marginBottom: 16, background: "#0f172a", border: "1px solid #3b82f6", borderRadius: 8, padding: 12 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 4 }}>🏆 推荐方案：{optReport.recommended.name}</div>
+                          <div style={{ fontSize: 12 }}>
+                            胜率 {(optReport.recommended.win_mean * 100).toFixed(0)}%
+                            （95%CI {(optReport.recommended.win_ci95[0] * 100).toFixed(0)}–{(optReport.recommended.win_ci95[1] * 100).toFixed(0)}%）
+                            · 成功率 {(optReport.recommended.success_rate * 100).toFixed(0)}%
+                            · 成本 {optReport.recommended.cost_mean.toFixed(2)}
+                          </div>
+                        </div>
+                      )}
+                      {optReport.scenarios && optReport.scenarios.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>胜率 / 成本 散点（帕累托前沿高亮）</div>
+                          <svg width={360} height={300} style={{ background: "#0f172a", borderRadius: 8 }}>
+                            <line x1={40} y1={260} x2={340} y2={260} stroke="#334155" />
+                            <line x1={40} y1={20} x2={40} y2={260} stroke="#334155" />
+                            {optReport.scenarios.map((s: any, i: number) => {
+                              const cx = 40 + s.cost_mean * 300;
+                              const cy = 260 - s.win_mean * 240;
+                              return (
+                                <g key={i}>
+                                  <circle cx={cx} cy={cy} r={6} fill={s.is_pareto ? "#34d399" : "#64748b"} stroke="#0f172a" />
+                                  <text x={cx + 8} y={cy + 4} fill="#cbd5e1" fontSize={10}>{s.name}</text>
+                                </g>
+                              );
+                            })}
+                            <text x={190} y={285} textAnchor="middle" fill="#94a3b8" fontSize={12}>成本 (Cost) →</text>
+                            <text x={14} y={140} textAnchor="middle" fill="#94a3b8" fontSize={12} transform="rotate(-90, 14, 140)">胜率 (Win Rate) →</text>
+                          </svg>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>各方案统计</div>
+                      {optReport.scenarios && optReport.scenarios.map((s: any, i: number) => (
+                        <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 8, borderLeft: `3px solid ${s.is_pareto ? "#34d399" : "#475569"}` }}>
+                          <div style={{ fontWeight: 600 }}>{s.name} {s.is_pareto && <span style={{ fontSize: 10, color: "#34d399" }}>（帕累托）</span>}</div>
+                          <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                            胜率 {(s.win_mean * 100).toFixed(0)}% ± {((s.win_ci95 ? (s.win_ci95[1] - s.win_mean) : 0) * 100).toFixed(0)}%
+                            · 成功率 {(s.success_rate * 100).toFixed(0)}%
+                            · 成本 {s.cost_mean.toFixed(2)}
+                            · {s.runs} 次
+                          </div>
+                          {s.directive && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>指令：{s.directive}</div>}
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>

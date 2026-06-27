@@ -28,6 +28,7 @@ class SessionStatus(str, Enum):
     COMPLETE = "complete"
     PAUSED = "paused"
     FAILED = "failed"
+    OPTIMIZING = "optimizing"
 
 
 @dataclass

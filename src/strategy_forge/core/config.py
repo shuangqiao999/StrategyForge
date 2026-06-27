@@ -35,7 +35,9 @@ class DeductionConfig:
         self.deduction_default_rounds = int(os.getenv("FORGE_DEFAULT_ROUNDS", "10"))
         self.deduction_candidate_count = int(os.getenv("FORGE_CANDIDATE_COUNT", "3"))
         self.deduction_llm_temperature = float(os.getenv("FORGE_LLM_TEMPERATURE", "0.3"))
-        self.deduction_max_concurrent = int(os.getenv("FORGE_MAX_CONCURRENT", "8"))
+        self.deduction_max_concurrent = int(os.getenv("FORGE_MAX_CONCURRENT", "2"))
+        self.deduction_retrieve_top_k = int(os.getenv("FORGE_RETRIEVE_TOP_K", "5"))
+        self.deduction_similarity_threshold = float(os.getenv("FORGE_SIMILARITY_THRESHOLD", "0.4"))
 
     def __getattr__(self, name: str):
         return None

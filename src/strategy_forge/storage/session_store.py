@@ -44,7 +44,8 @@ class SessionStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     error TEXT DEFAULT '',
-                    report_json TEXT DEFAULT '{}'
+                    report_json TEXT DEFAULT '{}',
+                    optimization_report_json TEXT DEFAULT '{}'
                 )
             """)
             conn.execute("""
@@ -71,6 +72,13 @@ class SessionStore:
                 "CREATE INDEX IF NOT EXISTS idx_deduction_sessions_created "
                 "ON deduction_sessions(created_at DESC)"
             )
+            # 旧库兼容: 补充优化器报告列
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(deduction_sessions)").fetchall()]
+            if "optimization_report_json" not in cols:
+                conn.execute(
+                    "ALTER TABLE deduction_sessions "
+                    "ADD COLUMN optimization_report_json TEXT DEFAULT '{}'"
+                )
             conn.commit()
 
     def create(self, session_id: str, title: str, source_material: str,
@@ -111,6 +119,7 @@ class SessionStore:
         d = dict(row)
         d["config_json"] = json.loads(d.get("config_json", "{}") or "{}")
         d["report_json"] = json.loads(d.get("report_json", "{}") or "{}")
+        d["optimization_report_json"] = json.loads(d.get("optimization_report_json", "{}") or "{}")
         return d
 
     def list_all(self, limit: int = 50) -> list[dict[str, Any]]:

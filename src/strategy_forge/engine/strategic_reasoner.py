@@ -62,11 +62,12 @@ class StrategicReasoner:
       3. Select best candidate or fall back to LLM tiebreak
     """
 
-    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None):
+    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None, temperature: float = 0.7):
         self.candidate_count = candidate_count
         self._preprocessor = preprocessor
         self._chat_fn = chat_fn
         self._immutable_goals: list[str] = list(immutable_goals or [])
+        self._temperature = temperature
         self._trust_matrix: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     def record_interaction(
@@ -143,9 +144,9 @@ class StrategicReasoner:
         candidates: list[dict[str, Any]] = []
         try:
             if self._chat_fn is not None:
-                content = await asyncio.to_thread(self._chat_fn, messages, system, 0.7)
+                content = await asyncio.to_thread(self._chat_fn, messages, system, self._temperature)
             else:
-                response = await llm.chat(messages, system=system, temperature=0.7)
+                response = await llm.chat(messages, system=system, temperature=self._temperature)
                 content = extract_text(response)
             candidates = _parse_candidates(content)
         except Exception as e:
