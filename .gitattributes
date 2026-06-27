@@ -1,0 +1,24 @@
+# 统一按 UTF-8 文本处理，避免跨平台编码/换行问题
+* text=auto
+
+# 源码与文本显式声明为文本（UTF-8）
+*.py    text
+*.ts    text
+*.tsx   text
+*.js    text
+*.json  text
+*.toml  text
+*.md    text
+*.rs    text
+*.html  text
+*.css   text
+*.txt   text
+
+# 二进制资源不做文本规范化
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.exe   binary
+*.db    binary
+*.woff  binary
+*.woff2 binary

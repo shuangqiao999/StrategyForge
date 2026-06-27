@@ -1,0 +1,49 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== PyInstaller 构建产物 =====
+/build/
+/dist/
+*.manifest
+
+# ===== Node / 前端 =====
+node_modules/
+apps/strategy-forge/dist/
+.vite/
+
+# ===== Rust / Tauri =====
+target/
+apps/strategy-forge/src-tauri/resources/strategy-forge-backend/
+
+# ===== 打包发布产物（体积大，不入库） =====
+/release/
+
+# ===== 运行时数据（本地数据库与配置，含密钥，不入库） =====
+/data/forge_config.json
+/data/sessions.db
+/data/sessions.db-shm
+/data/sessions.db-wal
+/data/lancedb/
+/data/graphs/
+
+# ===== 环境变量与密钥 =====
+.env
+.env.local
+*.local
+*.log
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

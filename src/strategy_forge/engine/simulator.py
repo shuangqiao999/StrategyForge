@@ -1,0 +1,258 @@
+﻿"""Phase 4: Parallel Simulation — multi-agent with dual-path LanceDB memory recall.
+
+Dual-path retrieval:
+  Path A (static): retrieval from deduction_chunks table — original source material
+  Path B (dynamic): retrieval from deduction_events table — simulation-generated events
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import random
+import re
+import uuid
+from collections.abc import Callable
+from typing import Any
+
+from strategy_forge.storage.graph_store import DeductionGraphStore
+
+from ._utils import extract_text
+from .models import DeductionAgentProfile, SimulationAction, SimulationRound
+from .preprocessor import DeductionPreprocessor
+
+logger = logging.getLogger(__name__)
+
+
+_ACTION_PROMPT = """你是一个推演模拟中的智能体。根据你的角色设定和当前世界状态，决定你的下一步行动。
+
+## 你的固定人格（基于原文）
+{persona}
+
+## 你的背景
+{background}
+
+## 你的目标
+{goals}
+
+## 当前轮次
+第 {round_number} 轮
+
+## 近期模拟动态事件（重要！以下是其他角色刚刚做过的事）
+{dynamic_memory}
+
+## 你的原著背景参考（仅供参考）
+{static_knowledge}
+
+## 近期世界缓存
+{recent_events}
+
+## 输出 JSON — 选择一种行动
+```json
+{{
+  "action": "post|reply|interact|observe",
+  "target": "目标实体名或留空",
+  "content": "行动内容 (30-100字)"
+}}
+```
+
+只返回 JSON，不要解释。"""
+
+
+class SimulationEngine:
+    """多智能体并行模拟引擎 — 双路语义记忆。
+
+    决策上下文优先级:
+      1. 动态事件表 (LanceDB deduction_events) — 模拟中生成的事件, 语义检索
+      2. 静态原文表 (LanceDB deduction_chunks) — 原著背景, 语义检索
+      3. 近期缓存 (event_history[-5:]) — 最近 5 条全局事件
+      4. 智能体自身设定 (persona / background / goals)
+    """
+
+    def __init__(
+        self,
+        agents: list[DeductionAgentProfile],
+        graph: DeductionGraphStore,
+        total_rounds: int = 10,
+        log_fn: Callable[[str, str], None] | None = None,
+        preprocessor: DeductionPreprocessor | None = None,
+        chat_fn: Any = None,
+        pre_goals: list[str] | None = None,
+    ) -> None:
+        self.agents = agents
+        self.graph = graph
+        self.total_rounds = total_rounds
+        self._log = log_fn or (lambda p, m: None)
+        self._event_history: list[dict[str, Any]] = []
+        self._max_concurrent = 10
+        self._preprocessor = preprocessor
+        self._chat_fn = chat_fn
+        self._immutable_goals: list[str] = list(pre_goals or [])
+        from strategy_forge.core.config import config
+
+        from .strategic_reasoner import StrategicReasoner
+        self.reasoner = StrategicReasoner(
+            candidate_count=config.deduction_candidate_count,
+            preprocessor=preprocessor,
+            chat_fn=chat_fn,
+            immutable_goals=self._immutable_goals,
+        )
+
+    async def run_round(self, round_number: int) -> SimulationRound:
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+
+        sim_round = SimulationRound(round_number=round_number)
+        client = LLMClient()
+
+        ordered = list(self.agents)
+        random.shuffle(ordered)
+
+        sem = asyncio.Semaphore(self._max_concurrent)
+
+        async def process_agent(agent: DeductionAgentProfile) -> SimulationAction | None:
+            async with sem:
+                return await self._agent_decide(client, agent, round_number)
+
+        tasks = [process_agent(a) for a in ordered]
+        results = await asyncio.gather(*tasks)
+
+        for action in results:
+            if action is not None:
+                sim_round.actions.append(action)
+                self._event_history.append({
+                    "agent": action.agent_id,
+                    "agent_name": getattr(
+                        next((a for a in self.agents if a.entity_id == action.agent_id), None),
+                        "name", action.agent_id[:8],
+                    ),
+                    "action": action.action_type,
+                    "content": action.content,
+                    "round": round_number,
+                    "timestamp": action.timestamp,
+                })
+
+        if len(self._event_history) > 200:
+            self._event_history = self._event_history[-200:]
+
+        # Write round events to Kuzu graph + LanceDB dynamic event table
+        for action in sim_round.actions:
+            event_id = f"evt-{uuid.uuid4().hex[:8]}"
+            self.graph.add_event(
+                event_id, action.content[:200], action.action_type,
+                action.timestamp, action.agent_id,
+            )
+            self.graph.add_acted(action.agent_id, event_id, action.action_type, action.timestamp)
+
+            # ★ 动态事件写入 LanceDB (下一轮决策即可语义召回)
+            if self._preprocessor is not None:
+                try:
+                    self._preprocessor.add_event_memory(
+                        content=action.content,
+                        agent_id=action.agent_id,
+                        round_number=round_number,
+                        event_type=action.action_type,
+                    )
+                except Exception as e:
+                    logger.warning("[Simulator] Event memory write failed for %s: %s",
+                                 action.agent_id, e)
+
+        return sim_round
+
+    async def _agent_decide(
+        self, client: Any, agent: DeductionAgentProfile, round_number: int
+    ) -> SimulationAction | None:
+        # ── 近期事件 (最近 5 条) ──
+        recent = self._event_history[-5:]
+        recent_text = "\n".join(
+            f"- [{e.get('round', '?')}] {e.get('agent_name', e.get('agent', '?'))}: "
+            f"{e.get('content', '')[:80]}"
+            for e in recent
+        ) or "无近期事件"
+
+        # ── Path A: 静态原著背景检索 ──
+        static_text = "无特定背景"
+        if self._preprocessor and self._preprocessor.result:
+            try:
+                static_frags = await asyncio.to_thread(
+                    self._preprocessor.retrieve_for_entity,
+                    agent.name, top_k=2,
+                    must_contain={agent.name} if agent.name else None,
+                )
+                if static_frags:
+                    static_text = "\n---\n".join(f[:300] for f in static_frags)
+            except Exception as e:
+                logger.warning("[Simulator] Static recall failed for %s: %s", agent.name, e)
+
+        # ── Path B: 动态模拟事件检索 ★ ──
+        dynamic_text = "无近期模拟事件"
+        if self._preprocessor is not None:
+            try:
+                aliases: set[str] = set()
+                if self._preprocessor.result:
+                    aliases = self._preprocessor.result.high_freq_entities.get(agent.name, set())
+                    aliases.update(
+                        self._preprocessor.result.low_freq_entities.get(agent.name, set()))
+                query = agent.name + " " + " ".join(aliases - {agent.name})
+                dynamic_frags = await asyncio.to_thread(
+                    self._preprocessor.retrieve_dynamic_events,
+                    query, top_k=3, min_similarity=0.4,
+                )
+                if dynamic_frags:
+                    dynamic_text = "\n---\n".join(dynamic_frags)
+            except Exception as e:
+                logger.warning("[Simulator] Dynamic recall failed for %s: %s", agent.name, e)
+
+        # ── Strategic Reasoning (primary path) ──
+        world = {"recent_events": recent_text, "static_knowledge": static_text,
+                  "dynamic_memory": dynamic_text}
+        try:
+            decision = await self.reasoner.reason(agent, world, round_number, client=client)
+            sel = decision.get("selected", {})
+            action_data = {"action": sel.get("action", "observe"),
+                           "target": sel.get("target", ""),
+                           "content": sel.get("content", f"{agent.name}观察着周围环境")}
+            # Update trust matrix from selected action
+            if sel.get("target"):
+                self.reasoner.record_interaction(
+                    agent.entity_id, sel["target"], action_data["action"], action_data["content"])
+        except Exception as e:
+            logger.warning("[Simulator] Reasoner failed for %s, using inline prompt: %s", agent.name, e)
+            # ── Fallback: inline prompt ──
+            from strategy_forge.core.llm_client import Message
+            system = "你是推演模拟中的角色，根据角色设定和历史事件做出合理的下一步行动。只输出 JSON。"
+            messages = [Message(role="user", content=_ACTION_PROMPT.format(
+                persona=agent.persona, background=agent.background,
+                goals=", ".join(agent.goals) if agent.goals else "参与互动",
+                round_number=round_number, recent_events=recent_text,
+                static_knowledge=static_text, dynamic_memory=dynamic_text,
+            ))]
+            try:
+                if self._chat_fn is not None:
+                    response = await asyncio.to_thread(self._chat_fn, messages, system, 0.7)
+                    content = response
+                else:
+                    response = await client.chat(messages, system=system, temperature=0.7)
+                    content = extract_text(response)
+                action_data = _parse_action_json(content)
+            except Exception as e2:
+                logger.warning("[Deduction] Agent %s decision failed: %s", agent.name, e2)
+                return None
+
+        from datetime import datetime
+        return SimulationAction(
+            agent_id=agent.entity_id,
+            action_type=action_data.get("action", "observe"),
+            target_id=action_data.get("target", ""),
+            content=action_data.get("content", f"{agent.name}观察着周围环境"),
+            timestamp=datetime.now().isoformat(),
+        )
+
+
+def _parse_action_json(raw: str) -> dict[str, Any]:
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if not match:
+        return {}
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
