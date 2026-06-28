@@ -196,6 +196,76 @@ class StrategicReasoner:
             "trust_used": any(abs(v) > 0.5 for v in self._trust_matrix.get(agent.entity_id, {}).values()),
         }
 
+    async def reason_quantified(
+        self, agent: DeductionAgentProfile, state: Any, rule_engine: Any,
+        recent_events: str = "", other_context: str = "", round_number: int = 0,
+        client: Any = None,
+    ) -> dict[str, Any]:
+        """量化模式决策：输出 {action_type, target, intensity, rationale}（第一版不含 resource_allocation）。"""
+        from ._utils import extract_text
+        from .graph_builder import try_extract_json
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        from strategy_forge.core.llm_client import Message
+
+        actions = rule_engine.actions()
+        user_cmd = ""
+        if self._preprocessor is not None:
+            try:
+                iv = self._preprocessor.retrieve_latest_intervention()
+                if iv:
+                    user_cmd = iv.get("content", "")
+            except Exception:
+                pass
+
+        goals = ", ".join(agent.goals) if agent.goals else "依据人格自主行动"
+        imm = "；".join(self._immutable_goals) if self._immutable_goals else "无"
+        prompt = (
+            f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
+            "请基于你的人格、目标与当前数值状态，从可选行动中选择一个并给出投入力度。\n\n"
+            f"## 你的人格\n{agent.persona or '（无）'}\n"
+            f"## 你的目标\n{goals}\n"
+            f"## 不可变战略指令（最高优先级）\n{imm}\n"
+            + (f"## 外部干预指令（最高优先级）\n{user_cmd}\n" if user_cmd else "")
+            + f"## 你的当前状态\n{state.to_prompt_context()}\n"
+            f"## 其他参与方状态\n{other_context or '（暂无）'}\n"
+            f"## 近期局势\n{recent_events or '（无）'}\n\n"
+            f"## 可选行动\n{rule_engine.action_catalog()}\n\n"
+            '## 输出 JSON（仅 JSON，无解释）\n'
+            '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
+            '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
+            "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
+        )
+        system = "你是量化推演中的战略决策者，只输出 JSON。"
+        llm = client if client is not None else LLMClient()
+        try:
+            if self._chat_fn is not None:
+                content = await asyncio.to_thread(
+                    self._chat_fn, [Message(role="user", content=prompt)], system, self._temperature)
+            else:
+                resp = await llm.chat([Message(role="user", content=prompt)],
+                                      system=system, temperature=self._temperature)
+                content = extract_text(resp)
+            data = try_extract_json(content)
+            if not isinstance(data, dict):
+                data = {}
+        except Exception as e:
+            logger.warning("[Reasoner] 量化决策失败，回退 observe: %s", e)
+            data = {}
+
+        action = str(data.get("action_type", "observe"))
+        if action not in actions:
+            action = "observe"
+        try:
+            intensity = max(0.0, min(1.0, float(data.get("intensity", 0.5))))
+        except (TypeError, ValueError):
+            intensity = 0.5
+        return {
+            "action_type": action,
+            "target": str(data.get("target", "") or "").strip(),
+            "intensity": intensity,
+            "rationale": str(data.get("rationale", ""))[:120],
+        }
+
 
 def _parse_candidates(raw: str) -> list[dict[str, Any]]:
     raw = raw.strip()

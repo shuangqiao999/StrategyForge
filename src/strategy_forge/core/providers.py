@@ -234,7 +234,7 @@ def _friendly(e: Exception) -> str:
     return str(e)[:150]
 
 def _mask_key(k: str) -> str:
-    return k[:4] + "•"*(len(k)-8) + k[-4:] if k and len(k)>=8 else k
+    return k[:4] + "*"*(len(k)-8) + k[-4:] if k and len(k)>=8 else k
 
 
 registry = ProviderRegistry()

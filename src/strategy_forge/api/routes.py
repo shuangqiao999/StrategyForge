@@ -218,7 +218,8 @@ async def run_optimization(session_id: str, body: OptimizeRequest, request: Requ
     for idx, s in enumerate(body.scenarios or []):
         directive = str(s.get("directive", "")).strip()
         name = str(s.get("name", "")).strip() or f"方案 {idx + 1}"
-        scenarios.append({"name": name, "directive": directive})
+        scenarios.append({"name": name, "directive": directive,
+                          "win_target": s.get("win_target")})
     if not scenarios:
         scenarios = [{"name": "默认策略", "directive": ""}]
 

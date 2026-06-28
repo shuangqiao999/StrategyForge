@@ -38,6 +38,9 @@ interface ReportData {
   key_events?: Array<any>;
   risk_alerts?: string[];
   recommendations?: string[];
+  quantified?: boolean;
+  domain?: string;
+  final_states?: Record<string, { name: string; metrics: Record<string, number>; history?: any[]; alive: boolean }>;
 }
 
 // ── Phase Labels ──
@@ -66,6 +69,8 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [report, setReport] = useState<ReportData | null>(null);
   const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "optimize">("graph");
+  const [domain, setDomain] = useState("auto");
+  const [enableNarrate, setEnableNarrate] = useState(true);
 
   // ── 策略优化器 ──
   const [optEnabled, setOptEnabled] = useState(false);
@@ -241,7 +246,7 @@ export default function App() {
       const r = await fetch(`${API_BASE}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source_material: sourceMaterial }),
+        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, enable_narrate: enableNarrate } }),
       });
       if (r.ok) {
         const data = await r.json();
@@ -250,7 +255,7 @@ export default function App() {
       }
     } catch { /* ignore */ }
     setCreating(false);
-  }, [title, sourceMaterial]);
+  }, [title, sourceMaterial, domain, enableNarrate]);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -440,6 +445,26 @@ export default function App() {
             value={preGoal}
             onChange={e => setPreGoal(e.target.value)}
           />
+          <select
+            value={domain}
+            onChange={e => setDomain(e.target.value)}
+            title="推演领域：选具体领域或自动识别进入量化推演；纯叙事保持 1.0 行为"
+            style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 12 }}
+          >
+            <option value="auto">🤖 自动识别领域（量化）</option>
+            <option value="military">⚔️ 军事战争</option>
+            <option value="business">📊 商业竞争</option>
+            <option value="politics">🏛️ 政治博弈</option>
+            <option value="ecology">🌿 生态环境</option>
+            <option value="urban">🏙️ 城市规划</option>
+            <option value="narrative">📖 纯叙事（不量化）</option>
+          </select>
+          {domain !== "narrative" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+              <input type="checkbox" checked={enableNarrate} onChange={e => setEnableNarrate(e.target.checked)} />
+              生成叙事解读（关闭可省时）
+            </label>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -638,6 +663,33 @@ export default function App() {
                 <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13 }}>
                   {report ? (
                     <>
+                      {report.quantified && report.final_states && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>
+                            量化最终状态（领域：{report.domain}）
+                          </div>
+                          {Object.values(report.final_states).map((s, i) => (
+                            <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 8, borderLeft: `3px solid ${s.alive ? "#34d399" : "#ef4444"}` }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {s.name}{" "}
+                                {s.alive
+                                  ? <span style={{ fontSize: 10, color: "#34d399" }}>存活</span>
+                                  : <span style={{ fontSize: 10, color: "#f87171" }}>★出局★</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 2 }}>
+                                {Object.entries(s.metrics).map(([k, v]) => `${k}=${Number(v).toFixed(0)}`).join("  ·  ")}
+                              </div>
+                              {s.history && s.history.length > 0 && (
+                                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                                  轨迹：{s.history.slice(-6).map((h: any, j: number) => (
+                                    <span key={j} style={{ marginRight: 8 }}>[R{h.round}]{h.metric}{h.delta >= 0 ? "+" : ""}{Number(h.delta).toFixed(1)}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {report.summary && (
                         <div style={{ marginBottom: 18 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>推演总结</div>

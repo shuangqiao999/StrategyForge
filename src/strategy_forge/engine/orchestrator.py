@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from strategy_forge.storage.graph_store import DeductionGraphStore
 from strategy_forge.storage.session_store import SessionStore
@@ -30,11 +31,16 @@ class DeductionOrchestrator:
         self.graph = graph
         self.store = session_store
         self._log = logger_fn or (lambda p, m: None)
+        # 量化模式状态（rule_engine 非空即量化）
+        self._rule_engine: Any = None
+        self._states: dict[str, Any] = {}
+        self._enable_narrate: bool = True
 
     async def run(self) -> DeductionSession:
         session_id = self.session.id
         try:
             await self._phase1_ontology()
+            await self._phase1_5_quantify()
             await self._phase2_graph()
             await self._phase3_agents()
             await self._phase4_simulation()
@@ -65,6 +71,45 @@ class DeductionOrchestrator:
         self.store.update(self.session.id,
                           status=SessionStatus.GRAPH_RUNNING.value,
                           phase=DeductionPhase.GRAPH.value)
+
+    async def _phase1_5_quantify(self) -> None:
+        """阶段1.5（仅量化模式）：确定规则包。叙事模式或识别失败则保持 _rule_engine=None。"""
+        import json as _json
+
+        data = self.store.get(self.session.id)
+        cfg = (data or {}).get("config_json", {}) or {}
+        if isinstance(cfg, str):
+            cfg = _json.loads(cfg)
+        self._enable_narrate = bool(cfg.get("enable_narrate", True))
+        domain = (cfg.get("domain") or "narrative").strip()
+        custom = cfg.get("custom_rules")
+        if domain in ("", "narrative"):
+            self._rule_engine = None
+            return
+
+        from .rule_engine import RuleEngine
+        try:
+            if domain == "custom" and custom:
+                self._rule_engine = RuleEngine.from_custom(custom)
+                self._log("quantify", f"阶段1.5: 使用自定义规则包（{self._rule_engine.domain}）")
+            elif domain == "auto":
+                self._log("quantify", "阶段1.5: 自动识别推演领域...")
+                from strategy_forge.core.llm_client import DeductionLLMClient
+                detected = await RuleEngine.detect_domain(
+                    self.session.source_material, DeductionLLMClient())
+                if detected == "narrative":
+                    self._rule_engine = None
+                    self._log("quantify", "未识别到明确量化领域，回退叙事模式")
+                    return
+                self._rule_engine = RuleEngine.from_domain(detected)
+                self._log("quantify", f"识别领域: {self._rule_engine.pack.get('display_name', detected)}")
+            else:
+                self._rule_engine = RuleEngine.from_domain(domain)
+                self._log("quantify", f"阶段1.5: 使用领域规则包: {self._rule_engine.pack.get('display_name', domain)}")
+        except Exception as e:
+            logger.warning("[Orchestrator] 规则包加载失败，回退叙事: %s", e)
+            self._rule_engine = None
+            self._log("quantify", f"规则包加载失败，回退叙事模式: {e}")
 
     async def _phase2_graph(self) -> None:
         self._log("graph", "阶段2: GraphRAG 知识图谱构建开始")
@@ -148,7 +193,17 @@ class DeductionOrchestrator:
 
     async def _phase4_simulation(self) -> None:
         total_rounds = self.session.total_rounds
-        self._log("simulation", f"阶段4: 并行模拟开始 ({total_rounds} 轮)")
+        re_engine = self._rule_engine
+        states: dict[str, Any] = {}
+        if re_engine is not None:
+            for a in self._agents:
+                states[a.entity_id] = re_engine.init_state(a.entity_id, a.name)
+            self._states = states
+            self._log("simulation",
+                      f"阶段4: 量化并行模拟开始 ({total_rounds} 轮, {len(states)} 个量化实体, "
+                      f"领域={re_engine.domain})")
+        else:
+            self._log("simulation", f"阶段4: 并行模拟开始 ({total_rounds} 轮)")
 
         from .simulator import SimulationEngine
         engine = SimulationEngine(
@@ -158,6 +213,9 @@ class DeductionOrchestrator:
             log_fn=self._log,
             preprocessor=getattr(self, "_preprocessor", None),
             pre_goals=getattr(self, "_pre_goals", []),
+            rule_engine=re_engine,
+            states=states if re_engine is not None else None,
+            enable_narrate=self._enable_narrate,
         )
 
         rounds: list[SimulationRound] = []
@@ -189,13 +247,23 @@ class DeductionOrchestrator:
         self.session.report = report
 
         import json
+        report_payload = {
+            "summary": report.summary,
+            "key_events": report.key_events,
+            "risk_alerts": report.risk_alerts,
+            "recommendations": report.recommendations,
+        }
+        if self._rule_engine is not None and self._states:
+            report_payload["quantified"] = True
+            report_payload["domain"] = self._rule_engine.domain
+            report_payload["final_states"] = {
+                eid: {"name": st.name, "metrics": st.metrics,
+                      "history": st.history[-60:],
+                      "alive": self._rule_engine.is_alive(st)}
+                for eid, st in self._states.items()
+            }
         self.store.update(self.session.id,
-                          report_json=json.dumps({
-                              "summary": report.summary,
-                              "key_events": report.key_events,
-                              "risk_alerts": report.risk_alerts,
-                              "recommendations": report.recommendations,
-                          }, ensure_ascii=False))
+                          report_json=json.dumps(report_payload, ensure_ascii=False))
         self._log("report", f"报告生成完成: {report.summary[:100]}...")
 
     def get_realtime_round(self) -> SimulationRound | None:

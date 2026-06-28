@@ -126,3 +126,52 @@ class DeductionSession:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     error: str = ""
     report: DeductionReport | None = None
+
+
+@dataclass
+class EntityState:
+    """通用可量化实体状态（规则包驱动，不绑定具体领域）。
+
+    metrics / 阈值 / 初值 / 取值范围均来自规则包，新增领域只需提供规则包，
+    无需修改本类（取代按领域写 Python 子类的做法）。
+    """
+    id: str
+    name: str
+    domain: str = "generic"
+    metrics: dict[str, float] = field(default_factory=dict)
+    history: list[dict[str, Any]] = field(default_factory=list)
+
+    def get_metric(self, name: str) -> float:
+        return self.metrics.get(name, 0.0)
+
+    def apply_delta(self, name: str, delta: float, lo: float = 0.0, hi: float = 100.0,
+                    round_number: int = 0) -> float:
+        old = self.metrics.get(name, 0.0)
+        new = max(lo, min(hi, old + delta))
+        self.metrics[name] = new
+        self.history.append({"round": round_number, "metric": name,
+                             "old": round(old, 2), "delta": round(delta, 2),
+                             "new": round(new, 2)})
+        return new
+
+    def apply_deltas(self, deltas: dict[str, float], round_number: int = 0,
+                     ranges: dict[str, Any] | None = None) -> None:
+        ranges = ranges or {}
+        for name, delta in deltas.items():
+            rng = ranges.get(name, [0.0, 100.0])
+            lo, hi = float(rng[0]), float(rng[1])
+            self.apply_delta(name, delta, lo, hi, round_number)
+
+    def is_alive(self, thresholds: dict[str, float]) -> bool:
+        """任一受阈值约束的指标低于(含等于)其阈值则判定为出局。"""
+        for name, floor in (thresholds or {}).items():
+            if self.metrics.get(name, 0.0) <= float(floor):
+                return False
+        return True
+
+    def to_prompt_context(self) -> str:
+        return f"{self.name}({self.domain}): " + ", ".join(
+            f"{k}={v:.1f}" for k, v in self.metrics.items())
+
+    def snapshot(self) -> dict[str, float]:
+        return dict(self.metrics)

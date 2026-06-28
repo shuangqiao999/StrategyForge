@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import math
 import random
@@ -118,6 +119,34 @@ class StrategyOptimizer:
         if not agents:
             raise RuntimeError("基线构建完成但未产生任何智能体，请检查种子材料是否包含人物(Person)实体")
 
+        # 量化模式：确定规则包 + 建立基线初始状态（只建一次，各次模拟深拷贝隔离）
+        rule_engine = None
+        base_states: dict[str, Any] = {}
+        try:
+            data = self.engine.session_store.get(session_id)
+            cfg = (data or {}).get("config_json", {}) or {}
+            if isinstance(cfg, str):
+                import json as _json
+                cfg = _json.loads(cfg)
+            domain = (cfg.get("domain") or "narrative").strip()
+            if domain not in ("", "narrative"):
+                from strategy_forge.engine.rule_engine import RuleEngine
+                if domain == "custom" and cfg.get("custom_rules"):
+                    rule_engine = RuleEngine.from_custom(cfg["custom_rules"])
+                elif domain == "auto":
+                    detected = await RuleEngine.detect_domain(source, LLMClient())
+                    if detected != "narrative":
+                        rule_engine = RuleEngine.from_domain(detected)
+                else:
+                    rule_engine = RuleEngine.from_domain(domain)
+            if rule_engine is not None:
+                for a in agents:
+                    base_states[a.entity_id] = rule_engine.init_state(a.entity_id, a.name)
+                olog(f"量化模式: 领域={rule_engine.domain}，{len(base_states)} 个量化实体，胜负由数值阈值判定")
+        except Exception as e:
+            logger.warning("[Optimizer] 量化初始化失败，回退 LLM 评估: %s", e)
+            rule_engine = None
+
         total = len(scenarios) * iterations
         olog(f"基线就绪：{len(agents)} 个智能体；开始 {len(scenarios)} 个方案 × {iterations} 次蒙特卡洛（共 {total} 次推演）")
 
@@ -137,21 +166,38 @@ class StrategyOptimizer:
             async with sem:
                 if cancel_event is not None and cancel_event.is_set():
                     return None
-                sim = SimulationEngine(
-                    agents=agents, graph=graph, total_rounds=total_rounds,
-                    log_fn=lambda _p, _m: None, preprocessor=preprocessor,
-                    pre_goals=[sc["directive"]] if sc.get("directive") else [],
-                    seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
-                )
-                actions: list[Any] = []
-                for rnd in range(1, total_rounds + 1):
-                    if cancel_event is not None and cancel_event.is_set():
-                        break
-                    rd = await sim.run_round(rnd)
-                    actions.extend(rd.actions)
-                outcome = await self._evaluate_outcome(
-                    eval_client, win_condition, sc.get("directive", ""), actions,
-                )
+                if rule_engine is not None:
+                    # 量化模式：深拷贝基线状态隔离 → 数值阈值客观判胜负
+                    states_copy = {eid: copy.deepcopy(st) for eid, st in base_states.items()}
+                    sim = SimulationEngine(
+                        agents=agents, graph=graph, total_rounds=total_rounds,
+                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        pre_goals=[sc["directive"]] if sc.get("directive") else [],
+                        seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
+                        rule_engine=rule_engine, states=states_copy, enable_narrate=False,
+                    )
+                    actions: list[Any] = []
+                    for rnd in range(1, total_rounds + 1):
+                        if cancel_event is not None and cancel_event.is_set():
+                            break
+                        await sim.run_round(rnd)
+                    outcome = self._judge_quantified(rule_engine, states_copy, sc)
+                else:
+                    sim = SimulationEngine(
+                        agents=agents, graph=graph, total_rounds=total_rounds,
+                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        pre_goals=[sc["directive"]] if sc.get("directive") else [],
+                        seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
+                    )
+                    actions = []
+                    for rnd in range(1, total_rounds + 1):
+                        if cancel_event is not None and cancel_event.is_set():
+                            break
+                        rd = await sim.run_round(rnd)
+                        actions.extend(rd.actions)
+                    outcome = await self._evaluate_outcome(
+                        eval_client, win_condition, sc.get("directive", ""), actions,
+                    )
             done += 1
             best_win = max(best_win, outcome.win_score)
             if progress_cb is not None:
@@ -194,6 +240,34 @@ class StrategyOptimizer:
             + (f"，推荐方案：{report['recommended']['name']}" if report.get("recommended") else "")
         )
         return report
+
+    def _judge_quantified(self, rule_engine: Any, states: dict[str, Any],
+                          scenario: dict[str, Any]) -> SimulationOutcome:
+        """量化模式：按结构化胜利条件读最终 EntityState 数值客观判胜负（解决评估者悖论）。"""
+        win_target = scenario.get("win_target") or {}
+        ref = (win_target.get("entity_ref") or "").strip()
+        target_state = None
+        if ref:
+            for st in states.values():
+                nm = getattr(st, "name", "")
+                if nm == ref or (len(ref) >= 2 and (ref in nm or nm in ref)):
+                    target_state = st
+                    break
+        if target_state is not None:
+            j = rule_engine.judge(target_state, win_target)
+            detail = ", ".join(f"{k}={v:.0f}" for k, v in target_state.metrics.items())
+            return SimulationOutcome(success=j["success"], win_score=j["win_score"],
+                                     cost=j["cost"], rationale=f"{target_state.name}: {detail}")
+        # 缺省（未指定我方实体）：用全体存活率 + 平均健康度作客观评分
+        if not states:
+            return SimulationOutcome(False, 0.0, 1.0, "无量化实体")
+        alive = sum(1 for st in states.values() if rule_engine.is_alive(st))
+        n = len(states)
+        win_score = round(alive / n, 4)
+        avg = sum(sum(st.metrics.values()) / max(1, len(st.metrics))
+                  for st in states.values()) / n / 100.0
+        return SimulationOutcome(success=win_score >= 0.5, win_score=win_score,
+                                 cost=round(1.0 - avg, 4), rationale=f"存活 {alive}/{n}")
 
     async def _evaluate_outcome(
         self, client: Any, win_condition: str, directive: str, actions: list[Any],

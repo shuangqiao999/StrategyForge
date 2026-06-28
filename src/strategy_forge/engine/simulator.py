@@ -83,6 +83,10 @@ class SimulationEngine:
         temperature: float = 0.7,
         persist_events: bool = True,
         max_concurrent: int | None = None,
+        rule_engine: Any = None,
+        states: dict[str, Any] | None = None,
+        enable_narrate: bool = True,
+        env: dict[str, str] | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -96,6 +100,12 @@ class SimulationEngine:
         self._persist_events = persist_events
         self._temperature = temperature
         self._rng = random.Random(seed)
+        # 量化模式参数（rule_engine 非空即进入量化模式）
+        self._rule_engine = rule_engine
+        self._states: dict[str, Any] = states or {}
+        self._quantified = rule_engine is not None
+        self._enable_narrate = enable_narrate
+        self._env = env
         from strategy_forge.core.config import config
 
         self._max_concurrent = (
@@ -113,6 +123,9 @@ class SimulationEngine:
         )
 
     async def run_round(self, round_number: int) -> SimulationRound:
+        if self._quantified:
+            return await self._run_round_quantified(round_number)
+
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
 
         sim_round = SimulationRound(round_number=round_number)
@@ -270,6 +283,119 @@ class SimulationEngine:
             content=action_data.get("content", f"{agent.name}观察着周围环境"),
             timestamp=datetime.now().isoformat(),
         )
+
+    # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
+    async def _run_round_quantified(self, round_number: int) -> SimulationRound:
+        from datetime import datetime
+
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+
+        sim_round = SimulationRound(round_number=round_number)
+        re_engine = self._rule_engine
+        states = self._states
+        client = LLMClient()
+
+        alive_agents = [a for a in self.agents
+                        if a.entity_id in states and re_engine.is_alive(states[a.entity_id])]
+        if not alive_agents:
+            return sim_round
+
+        ordered = list(alive_agents)
+        self._rng.shuffle(ordered)
+
+        recent = "\n".join(
+            f"- [{e.get('round','?')}] {e.get('agent_name','?')}: {e.get('content','')[:80]}"
+            for e in self._event_history[-5:]
+        ) or "（无近期事件）"
+
+        def others_ctx(self_id: str) -> str:
+            return "\n".join(
+                states[a.entity_id].to_prompt_context()
+                for a in alive_agents if a.entity_id != self_id
+            ) or "（无其他参与方）"
+
+        sem = asyncio.Semaphore(self._max_concurrent)
+
+        async def decide(agent: DeductionAgentProfile) -> dict[str, Any]:
+            async with sem:
+                d = await self.reasoner.reason_quantified(
+                    agent, states[agent.entity_id], re_engine,
+                    recent_events=recent, other_context=others_ctx(agent.entity_id),
+                    round_number=round_number, client=client,
+                )
+                d["actor_id"] = agent.entity_id
+                return d
+
+        decisions = await asyncio.gather(*[decide(a) for a in ordered])
+
+        # 轮初快照(批量应用语义) + 交互解算
+        name_to_id = {a.name: a.entity_id for a in self.agents}
+        deltas = re_engine.resolve_round(states, decisions, name_to_id, self._env)
+        ranges = re_engine.ranges()
+        for eid, d in deltas.items():
+            if eid in states:
+                states[eid].apply_deltas(d, round_number, ranges)
+
+        # 构造行动 + 内存事件历史
+        for dec in decisions:
+            actor = dec["actor_id"]
+            agent = next((a for a in self.agents if a.entity_id == actor), None)
+            nm = agent.name if agent else actor[:8]
+            d_applied = deltas.get(actor, {})
+            delta_txt = ", ".join(f"{k}{v:+.1f}" for k, v in d_applied.items())
+            content = dec.get("rationale", "") or f"{nm} 执行 {dec['action_type']}"
+            sim_round.actions.append(SimulationAction(
+                agent_id=actor, action_type=dec["action_type"],
+                target_id=dec.get("target", ""), content=content,
+                timestamp=datetime.now().isoformat(),
+                metadata={"intensity": dec["intensity"], "deltas": d_applied,
+                          "metrics": dict(states[actor].metrics) if actor in states else {}},
+            ))
+            self._event_history.append({
+                "agent": actor, "agent_name": nm, "action": dec["action_type"],
+                "content": content + (f"（{delta_txt}）" if delta_txt else ""),
+                "round": round_number,
+            })
+        if len(self._event_history) > 200:
+            self._event_history = self._event_history[-200:]
+
+        # 轮末快照(供报告/趋势) + 可选叙事解读
+        sim_round.state_delta["states"] = {
+            a.entity_id: {"name": a.name, "metrics": dict(states[a.entity_id].metrics),
+                          "alive": re_engine.is_alive(states[a.entity_id])}
+            for a in self.agents if a.entity_id in states
+        }
+        if self._enable_narrate:
+            try:
+                narration = await self._narrate_round(client, round_number, decisions, deltas)
+                if narration:
+                    sim_round.state_delta["narration"] = narration
+            except Exception as e:
+                logger.warning("[Simulator] 轮末叙事失败: %s", e)
+
+        return sim_round
+
+    async def _narrate_round(self, client: Any, round_number: int,
+                             decisions: list[dict], deltas: dict) -> str:
+        from strategy_forge.core.llm_client import Message
+
+        from ._utils import extract_text
+        lines = []
+        for dec in decisions:
+            actor = dec["actor_id"]
+            agent = next((a for a in self.agents if a.entity_id == actor), None)
+            nm = agent.name if agent else actor[:8]
+            d = deltas.get(actor, {})
+            chg = ", ".join(f"{k}{v:+.1f}" for k, v in d.items()) or "无显著变化"
+            lines.append(f"{nm} 采取 {dec['action_type']}(强度{dec['intensity']:.1f}) "
+                         f"目标:{dec.get('target') or '—'}，数值变化: {chg}")
+        prompt = (
+            f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的战局叙事（100 字以内）。\n\n"
+            "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n只输出叙事段落，不要解释或列表。"
+        )
+        resp = await client.chat([Message(role="user", content=prompt)],
+                                 system="你是推演解说员，把数值变化翻译成简洁叙事。", temperature=0.5)
+        return extract_text(resp).strip()[:300]
 
 
 def _parse_action_json(raw: str) -> dict[str, Any]:

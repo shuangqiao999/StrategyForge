@@ -78,13 +78,23 @@ async def update_embed(body: EmbedConfigUpdate):
 
 
 # ── Model listing + test ──
+def _real_key_or(req_key: str) -> str:
+    """脱敏串(含 * / •)、空、或 'local' 时回退使用 registry 中存储的真实 Key，
+    避免把脱敏 Key 当真实 Key 塞进 HTTP 头(非 ASCII 字符会导致编码错误)。"""
+    k = (req_key or "").strip()
+    if not k or k.lower() == "local" or "*" in k or "•" in k:
+        return registry.llm_api_key or ""
+    return k
+
+
 @router.post("/list-models")
 async def list_models(body: ModelListRequest):
-    return await registry.list_models(body.base_url, body.api_key)
+    return await registry.list_models(body.base_url, _real_key_or(body.api_key))
+
 
 @router.post("/test-connection")
 async def test_connection(body: ModelListRequest):
-    return await registry.test_connection(body.base_url, body.api_key)
+    return await registry.test_connection(body.base_url, _real_key_or(body.api_key))
 
 
 # ── Reload ──
