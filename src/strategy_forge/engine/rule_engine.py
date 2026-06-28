@@ -99,8 +99,12 @@ class RuleEngine:
     # ── 整轮交互解算（基于快照，批量应用由调用方负责） ──
     def resolve_round(self, snapshot_states: dict[str, EntityState],
                       decisions: list[dict[str, Any]], name_to_id: dict[str, str],
-                      env: dict[str, str] | None = None) -> dict[str, dict[str, float]]:
+                      env: dict[str, str] | None = None,
+                      collect_interactions: bool = False):
+        """计算本轮全部 delta；collect_interactions=True 时额外返回逐 (actor→target) 归因，
+        供因果链(硬档)写入图谱。默认仅返回合并 delta，向后兼容。"""
         result: dict[str, dict[str, float]] = {}
+        interactions: list[dict[str, Any]] = []
 
         def _add(eid: str, d: dict[str, float]) -> None:
             bucket = result.setdefault(eid, {})
@@ -120,8 +124,13 @@ class RuleEngine:
                     tid = self._resolve_target(target, name_to_id, exclude=actor)
                     if tid and tid in snapshot_states:
                         _add(tid, tgt_d)
+                        if collect_interactions:
+                            interactions.append({"actor": actor, "target": tid,
+                                                 "action": action, "deltas": dict(tgt_d)})
                     elif target:
                         logger.debug("[RuleEngine] target 未解析/已出局: %s", target)
+        if collect_interactions:
+            return result, interactions
         return result
 
     @staticmethod

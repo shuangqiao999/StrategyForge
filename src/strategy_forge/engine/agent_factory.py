@@ -166,17 +166,11 @@ async def create_agents_from_graph(
         )
         agents.append(agent_profile)
 
-        # Store in Kuzu
+        # Store agent node in Kuzu (Agent 节点经 ACTED 时间线查询被读取)
         graph.upsert_agent_node(
             agent_profile.entity_id, agent_profile.name,
             agent_profile.persona, agent_profile.background,
             json.dumps(agent_profile.goals, ensure_ascii=False),
-        )
-        graph._conn.execute(
-            f"MATCH (e:{graph.NODE_TABLE} {{id: $eid}}), "
-            f"(a:{graph.AGENT_TABLE} {{id: $aid}}) "
-            "CREATE (a)-[:PARTICIPATES {role: 'embodies'}]->(e)",
-            {"eid": person.get("id", ""), "aid": agent_profile.entity_id},
         )
 
         log_fn("agents", f"  [{i+1}/{max_agents}] {person_name}: {agent_profile.persona[:80]}...")

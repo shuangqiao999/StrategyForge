@@ -28,6 +28,15 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
 ## 推演原文背景
 {source_snippet}
 
+## 关键关系（知识图谱：实体—关系—实体）
+{key_relations}
+
+## 行动时序与因果链（Kuzu 时序行动图：按时间排列的"谁—做了什么"）
+{action_timeline}
+
+## 因果归因（确定性·来自数值真值：源 → 目标 累计指标影响，负值=致衰）
+{causal_attribution}
+
 ## 输出 JSON
 ```json
 {{
@@ -51,6 +60,7 @@ async def generate_report(
     graph: DeductionGraphStore,
     rounds: list[SimulationRound],
     log_fn: Callable[[str, str], None],
+    preprocessor: Any = None,
 ) -> DeductionReport:
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
@@ -64,12 +74,69 @@ async def generate_report(
                               f"{action.agent_id[:8]}: {action.action_type} — {action.content[:80]}")
             agent_trajectories.setdefault(action.agent_id, []).append(action.content[:60])
 
+    # 跨轮语义召回：从 LanceDB events 表按场景主题召回最相关事件，补足"只看最近5轮"的盲区
+    if preprocessor is not None:
+        try:
+            query = (session.title or session.source_material[:200] or "关键转折与冲突").strip()
+            recalled = preprocessor.retrieve_dynamic_events(query, top_k=10, min_similarity=0.2)
+            for c in recalled:
+                line = f"[语义召回] {c[:100]}"
+                if line not in key_events:
+                    key_events.append(line)
+            if recalled:
+                log_fn("report", f"LanceDB 语义召回 {len(recalled)} 条跨轮关键事件")
+        except Exception as e:
+            logger.debug("[Reporter] 语义召回关键事件失败: %s", e)
+
     if not key_events:
         return DeductionReport(
             session_id=session.id,
             summary="推演未产生足够事件数据以生成报告。",
             raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
         )
+
+    # 从知识图谱取关键关系(按权重)丰富报告
+    key_relations = "（无显著关系）"
+    if graph is not None:
+        try:
+            rows = graph.query(
+                "MATCH (a:Entity)-[r:RELATES]->(b:Entity) "
+                "RETURN a.name, r.relation, b.name, r.weight "
+                "ORDER BY r.weight DESC LIMIT 15"
+            )
+            rels = [f"- {r[0]} --[{r[1]}]--> {r[2]}"
+                    for r in rows if r and r[0] and r[2]]
+            if rels:
+                key_relations = "\n".join(rels)
+                log_fn("report", f"图谱关键关系 {len(rels)} 条注入报告")
+        except Exception as e:
+            logger.debug("[Reporter] 关系查询失败: %s", e)
+
+    # 从 Kuzu 时序行动图(Agent-[ACTED]->Event)取全局事件序列，供因果链分析
+    action_timeline = "（无行动时序记录）"
+    if graph is not None:
+        try:
+            seq = graph.get_event_sequence(limit=30)
+            lines = [f"- [{e['timestamp'][:19]}] {e['agent_name']} {e['action']}: {e['description'][:60]}"
+                     for e in seq if e.get("agent_name")]
+            if lines:
+                action_timeline = "\n".join(lines)
+                log_fn("report", f"Kuzu 行动时序 {len(lines)} 条注入报告")
+        except Exception as e:
+            logger.debug("[Reporter] 行动时序查询失败: %s", e)
+
+    # 确定性因果归因：从 Kuzu CAUSED 边汇总"源→目标 累计指标影响"，校正 LLM 软推断
+    causal_attribution = "（无确定性因果数据）"
+    if graph is not None:
+        try:
+            summary = graph.get_causal_summary(limit=15)
+            clines = [f"- {s['source']} → {s['target']}: {s['metric']}{s['amount']:+.1f}（累计）"
+                      for s in summary if s.get("metric")]
+            if clines:
+                causal_attribution = "\n".join(clines)
+                log_fn("report", f"Kuzu 确定性因果归因 {len(clines)} 条注入报告")
+        except Exception as e:
+            logger.debug("[Reporter] 因果归因查询失败: %s", e)
 
     client = LLMClient()
     system = "你是推演分析专家，生成结构化推演报告。只输出 JSON。"
@@ -81,6 +148,9 @@ async def generate_report(
         relation_count=session.relation_count,
         key_events="\n".join(key_events[-20:]),
         source_snippet=session.source_material[:1000],
+        key_relations=key_relations,
+        action_timeline=action_timeline,
+        causal_attribution=causal_attribution,
     ))]
 
     default_report = DeductionReport(

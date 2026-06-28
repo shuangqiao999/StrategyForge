@@ -247,6 +247,53 @@ class StrategyOptimizer:
             + f"有效结果 {len(results)}/{total}"
             + (f"，推荐方案：{report['recommended']['name']}" if report.get("recommended") else "")
         )
+
+        # ── 4. 推荐方案"代表性 run"：persist=True 生成叙事报告 + 点亮时间线/因果页 ──
+        if not cancelled and rule_engine is not None and base_states and report.get("recommended"):
+            try:
+                import json
+                rec_name = report["recommended"]["name"]
+                rec_sc = next((s for s in scenarios if s.get("name") == rec_name), None)
+                if rec_sc is not None:
+                    olog(f"为推荐方案「{rec_name}」生成代表性推演报告（报告/时间线/因果页）...")
+                    rep_states = {eid: copy.deepcopy(st) for eid, st in base_states.items()}
+                    rep_sim = SimulationEngine(
+                        agents=agents, graph=graph, total_rounds=total_rounds,
+                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        pre_goals=[rec_sc["directive"]] if rec_sc.get("directive") else [],
+                        seed=20240101, temperature=0.6, persist_events=True, max_concurrent=1,
+                        rule_engine=rule_engine, states=rep_states, enable_narrate=False,
+                        enable_multi_action=enable_multi_action, max_actions=max_actions,
+                    )
+                    rep_rounds = []
+                    for rnd in range(1, total_rounds + 1):
+                        rep_rounds.append(await rep_sim.run_round(rnd))
+                    from strategy_forge.engine.reporter import generate_report
+                    session.current_round = total_rounds
+                    rep = await generate_report(
+                        session=session, graph=graph, rounds=rep_rounds,
+                        log_fn=lambda _p, _m: None, preprocessor=preprocessor)
+                    payload = {
+                        "summary": rep.summary,
+                        "key_events": rep.key_events,
+                        "risk_alerts": rep.risk_alerts,
+                        "recommendations": rep.recommendations,
+                        "quantified": True,
+                        "domain": rule_engine.domain,
+                        "optimized_scenario": rec_name,
+                        "final_states": {
+                            eid: {"name": st.name, "metrics": st.metrics,
+                                  "history": st.history[-60:],
+                                  "alive": rule_engine.is_alive(st)}
+                            for eid, st in rep_states.items()
+                        },
+                    }
+                    self.engine.session_store.update(
+                        session_id, report_json=json.dumps(payload, ensure_ascii=False))
+                    olog("代表性推演报告已生成")
+            except Exception as e:
+                logger.warning("[Optimizer] 代表性报告生成失败: %s", e)
+
         return report
 
     def _judge_quantified(self, rule_engine: Any, states: dict[str, Any],

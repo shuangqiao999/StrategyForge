@@ -252,6 +252,7 @@ class DeductionOrchestrator:
             graph=self.graph,
             rounds=getattr(self, "_simulation_rounds", []),
             log_fn=self._log,
+            preprocessor=getattr(self, "_preprocessor", None),
         )
         self.session.report = report
 

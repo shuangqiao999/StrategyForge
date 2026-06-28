@@ -39,6 +39,9 @@ Recent events: {recent_events}
 ## Trust Relationship Summary
 {trust_summary}
 
+## 关系网络（来自知识图谱：盟友 / 对手）
+{relationship_context}
+
 ## Output — pure JSON array
 [
   {{
@@ -97,6 +100,21 @@ class StrategicReasoner:
     def get_trust(self, source: str, target: str) -> float:
         return self._trust_matrix.get(source, {}).get(target, 0.0)
 
+    def seed_trust(self, source_id: str, allies: list[str], opponents: list[str],
+                   weight: float = 2.0) -> None:
+        """用图谱既有关系初始化信任矩阵（键用对方名称，匹配运行时 get_trust 查找约定）。
+
+        仅影响定性 reason() 的启发式打分与信任摘要；量化路径不读信任矩阵，
+        关系信息在量化模式经 relationship_context 注入 Prompt。
+        """
+        w = max(-5.0, min(5.0, weight))
+        for name in allies or []:
+            if name:
+                self._trust_matrix[source_id][name] = w
+        for name in opponents or []:
+            if name:
+                self._trust_matrix[source_id][name] = -w
+
     def _trust_summary_for(self, agent_id: str) -> str:
         relations = self._trust_matrix.get(agent_id, {})
         if not relations:
@@ -141,6 +159,7 @@ class StrategicReasoner:
             round_number=round_number,
             recent_events=str(recent)[:500],
             trust_summary=trust,
+            relationship_context=world_state.get("relationship_context", "") or "（无已知关系）",
         ))]
 
         candidates: list[dict[str, Any]] = []
@@ -201,7 +220,8 @@ class StrategicReasoner:
     async def reason_quantified(
         self, agent: DeductionAgentProfile, state: Any, rule_engine: Any,
         recent_events: str = "", other_context: str = "", round_number: int = 0,
-        client: Any = None,
+        client: Any = None, static_knowledge: str = "", dynamic_memory: str = "",
+        relationship_context: str = "",
     ) -> dict[str, Any]:
         """量化模式决策。
 
@@ -238,7 +258,10 @@ class StrategicReasoner:
             + (f"## 外部干预指令（最高优先级）\n{user_cmd}\n" if user_cmd else "")
             + f"## 你的当前状态\n{state.to_prompt_context()}\n"
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n"
-            f"## 近期局势\n{recent_events or '（无）'}\n\n"
+            + (f"## 关系网络（盟友/对手）\n{relationship_context}\n" if relationship_context else "")
+            + (f"## 原著背景（语义召回）\n{static_knowledge}\n" if static_knowledge else "")
+            + (f"## 历史记忆（语义召回）\n{dynamic_memory}\n" if dynamic_memory else "")
+            + f"## 近期局势\n{recent_events or '（无）'}\n\n"
             f"## 可选行动\n{rule_engine.action_catalog()}\n\n"
         )
         if self._enable_multi_action:

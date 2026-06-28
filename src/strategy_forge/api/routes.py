@@ -187,6 +187,9 @@ class OptimizeRequest(BaseModel):
     iterations: int = 20
     objective: str = "balanced"
     max_concurrent: int | None = None
+
+
+class SettingsRequest(BaseModel):
     enable_multi_action: bool = False
     max_actions: int = 3
 
@@ -244,14 +247,7 @@ async def run_optimization(session_id: str, body: OptimizeRequest, request: Requ
 
     iterations = max(1, min(int(body.iterations or 20), 200))
 
-    # 持久化多动作资源分配偏好到会话配置（供优化器与主推演统一读取）
-    cfg_data = engine.session_store.get(session_id)
-    opt_cfg = (cfg_data or {}).get("config_json", {}) or {}
-    if isinstance(opt_cfg, str):
-        opt_cfg = json.loads(opt_cfg)
-    opt_cfg["enable_multi_action"] = bool(body.enable_multi_action)
-    opt_cfg["max_actions"] = max(1, int(body.max_actions or 3))
-    engine.session_store.update(session_id, config_json=json.dumps(opt_cfg, ensure_ascii=False))
+    # 多动作设置以会话 config_json 为单一真值源（由 /settings 写入），优化器与主推演统一读取
 
     from strategy_forge.engine.optimizer import StrategyOptimizer
     optimizer = StrategyOptimizer(engine)
@@ -365,6 +361,24 @@ async def set_pre_goal(session_id: str, req: PreGoalRequest, request: Request):
     return {"session_id": session_id, "pre_goals": pre_goals}
 
 
+@router.post("/session/{session_id}/settings")
+async def update_settings(session_id: str, req: SettingsRequest, request: Request):
+    """更新推演级设置（多动作资源分配），供普通推演与优化器统一读取。"""
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    data = engine.session_store.get(session_id)
+    config = (data or {}).get("config_json", {}) or {}
+    if isinstance(config, str):
+        config = json.loads(config)
+    config["enable_multi_action"] = bool(req.enable_multi_action)
+    config["max_actions"] = max(1, int(req.max_actions or 3))
+    engine.session_store.update(session_id, config_json=json.dumps(config, ensure_ascii=False))
+    return {"session_id": session_id, "enable_multi_action": config["enable_multi_action"],
+            "max_actions": config["max_actions"]}
+
+
 # ── Data export ──
 
 @router.get("/session/{session_id}/graph")
@@ -375,6 +389,39 @@ async def get_graph_data(session_id: str, request: Request):
         raise HTTPException(404, "Session not found")
     graph = engine.get_graph(session_id)
     return graph.export_graph_data()
+
+
+@router.get("/session/{session_id}/timeline")
+async def get_timeline(session_id: str, request: Request):
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    graph = engine.get_graph(session_id)
+    try:
+        return {
+            "timelines": graph.get_agent_timelines(),
+            "sequence": graph.get_event_sequence(),
+        }
+    except Exception as e:
+        logger.warning("[StrategyForge] timeline query failed: %s", e)
+        return {"timelines": [], "sequence": []}
+
+
+@router.get("/session/{session_id}/causal")
+async def get_causal(session_id: str, request: Request):
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    graph = engine.get_graph(session_id)
+    try:
+        sub = graph.get_causal_subgraph()
+        sub["summary"] = graph.get_causal_summary()
+        return sub
+    except Exception as e:
+        logger.warning("[StrategyForge] causal query failed: %s", e)
+        return {"nodes": [], "links": [], "summary": []}
 
 
 @router.get("/session/{session_id}/report")

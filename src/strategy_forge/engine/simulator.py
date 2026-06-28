@@ -59,6 +59,15 @@ _ACTION_PROMPT = """你是一个推演模拟中的智能体。根据你的角色
 只返回 JSON，不要解释。"""
 
 
+# 关系→盟友/对手的关键词启发式（中英），用于从 Kuzu RELATES 关系反哺决策与信任。
+_REL_ALLY_KW = ("盟", "同盟", "结盟", "联盟", "支持", "合作", "友", "部下", "下属",
+                "效忠", "追随", "ally", "allied", "support", "friend", "cooperat",
+                "subordinate", "loyal")
+_REL_FOE_KW = ("敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛", "仇", "攻击",
+               "威胁", "rival", "enemy", "hostil", "oppos", "compet", "conflict",
+               "betray", "threat")
+
+
 class SimulationEngine:
     """多智能体并行模拟引擎 — 双路语义记忆。
 
@@ -127,6 +136,58 @@ class SimulationEngine:
             enable_multi_action=self._enable_multi_action,
             max_actions=self._max_actions,
         )
+
+        # A. 关系反哺：开局一次性从 Kuzu 预取盟友/对手并播种信任(关系在一次推演内静态)
+        self._rel_context: dict[str, dict] = {}
+        self._build_relationship_context()
+
+    @staticmethod
+    def _classify_relation(relation: str) -> str:
+        r = (relation or "").lower()
+        if any(k in r for k in _REL_FOE_KW):
+            return "foe"
+        if any(k in r for k in _REL_ALLY_KW):
+            return "ally"
+        return "neutral"
+
+    def _build_relationship_context(self) -> None:
+        """开局一次性从 Kuzu 预取各 agent 的盟友/对手(关系静态)，缓存并播种信任矩阵。
+
+        顺序执行(非并发)，规避 Kuzu 单连接线程安全问题；运行中只读缓存，
+        不在并发 decide() 里查图。量化经 relationship_context 注入 Prompt，
+        定性额外经 seed_trust 影响打分/信任摘要。
+        """
+        if self.graph is None or not self.agents:
+            return
+        for a in self.agents:
+            allies: list[str] = []
+            foes: list[str] = []
+            try:
+                data = self.graph.get_entity_neighbors(a.entity_id, max_depth=1)
+            except Exception as e:
+                logger.debug("[Simulator] 关系预取失败 %s: %s", a.name, e)
+                continue
+            for nb in data.get("neighbors", []):
+                nm = nb.get("name", "")
+                if not nm or nm == a.name:
+                    continue
+                kind = self._classify_relation(nb.get("relation", ""))
+                if kind == "ally" and nm not in allies:
+                    allies.append(nm)
+                elif kind == "foe" and nm not in foes:
+                    foes.append(nm)
+            parts = []
+            if allies:
+                parts.append("盟友: " + "、".join(allies[:6]))
+            if foes:
+                parts.append("对手: " + "、".join(foes[:6]))
+            self._rel_context[a.entity_id] = {
+                "allies": allies, "opponents": foes, "summary": "；".join(parts)}
+            if allies or foes:
+                self.reasoner.seed_trust(a.entity_id, allies, foes)
+        seeded = sum(1 for v in self._rel_context.values() if v["summary"])
+        if seeded:
+            self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
 
     async def run_round(self, round_number: int) -> SimulationRound:
         if self._quantified:
@@ -247,7 +308,8 @@ class SimulationEngine:
 
         # ── Strategic Reasoning (primary path) ──
         world = {"recent_events": recent_text, "static_knowledge": static_text,
-                  "dynamic_memory": dynamic_text}
+                  "dynamic_memory": dynamic_text,
+                  "relationship_context": self._rel_context.get(agent.entity_id, {}).get("summary", "")}
         try:
             decision = await self.reasoner.reason(agent, world, round_number, client=client)
             sel = decision.get("selected", {})
@@ -320,23 +382,66 @@ class SimulationEngine:
                 for a in alive_agents if a.entity_id != self_id
             ) or "（无其他参与方）"
 
+        from strategy_forge.core.config import config as _cfg
         sem = asyncio.Semaphore(self._max_concurrent)
+
+        async def _recall(agent: DeductionAgentProfile) -> tuple[str, str]:
+            """量化轮的 LanceDB 语义召回：Path A 原著静态(只读，优化器也启用) + Path B 动态事件。"""
+            static_text, dynamic_text = "", ""
+            pp = self._preprocessor
+            if pp is not None and getattr(pp, "result", None):
+                try:
+                    frags = await asyncio.to_thread(
+                        pp.retrieve_for_entity, agent.name, 2,
+                        {agent.name} if agent.name else None)
+                    if frags:
+                        static_text = "\n---\n".join(f[:300] for f in frags)
+                except Exception as e:
+                    logger.debug("[Simulator] 量化静态召回失败 %s: %s", agent.name, e)
+            if self._persist_events and pp is not None:
+                try:
+                    aliases: set[str] = set()
+                    if pp.result:
+                        aliases = set(pp.result.high_freq_entities.get(agent.name, set()))
+                        aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
+                    query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
+                    frags = await asyncio.to_thread(
+                        pp.retrieve_dynamic_events, query, 3,
+                        _cfg.deduction_similarity_threshold)
+                    if frags:
+                        dynamic_text = "\n---\n".join(frags)
+                except Exception as e:
+                    logger.debug("[Simulator] 量化动态召回失败 %s: %s", agent.name, e)
+            elif not self._persist_events:
+                # 隔离模式(蒙特卡洛)：仅用内存事件历史，不触碰 LanceDB 动态表
+                mem = [e for e in self._event_history[-20:]
+                       if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
+                if mem:
+                    dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
+            return static_text, dynamic_text
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any]:
             async with sem:
+                static_text, dynamic_text = await _recall(agent)
                 d = await self.reasoner.reason_quantified(
                     agent, states[agent.entity_id], re_engine,
                     recent_events=recent, other_context=others_ctx(agent.entity_id),
                     round_number=round_number, client=client,
+                    static_knowledge=static_text, dynamic_memory=dynamic_text,
+                    relationship_context=self._rel_context.get(agent.entity_id, {}).get("summary", ""),
                 )
                 d["actor_id"] = agent.entity_id
                 return d
 
         decisions = await asyncio.gather(*[decide(a) for a in ordered])
 
-        # 轮初快照(批量应用语义) + 交互解算
+        # 轮初快照(批量应用语义) + 交互解算（收集逐交互归因，供因果链硬档写入）
         name_to_id = {a.name: a.entity_id for a in self.agents}
-        deltas = re_engine.resolve_round(states, decisions, name_to_id, self._env)
+        deltas, interactions = re_engine.resolve_round(
+            states, decisions, name_to_id, self._env, collect_interactions=True)
+        inter_by_actor: dict[str, list[dict[str, Any]]] = {}
+        for _it in interactions:
+            inter_by_actor.setdefault(_it["actor"], []).append(_it)
         ranges = re_engine.ranges()
         for eid, d in deltas.items():
             if eid in states:
@@ -374,6 +479,36 @@ class SimulationEngine:
                 timestamp=datetime.now().isoformat(),
                 metadata=meta,
             ))
+            # W4: 量化轮事件写入 LanceDB 动态表(仅主推演 persist_events=True；优化器隔离不写)
+            if self._persist_events and self._preprocessor is not None:
+                try:
+                    self._preprocessor.add_event_memory(
+                        content=content, agent_id=actor,
+                        round_number=round_number,
+                        event_type=dec["action_type"], priority=0.5)
+                except Exception as e:
+                    logger.debug("[Simulator] 量化事件写入 LanceDB 失败: %s", e)
+            # B+因果链: 量化轮写 Event 节点 + ACTED 边 + TARGETS/CAUSED(确定性数值归因)
+            # 仅主推演 persist_events=True；优化器隔离不写。
+            if self._persist_events and self.graph is not None:
+                try:
+                    _ts = datetime.now().isoformat()
+                    _eid = f"evt-{uuid.uuid4().hex[:8]}"
+                    _inters = inter_by_actor.get(actor, [])
+                    _primary_tid = _inters[0]["target"] if _inters else ""
+                    self.graph.add_event(_eid, content[:200], dec["action_type"], _ts, actor,
+                                         round_number=round_number, target_id=_primary_tid)
+                    self.graph.add_acted(actor, _eid, dec["action_type"], _ts)
+                    _seen_targets: set[str] = set()
+                    for _it in _inters:
+                        _tid = _it["target"]
+                        if _tid not in _seen_targets:
+                            self.graph.add_targets(_eid, _tid)
+                            _seen_targets.add(_tid)
+                        for _metric, _amount in _it["deltas"].items():
+                            self.graph.add_caused(_eid, _tid, _metric, float(_amount))
+                except Exception as e:
+                    logger.debug("[Simulator] 量化因果写入 Kuzu 失败: %s", e)
             evt_suffix = (f"［{alloc_txt}］" if alloc_txt else "") + (f"（{delta_txt}）" if delta_txt else "")
             self._event_history.append({
                 "agent": actor, "agent_name": nm, "action": dec["action_type"],

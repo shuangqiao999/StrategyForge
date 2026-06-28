@@ -33,6 +33,21 @@ interface LogEntry {
   timestamp: string;
 }
 
+interface TimelineAction { action: string; timestamp: string; description: string; event_type: string; }
+interface AgentTimeline { agent_id: string; agent_name: string; actions: TimelineAction[]; }
+interface TimelineData {
+  timelines: AgentTimeline[];
+  sequence: Array<{ timestamp: string; agent_name: string; action: string; description: string; event_type: string }>;
+}
+
+interface CausalNode { id: string; kind: string; label: string; desc?: string; }
+interface CausalLink { source: string; target: string; type: string; label: string; }
+interface CausalData {
+  nodes: CausalNode[];
+  links: CausalLink[];
+  summary: Array<{ source: string; target: string; metric: string; amount: number }>;
+}
+
 interface ReportData {
   summary?: string;
   key_events?: Array<any>;
@@ -68,7 +83,10 @@ export default function App() {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [report, setReport] = useState<ReportData | null>(null);
-  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "optimize">("graph");
+  const [timeline, setTimeline] = useState<TimelineData | null>(null);
+  const [causal, setCausal] = useState<CausalData | null>(null);
+  const [timelineView, setTimelineView] = useState<"timeline" | "causal">("timeline");
+  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize">("graph");
   const [domain, setDomain] = useState("auto");
   const [enableNarrate, setEnableNarrate] = useState(true);
 
@@ -215,6 +233,30 @@ export default function App() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchTimeline = useCallback(async (sessionId: string) => {
+    try {
+      const r = await fetch(`${API_BASE}/session/${sessionId}/timeline`);
+      if (r.ok) setTimeline(await r.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  const fetchCausal = useCallback(async (sessionId: string) => {
+    try {
+      const r = await fetch(`${API_BASE}/session/${sessionId}/causal`);
+      if (r.ok) setCausal(await r.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  // 运行前把多动作设置写入会话 config_json（普通推演与优化器统一读取）
+  const persistSettings = useCallback(async (sessionId: string) => {
+    try {
+      await fetch(`${API_BASE}/session/${sessionId}/settings`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions }),
+      });
+    } catch { /* ignore */ }
+  }, [optMultiAction, optMaxActions]);
+
   const fetchLogs = useCallback(async (sessionId: string) => {
     try {
       const r = await fetch(`${API_BASE}/session/${sessionId}/logs`);
@@ -239,7 +281,9 @@ export default function App() {
     fetchGraph(id);
     fetchLogs(id);
     fetchReport(id);
-  }, [fetchGraph, fetchLogs, fetchReport]);
+    fetchTimeline(id);
+    fetchCausal(id);
+  }, [fetchGraph, fetchLogs, fetchReport, fetchTimeline, fetchCausal]);
 
   const handleCreate = useCallback(async () => {
     if (!title.trim() || !sourceMaterial.trim()) return;
@@ -290,18 +334,21 @@ export default function App() {
     setLoading(true);
     setLogs([]);
     try {
+      await persistSettings(selectedId);
       const r = await fetch(`${API_BASE}/session/${selectedId}/start`, { method: "POST" });
       if (!r.ok) throw new Error(await r.text());
       await fetchSessions();
       await fetchGraph(selectedId);
       await fetchLogs(selectedId);
       await fetchReport(selectedId);
+      await fetchTimeline(selectedId);
+      await fetchCausal(selectedId);
       setMainTab("report");
     } catch (e: any) {
       alert("推演启动失败: " + (e.message || "未知错误"));
     }
     setLoading(false);
-  }, [selectedId, fetchSessions, fetchGraph, fetchLogs, fetchReport]);
+  }, [selectedId, fetchSessions, fetchGraph, fetchLogs, fetchReport, fetchTimeline, fetchCausal, persistSettings]);
 
   const handleDelete = useCallback(async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -356,9 +403,10 @@ export default function App() {
     if (!optWinCondition.trim() && !window.confirm("未填写胜利条件，将尝试使用会话的推演前目标(pre-goal)。是否继续？")) return;
     setOptRunning(true); setOptReport(null); setOptProgress(null); setMainTab("optimize"); setLogs([]);
     try {
+      await persistSettings(selectedId);
       const r = await fetch(`${API_BASE}/session/${selectedId}/optimize`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenarios, win_condition: optWinCondition, iterations: optIterations, objective: optObjective, enable_multi_action: optMultiAction, max_actions: optMaxActions }),
+        body: JSON.stringify({ scenarios, win_condition: optWinCondition, iterations: optIterations, objective: optObjective }),
       });
       if (!r.ok) throw new Error(await r.text());
       pollOptimize(selectedId);
@@ -366,7 +414,7 @@ export default function App() {
       setOptRunning(false);
       alert("优化启动失败: " + (e.message || "未知错误"));
     }
-  }, [selectedId, optScenarios, optWinCondition, optIterations, optObjective, optMultiAction, optMaxActions, pollOptimize]);
+  }, [selectedId, optScenarios, optWinCondition, optIterations, optObjective, persistSettings, pollOptimize]);
 
   const cancelOptimize = useCallback(async () => {
     if (!selectedId) return;
@@ -409,7 +457,7 @@ export default function App() {
     if (!selected || (selected.status !== "simulating" && selected.status !== "optimizing")) return;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
     es.onmessage = (ev: MessageEvent) => {
-      if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); return; }
+      if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); return; }
       try {
         const d = JSON.parse(ev.data);
         setLogs(prev => [...prev.slice(-200), { phase: d.phase || d.type || "", message: d.message || "", timestamp: d.timestamp || "" }]);
@@ -418,7 +466,7 @@ export default function App() {
     };
     es.onerror = () => { es.close(); };
     return () => es.close();
-  }, [selectedId, sessions, fetchSessions, fetchGraph]);
+  }, [selectedId, sessions, fetchSessions, fetchGraph, fetchTimeline, fetchCausal]);
 
   const selected = sessions.find(s => s.id === selectedId);
 
@@ -518,24 +566,6 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input type="checkbox" checked={optMultiAction} onChange={e => setOptMultiAction(e.target.checked)} style={{ width: 16, height: 16 }} />
-                  <span style={{ color: "#e2e8f0", fontSize: 13 }}>启用资源分配（多动作）</span>
-                  <span style={{ fontSize: 10, color: "#64748b" }}>实验性，默认关闭</span>
-                </label>
-                {optMultiAction && (
-                  <>
-                    <div style={{ marginTop: 6 }}>
-                      <label style={lbl}>每方最多动作数：{optMaxActions}</label>
-                      <input type="range" min={2} max={4} step={1} value={optMaxActions} onChange={e => setOptMaxActions(parseInt(e.target.value))} style={{ width: "100%" }} />
-                    </div>
-                    <div style={{ fontSize: 11, color: "#f59e0b", background: "#1e293b", padding: 8, borderRadius: 4, marginTop: 4 }}>
-                      ⚠️ 启用后每方可同时把资源分配给多个动作（如同时进攻与防守）。会要求 LLM 输出更复杂的分配比例，可能增加决策出错率，建议先用小次数试跑。
-                    </div>
-                  </>
-                )}
-              </div>
-              <div>
                 <label style={lbl}>胜利条件（统一判定标准）</label>
                 <textarea value={optWinCondition} onChange={e => setOptWinCondition(e.target.value)} placeholder="例：核心势力长期存续且主要人物善终（留空则用会话的推演前目标）" style={{ height: 50, fontSize: 12, width: "100%" }} />
               </div>
@@ -618,7 +648,18 @@ export default function App() {
                 {selected.agent_count > 0 && <span className="pill">{selected.agent_count} 智能体</span>}
                 {selected.current_round > 0 && <span className="pill">{selected.current_round}/{selected.total_rounds} 轮</span>}
               </div>
-              <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label title="启用资源分配（多动作）：每方每轮可同时把资源分配给多个动作（如进攻+防守），运行前生效" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#cbd5e1", cursor: "pointer" }}>
+                  <input type="checkbox" checked={optMultiAction} onChange={e => setOptMultiAction(e.target.checked)} />
+                  多动作
+                </label>
+                {optMultiAction && (
+                  <select value={optMaxActions} onChange={e => setOptMaxActions(parseInt(e.target.value))} title="每方最多动作数" style={{ height: 24, fontSize: 11, background: "#0f172a", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+                    <option value={2}>最多2</option>
+                    <option value={3}>最多3</option>
+                    <option value={4}>最多4</option>
+                  </select>
+                )}
                 {optEnabled ? (
                   optRunning ? (
                     <button className="btnSmall" style={{ marginRight: 6, background: "#ef4444", color: "#fff", border: "none" }} onClick={cancelOptimize}>
@@ -645,7 +686,7 @@ export default function App() {
 
             {/* 主区标签切换: 图谱 / 报告 / 日志 */}
             <div style={{ display: "flex", gap: 4, padding: "6px 12px 0" }}>
-              {(["graph", "report", "logs", "optimize"] as const).map(k => (
+              {(["graph", "report", "logs", "timeline", "optimize"] as const).map(k => (
                 <button
                   key={k}
                   onClick={() => setMainTab(k)}
@@ -655,7 +696,7 @@ export default function App() {
                     background: mainTab === k ? "#3b82f6" : "#0f172a",
                     color: mainTab === k ? "#fff" : "#94a3b8",
                   }}
-                >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : "优化"}</button>
+                >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : k === "timeline" ? "时间线" : "优化"}</button>
               ))}
             </div>
 
@@ -757,6 +798,85 @@ export default function App() {
                     <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
                       {selected.status === "complete" ? "暂无报告数据" : "推演完成后将生成报告"}
                     </div>
+                  )}
+                </div>
+              )}
+
+              {mainTab === "timeline" && (
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                    {(["timeline", "causal"] as const).map(v => (
+                      <button key={v} onClick={() => setTimelineView(v)} style={{ padding: "3px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #334155", background: timelineView === v ? "#3b82f6" : "#0f172a", color: timelineView === v ? "#fff" : "#94a3b8" }}>{v === "timeline" ? "时间线" : "因果图"}</button>
+                    ))}
+                  </div>
+                  {timelineView === "timeline" ? (
+                  timeline && (timeline.timelines.length > 0 || timeline.sequence.length > 0) ? (
+                    <>
+                      <div style={{ marginBottom: 18 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>
+                          智能体行动时间线
+                        </div>
+                        {timeline.timelines.map((t, i) => (
+                          <div key={i} style={{ marginBottom: 10, background: "#0f172a", borderRadius: 6, padding: 8 }}>
+                            <div style={{ fontWeight: 600 }}>{t.agent_name}</div>
+                            <ul style={{ margin: "4px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+                              {t.actions.map((a, j) => (
+                                <li key={j}>
+                                  <span style={{ color: "#a78bfa" }}>{a.action}</span>
+                                  {a.event_type ? <span style={{ color: "#64748b" }}> ({a.event_type})</span> : null}
+                                  {a.description ? <span> — {a.description}</span> : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                      {timeline.sequence.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #a78bfa", paddingLeft: 8 }}>事件序列（按时间）</div>
+                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                            {timeline.sequence.map((e, i) => (
+                              <li key={i}><span style={{ color: "#94a3b8" }}>{e.agent_name}</span> {e.action}{e.description ? `: ${e.description}` : ""}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
+                      {selected.status === "complete" ? "暂无行动时序数据" : "推演完成后将生成行动时间线"}
+                    </div>
+                  )
+                  ) : (
+                    causal && causal.nodes.length > 0 ? (
+                      <>
+                        <div style={{ height: 360, marginBottom: 12, background: "#0d1117", borderRadius: 6 }}>
+                          <ForceGraph3D
+                            graphData={{
+                              nodes: causal.nodes.map(n => ({ id: n.id, name: n.label, group: n.kind })),
+                              links: causal.links.map(l => ({ source: l.source, target: l.target, value: l.label })),
+                            }}
+                            nodeLabel={(n: any) => `${n.name}\n${n.group}`}
+                            nodeColor={(n: any) => n.group === "agent" ? "#3b82f6" : n.group === "event" ? "#a78bfa" : "#f59e0b"}
+                            linkLabel={(l: any) => String(l.value)}
+                            linkDirectionalArrowLength={3}
+                            backgroundColor="#0d1117"
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", marginBottom: 6, borderLeft: "3px solid #ef4444", paddingLeft: 8 }}>因果归因（源 → 目标 累计指标影响，负=致衰）</div>
+                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                            {causal.summary.map((s, i) => (
+                              <li key={i}><span style={{ color: "#94a3b8" }}>{s.source}</span> → <span style={{ color: "#94a3b8" }}>{s.target}</span>: {s.metric}{s.amount >= 0 ? "+" : ""}{s.amount}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
+                        {selected.status === "complete" ? "暂无因果数据" : "推演完成后将生成因果图"}
+                      </div>
+                    )
                   )}
                 </div>
               )}

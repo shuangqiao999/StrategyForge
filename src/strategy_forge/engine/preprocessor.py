@@ -6,6 +6,7 @@ This avoids RuntimeError in pytest-asyncio or nested event loops.
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,8 @@ class PreprocessResult:
 
 
 class DeductionPreprocessor:
-    _INDEX_PREFIX_LEN = 600
+    # 嵌入文本上限：放宽到与切片上限(1536)一致，避免长 chunk 只嵌入开头导致召回不全。
+    _INDEX_PREFIX_LEN = 1536
 
     def __init__(self, workspace_root: str | Path, session_id: str) -> None:
         ws = Path(workspace_root)
@@ -41,6 +43,16 @@ class DeductionPreprocessor:
         self._event_table_name: str = ""
         self._dim: int = 0
         self._result: PreprocessResult | None = None
+
+        # 检索加速缓存：chunks 表 preprocess 后不可变 + agent 名/查询高度重复，
+        # 故缓存"查询文本→向量"与"实体召回结果"，在优化器 M×N 并发共享同一
+        # preprocessor 时把重复嵌入/检索降到近零，避免压垮本地嵌入服务。
+        self._cache_lock = threading.Lock()
+        self._embed_cache: dict[str, list[float]] = {}
+        self._recall_cache: dict[tuple, list[str]] = {}
+        self._fts_ready: bool = False
+        self.embed_cache_hits: int = 0
+        self.recall_cache_hits: int = 0
 
         self._embed_config = self._resolve_embed_config()
         self._embed_url = self._resolve_embed_url()
@@ -122,12 +134,21 @@ class DeductionPreprocessor:
     # ── Sync Embedding (no asyncio) ──
 
     def _sync_embed_single(self, text: str) -> list[float]:
+        key = text[:self._INDEX_PREFIX_LEN]
+        with self._cache_lock:
+            cached = self._embed_cache.get(key)
+            if cached is not None:
+                self.embed_cache_hits += 1
+                return cached
         r = self._http.post(self._embed_url, json={
-            "input": text[:self._INDEX_PREFIX_LEN],
+            "input": key,
             "model": self._embed_model,
         }, timeout=60)
         r.raise_for_status()
-        return r.json()["data"][0]["embedding"]
+        vec = r.json()["data"][0]["embedding"]
+        with self._cache_lock:
+            self._embed_cache[key] = vec
+        return vec
 
     def _sync_embed_batch(self, texts: list[str]) -> list[list[float]]:
         r = self._http.post(self._embed_url, json={
@@ -178,9 +199,30 @@ class DeductionPreprocessor:
             }])
 
     def retrieve_latest_intervention(self) -> dict | None:
-        """检索最近的用户干预或不可变目标指令。"""
+        """检索最近的用户干预或不可变目标指令。
+
+        优先用 LanceDB 的 .where() 过滤下推（避免整表 to_arrow 扫描）；不支持时回退全表扫描。
+        """
         if self._event_table is None:
             return None
+        where_clause = ("priority >= 0.9 OR "
+                        "event_type IN ('user_intervention', 'immutable_goal')")
+        try:
+            rows = self._event_table.search().where(where_clause).limit(100).to_list()
+            interventions = [{
+                "content": r.get("content", ""),
+                "round_number": r.get("round_number", 0) or 0,
+                "priority": r.get("priority", 0.0) or 0.0,
+            } for r in rows]
+            if interventions:
+                interventions.sort(key=lambda x: (-x["priority"], -x["round_number"]))
+                return interventions[0]
+            return None
+        except Exception:
+            return self._intervention_scan()
+
+    def _intervention_scan(self) -> dict | None:
+        """回退路径：全表扫描筛选干预/目标（旧实现，兼容不支持 where 的环境）。"""
         try:
             raw = self._event_table.to_arrow().to_pydict()
             has_priority = "priority" in raw
@@ -189,7 +231,6 @@ class DeductionPreprocessor:
             for i in range(len(raw["event_id"])):
                 p = raw.get("priority", [0])[i] if has_priority else 0
                 et = raw.get("event_type", [""])[i] if has_etype else ""
-                # Match: priority >= 0.9 OR event_type is intervention/goal
                 if p >= 0.9 or et in ("user_intervention", "immutable_goal"):
                     interventions.append({
                         "content": raw["content"][i],
@@ -213,9 +254,15 @@ class DeductionPreprocessor:
         except Exception:
             return []
         fetch_k = top_k * 3
+        # 动态召回聚焦"模拟事件"，排除目标/干预(它们已由 retrieve_latest_intervention 单独注入)
+        where_clause = "event_type NOT IN ('immutable_goal', 'user_intervention')"
         try:
-            raw = (self._event_table.search(query_vec).metric("cosine")
-                   .limit(fetch_k).to_list())
+            q = self._event_table.search(query_vec).metric("cosine")
+            try:
+                q = q.where(where_clause)
+            except Exception:
+                pass
+            raw = q.limit(fetch_k).to_list()
         except Exception:
             return []
         if not raw:
@@ -234,18 +281,38 @@ class DeductionPreprocessor:
 
     # ── Static chunk retrieval ──
 
+    def _hybrid_or_vector_search(self, table: Any, query_vec: list[float],
+                                 query_text: str, limit: int) -> list[dict]:
+        """优先混合检索(向量+全文)，失败回退纯向量。仅静态 chunks 表建有 FTS 索引。"""
+        if self._fts_ready and query_text:
+            try:
+                return (table.search(query_type="hybrid")
+                        .vector(query_vec).text(query_text)
+                        .limit(limit).to_list())
+            except Exception as e:
+                logger.debug("[Preprocessor] hybrid search fallback to vector: %s", e)
+        return table.search(query_vec).metric("cosine").limit(limit).to_list()
+
     def retrieve_for_entity(
         self, entity_name: str, top_k: int = 5,
         must_contain: set[str] | None = None,
     ) -> list[str]:
         if self._table is None or self._dim <= 0:
             return []
+        cache_key = (entity_name, top_k, frozenset(must_contain) if must_contain else None)
+        with self._cache_lock:
+            cached = self._recall_cache.get(cache_key)
+            if cached is not None:
+                self.recall_cache_hits += 1
+                return list(cached)
         try:
             query_vec = self._sync_embed_single(entity_name)
         except Exception:
             return []
-        raw = (self._table.search(query_vec).metric("cosine")
-               .limit(top_k * 3).to_list())
+        try:
+            raw = self._hybrid_or_vector_search(self._table, query_vec, entity_name, top_k * 3)
+        except Exception:
+            return []
         results: list[str] = []
         for r in raw:
             content = r.get("content", "")
@@ -257,6 +324,8 @@ class DeductionPreprocessor:
                 results.append(content)
             if len(results) >= top_k:
                 break
+        with self._cache_lock:
+            self._recall_cache[cache_key] = list(results)
         return results
 
     # ── Main preprocessing pipeline ──
@@ -319,6 +388,13 @@ class DeductionPreprocessor:
                 for i in range(len(chunks))]
         self._table.add(rows)
         self._maybe_create_vector_index(self._table, len(rows))
+        # 为静态切片建全文索引，启用混合检索(向量+BM25)；events 表增量追加，不建 FTS。
+        try:
+            self._table.create_fts_index("content", replace=True)
+            self._fts_ready = True
+            logger.info("[Preprocessor] Created FTS index on chunks.content (hybrid search enabled)")
+        except Exception as e:
+            logger.debug("[Preprocessor] FTS index skipped (fallback to vector-only): %s", e)
         logger.info("[Preprocessor] LanceDB indexed %d chunks (dim=%d)", len(rows), dim)
 
         self._result = PreprocessResult(

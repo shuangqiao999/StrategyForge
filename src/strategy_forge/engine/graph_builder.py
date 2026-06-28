@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -222,10 +221,6 @@ async def _extract_from_chunks(
             total_relations += 1
 
         log_fn("graph", f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系")
-
-        # Store chunk node
-        chunk_id = f"chunk-{uuid.uuid4().hex[:8]}"
-        graph.upsert_chunk(chunk_id, text[:500], "source", i)
 
 
 def _normalize_name(name: str, alias_map: dict[str, set[str]]) -> str:
