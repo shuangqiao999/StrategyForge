@@ -87,6 +87,8 @@ class SimulationEngine:
         states: dict[str, Any] | None = None,
         enable_narrate: bool = True,
         env: dict[str, str] | None = None,
+        enable_multi_action: bool = False,
+        max_actions: int = 3,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -106,6 +108,8 @@ class SimulationEngine:
         self._quantified = rule_engine is not None
         self._enable_narrate = enable_narrate
         self._env = env
+        self._enable_multi_action = enable_multi_action
+        self._max_actions = max(1, int(max_actions))
         from strategy_forge.core.config import config
 
         self._max_concurrent = (
@@ -120,6 +124,8 @@ class SimulationEngine:
             chat_fn=chat_fn,
             immutable_goals=self._immutable_goals,
             temperature=temperature,
+            enable_multi_action=self._enable_multi_action,
+            max_actions=self._max_actions,
         )
 
     async def run_round(self, round_number: int) -> SimulationRound:
@@ -343,17 +349,35 @@ class SimulationEngine:
             nm = agent.name if agent else actor[:8]
             d_applied = deltas.get(actor, {})
             delta_txt = ", ".join(f"{k}{v:+.1f}" for k, v in d_applied.items())
-            content = dec.get("rationale", "") or f"{nm} 执行 {dec['action_type']}"
+            alloc = dec.get("actions") or None
+            alloc_txt = ""
+            if alloc:
+                alloc_txt = ", ".join(
+                    f"{a.get('action_type', '')}{float(a.get('weight', 0)):.2f}"
+                    + (f"→{a.get('target')}" if a.get("target") else "")
+                    for a in alloc
+                )
+                content = dec.get("rationale", "") or f"{nm} 资源分配: {alloc_txt}"
+            else:
+                content = dec.get("rationale", "") or f"{nm} 执行 {dec['action_type']}"
+            meta: dict[str, Any] = {
+                "intensity": dec.get("intensity", dec.get("budget", 0.5)),
+                "deltas": d_applied,
+                "metrics": dict(states[actor].metrics) if actor in states else {},
+            }
+            if alloc:
+                meta["budget"] = dec.get("budget", dec.get("intensity", 0.5))
+                meta["allocation"] = alloc
             sim_round.actions.append(SimulationAction(
                 agent_id=actor, action_type=dec["action_type"],
                 target_id=dec.get("target", ""), content=content,
                 timestamp=datetime.now().isoformat(),
-                metadata={"intensity": dec["intensity"], "deltas": d_applied,
-                          "metrics": dict(states[actor].metrics) if actor in states else {}},
+                metadata=meta,
             ))
+            evt_suffix = (f"［{alloc_txt}］" if alloc_txt else "") + (f"（{delta_txt}）" if delta_txt else "")
             self._event_history.append({
                 "agent": actor, "agent_name": nm, "action": dec["action_type"],
-                "content": content + (f"（{delta_txt}）" if delta_txt else ""),
+                "content": content + evt_suffix,
                 "round": round_number,
             })
         if len(self._event_history) > 200:
@@ -387,8 +411,18 @@ class SimulationEngine:
             nm = agent.name if agent else actor[:8]
             d = deltas.get(actor, {})
             chg = ", ".join(f"{k}{v:+.1f}" for k, v in d.items()) or "无显著变化"
-            lines.append(f"{nm} 采取 {dec['action_type']}(强度{dec['intensity']:.1f}) "
-                         f"目标:{dec.get('target') or '—'}，数值变化: {chg}")
+            alloc = dec.get("actions") or None
+            if alloc:
+                budget = float(dec.get("budget", dec.get("intensity", 0.5)))
+                act_txt = "资源分配 " + ", ".join(
+                    f"{a.get('action_type', '')}{float(a.get('weight', 0)):.0%}"
+                    + (f"(→{a.get('target')})" if a.get("target") else "")
+                    for a in alloc
+                ) + f"，总投入{budget:.1f}"
+            else:
+                act_txt = (f"采取 {dec['action_type']}(强度{dec.get('intensity', 0.5):.1f}) "
+                           f"目标:{dec.get('target') or '—'}")
+            lines.append(f"{nm} {act_txt}，数值变化: {chg}")
         prompt = (
             f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的战局叙事（100 字以内）。\n\n"
             "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n只输出叙事段落，不要解释或列表。"

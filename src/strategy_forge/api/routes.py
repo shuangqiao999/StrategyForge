@@ -187,6 +187,8 @@ class OptimizeRequest(BaseModel):
     iterations: int = 20
     objective: str = "balanced"
     max_concurrent: int | None = None
+    enable_multi_action: bool = False
+    max_actions: int = 3
 
 
 def _opt_state(app):
@@ -241,6 +243,15 @@ async def run_optimization(session_id: str, body: OptimizeRequest, request: Requ
             )
 
     iterations = max(1, min(int(body.iterations or 20), 200))
+
+    # 持久化多动作资源分配偏好到会话配置（供优化器与主推演统一读取）
+    cfg_data = engine.session_store.get(session_id)
+    opt_cfg = (cfg_data or {}).get("config_json", {}) or {}
+    if isinstance(opt_cfg, str):
+        opt_cfg = json.loads(opt_cfg)
+    opt_cfg["enable_multi_action"] = bool(body.enable_multi_action)
+    opt_cfg["max_actions"] = max(1, int(body.max_actions or 3))
+    engine.session_store.update(session_id, config_json=json.dumps(opt_cfg, ensure_ascii=False))
 
     from strategy_forge.engine.optimizer import StrategyOptimizer
     optimizer = StrategyOptimizer(engine)

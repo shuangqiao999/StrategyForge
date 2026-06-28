@@ -122,12 +122,19 @@ class StrategyOptimizer:
         # 量化模式：确定规则包 + 建立基线初始状态（只建一次，各次模拟深拷贝隔离）
         rule_engine = None
         base_states: dict[str, Any] = {}
+        enable_multi_action = False
+        max_actions = 3
         try:
             data = self.engine.session_store.get(session_id)
             cfg = (data or {}).get("config_json", {}) or {}
             if isinstance(cfg, str):
                 import json as _json
                 cfg = _json.loads(cfg)
+            enable_multi_action = bool(cfg.get("enable_multi_action", False))
+            try:
+                max_actions = int(cfg.get("max_actions", 3))
+            except (TypeError, ValueError):
+                max_actions = 3
             domain = (cfg.get("domain") or "narrative").strip()
             if domain not in ("", "narrative"):
                 from strategy_forge.engine.rule_engine import RuleEngine
@@ -175,6 +182,7 @@ class StrategyOptimizer:
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
+                        enable_multi_action=enable_multi_action, max_actions=max_actions,
                     )
                     actions: list[Any] = []
                     for rnd in range(1, total_rounds + 1):

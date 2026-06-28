@@ -8,7 +8,11 @@
   由调用方批量应用，避免同轮先手偏差
 - is_alive / judge：阈值存亡 + 结构化胜利条件的客观判胜负（解决评估者悖论）
 
-第一版（MVP）约定：仅使用 action_type + intensity + target；resource_allocation 不参与计算。
+决策契约：
+- 单动作（默认，向后兼容 v2.0）：action_type + intensity + target。
+- 多动作分配（可选）：budget + actions:[{action_type, weight, target}]，
+  按 budget × (weight / Σweight) 把总投入分配给各动作，各动作可带各自 target（多目标）。
+  budget=1 时总投入与单动作 intensity=1 等价（量级中性）。
 """
 from __future__ import annotations
 
@@ -107,17 +111,59 @@ class RuleEngine:
             actor = dec.get("actor_id")
             if actor is None or actor not in snapshot_states:
                 continue
-            action = dec.get("action_type", "observe")
-            intensity = dec.get("intensity", 0.5)
-            self_d, tgt_d = self.compute_deltas(action, intensity, env)
-            _add(actor, self_d)
-            if tgt_d:
-                tid = self._resolve_target(dec.get("target", ""), name_to_id, exclude=actor)
-                if tid and tid in snapshot_states:
-                    _add(tid, tgt_d)
-                elif dec.get("target"):
-                    logger.debug("[RuleEngine] target 未解析/已出局: %s", dec.get("target"))
+            for action, sub_intensity, target in self._iter_subactions(dec):
+                if sub_intensity <= 0:
+                    continue
+                self_d, tgt_d = self.compute_deltas(action, sub_intensity, env)
+                _add(actor, self_d)
+                if tgt_d:
+                    tid = self._resolve_target(target, name_to_id, exclude=actor)
+                    if tid and tid in snapshot_states:
+                        _add(tid, tgt_d)
+                    elif target:
+                        logger.debug("[RuleEngine] target 未解析/已出局: %s", target)
         return result
+
+    @staticmethod
+    def _iter_subactions(dec: dict[str, Any]) -> list[tuple[str, float, str]]:
+        """将决策展开为 [(action_type, sub_intensity, target), ...]。
+
+        - 多动作契约：budget + actions:[{action_type, weight, target}]，
+          按 budget × (weight/Σweight) 分配；权重缺失/全零则在各动作间均分预算。
+        - 旧契约：action_type + intensity + target（视作单元素，与 v2.0 逐字节一致）。
+        """
+        def _legacy() -> list[tuple[str, float, str]]:
+            try:
+                intensity = max(0.0, min(1.0, float(dec.get("intensity", 0.5))))
+            except (TypeError, ValueError):
+                intensity = 0.5
+            return [(str(dec.get("action_type", "observe")), intensity,
+                     str(dec.get("target", "") or "").strip())]
+
+        actions = dec.get("actions")
+        if not isinstance(actions, list) or not actions:
+            return _legacy()
+        try:
+            budget = max(0.0, min(1.0, float(dec.get("budget", dec.get("intensity", 0.5)))))
+        except (TypeError, ValueError):
+            budget = 0.5
+        parsed: list[tuple[str, float, str]] = []
+        for a in actions:
+            if not isinstance(a, dict):
+                continue
+            act = str(a.get("action_type", "observe"))
+            try:
+                w = max(0.0, float(a.get("weight", 0.0)))
+            except (TypeError, ValueError):
+                w = 0.0
+            parsed.append((act, w, str(a.get("target", "") or "").strip()))
+        if not parsed:
+            return _legacy()
+        total = sum(w for _a, w, _t in parsed)
+        if total <= 0:
+            n = len(parsed)
+            return [(act, budget / n, tgt) for act, _w, tgt in parsed]
+        return [(act, budget * (w / total), tgt) for act, w, tgt in parsed]
 
     @staticmethod
     def _resolve_target(tname: str, name_to_id: dict[str, str], exclude: str | None = None) -> str | None:

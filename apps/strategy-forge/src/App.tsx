@@ -76,6 +76,8 @@ export default function App() {
   const [optEnabled, setOptEnabled] = useState(false);
   const [optIterations, setOptIterations] = useState(20);
   const [optObjective, setOptObjective] = useState("balanced");
+  const [optMultiAction, setOptMultiAction] = useState(false);
+  const [optMaxActions, setOptMaxActions] = useState(3);
   const [optWinCondition, setOptWinCondition] = useState("");
   const [optScenarios, setOptScenarios] = useState<Array<{ name: string; directive: string; entity_ref: string }>>([{ name: "方案 1", directive: "", entity_ref: "" }]);
   const [optRunning, setOptRunning] = useState(false);
@@ -356,7 +358,7 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/session/${selectedId}/optimize`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenarios, win_condition: optWinCondition, iterations: optIterations, objective: optObjective }),
+        body: JSON.stringify({ scenarios, win_condition: optWinCondition, iterations: optIterations, objective: optObjective, enable_multi_action: optMultiAction, max_actions: optMaxActions }),
       });
       if (!r.ok) throw new Error(await r.text());
       pollOptimize(selectedId);
@@ -364,7 +366,7 @@ export default function App() {
       setOptRunning(false);
       alert("优化启动失败: " + (e.message || "未知错误"));
     }
-  }, [selectedId, optScenarios, optWinCondition, optIterations, optObjective, pollOptimize]);
+  }, [selectedId, optScenarios, optWinCondition, optIterations, optObjective, optMultiAction, optMaxActions, pollOptimize]);
 
   const cancelOptimize = useCallback(async () => {
     if (!selectedId) return;
@@ -514,6 +516,24 @@ export default function App() {
                   <option value="min_cost">💰 最低成本/风险</option>
                   <option value="balanced">⚖️ 平衡（帕累托最优）</option>
                 </select>
+              </div>
+              <div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={optMultiAction} onChange={e => setOptMultiAction(e.target.checked)} style={{ width: 16, height: 16 }} />
+                  <span style={{ color: "#e2e8f0", fontSize: 13 }}>启用资源分配（多动作）</span>
+                  <span style={{ fontSize: 10, color: "#64748b" }}>实验性，默认关闭</span>
+                </label>
+                {optMultiAction && (
+                  <>
+                    <div style={{ marginTop: 6 }}>
+                      <label style={lbl}>每方最多动作数：{optMaxActions}</label>
+                      <input type="range" min={2} max={4} step={1} value={optMaxActions} onChange={e => setOptMaxActions(parseInt(e.target.value))} style={{ width: "100%" }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#f59e0b", background: "#1e293b", padding: 8, borderRadius: 4, marginTop: 4 }}>
+                      ⚠️ 启用后每方可同时把资源分配给多个动作（如同时进攻与防守）。会要求 LLM 输出更复杂的分配比例，可能增加决策出错率，建议先用小次数试跑。
+                    </div>
+                  </>
+                )}
               </div>
               <div>
                 <label style={lbl}>胜利条件（统一判定标准）</label>

@@ -62,12 +62,14 @@ class StrategicReasoner:
       3. Select best candidate or fall back to LLM tiebreak
     """
 
-    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None, temperature: float = 0.7):
+    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None, temperature: float = 0.7, enable_multi_action: bool = False, max_actions: int = 3):
         self.candidate_count = candidate_count
         self._preprocessor = preprocessor
         self._chat_fn = chat_fn
         self._immutable_goals: list[str] = list(immutable_goals or [])
         self._temperature = temperature
+        self._enable_multi_action = enable_multi_action
+        self._max_actions = max(1, int(max_actions))
         self._trust_matrix: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     def record_interaction(
@@ -201,7 +203,13 @@ class StrategicReasoner:
         recent_events: str = "", other_context: str = "", round_number: int = 0,
         client: Any = None,
     ) -> dict[str, Any]:
-        """量化模式决策：输出 {action_type, target, intensity, rationale}（第一版不含 resource_allocation）。"""
+        """量化模式决策。
+
+        - 单动作（默认）：输出 {action_type, target, intensity, rationale}，与 v2.0 一致。
+        - 多动作分配（self._enable_multi_action）：输出 {budget, actions:[{action_type, weight, target}], rationale}，
+          解析后归一化并裁剪到 max_actions；统一返回时附带 action_type/target/intensity（取主导动作），
+          以兼容下游 SimulationAction 构造与叙事。
+        """
         from ._utils import extract_text
         from .graph_builder import try_extract_json
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
@@ -219,9 +227,11 @@ class StrategicReasoner:
 
         goals = ", ".join(agent.goals) if agent.goals else "依据人格自主行动"
         imm = "；".join(self._immutable_goals) if self._immutable_goals else "无"
-        prompt = (
+        select_hint = ("从可选行动中分配资源给一个或多个动作"
+                       if self._enable_multi_action else "从可选行动中选择一个并给出投入力度")
+        header = (
             f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
-            "请基于你的人格、目标与当前数值状态，从可选行动中选择一个并给出投入力度。\n\n"
+            f"请基于你的人格、目标与当前数值状态，{select_hint}。\n\n"
             f"## 你的人格\n{agent.persona or '（无）'}\n"
             f"## 你的目标\n{goals}\n"
             f"## 不可变战略指令（最高优先级）\n{imm}\n"
@@ -230,11 +240,26 @@ class StrategicReasoner:
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n"
             f"## 近期局势\n{recent_events or '（无）'}\n\n"
             f"## 可选行动\n{rule_engine.action_catalog()}\n\n"
-            '## 输出 JSON（仅 JSON，无解释）\n'
-            '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
-            '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
-            "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
         )
+        if self._enable_multi_action:
+            output_spec = (
+                '## 输出 JSON（仅 JSON，无解释）\n'
+                '{"budget": 0.0到1.0, "actions": ['
+                '{"action_type": "上面之一", "weight": 0.0到1.0, '
+                '"target": "目标方名称(进攻/竞争/外交时填，否则留空)"}], '
+                '"rationale": "20-50字理由"}\n'
+                f"- 最多 {self._max_actions} 个动作，可同时分配资源（如同时进攻与防守，或对不同对手施压）\n"
+                "- budget：本轮总投入力度，0.1=保守，0.5=常规，1.0=倾尽全力\n"
+                "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0"
+            )
+        else:
+            output_spec = (
+                '## 输出 JSON（仅 JSON，无解释）\n'
+                '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
+                '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
+                "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
+            )
+        prompt = header + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"
         llm = client if client is not None else LLMClient()
         try:
@@ -252,6 +277,50 @@ class StrategicReasoner:
             logger.warning("[Reasoner] 量化决策失败，回退 observe: %s", e)
             data = {}
 
+        rationale = str(data.get("rationale", ""))[:120]
+
+        if self._enable_multi_action:
+            try:
+                budget = max(0.0, min(1.0, float(data.get("budget", data.get("intensity", 0.5)))))
+            except (TypeError, ValueError):
+                budget = 0.5
+            subs: list[dict[str, Any]] = []
+            raw_actions = data.get("actions")
+            if isinstance(raw_actions, list):
+                for a in raw_actions:
+                    if not isinstance(a, dict):
+                        continue
+                    act = str(a.get("action_type", "")).strip()
+                    if act not in actions:
+                        continue
+                    try:
+                        w = float(a.get("weight", 0.0))
+                    except (TypeError, ValueError):
+                        w = 0.0
+                    if w <= 0:
+                        continue
+                    subs.append({"action_type": act, "weight": w,
+                                 "target": str(a.get("target", "") or "").strip()})
+            if not subs:
+                return {"action_type": "observe", "target": "", "intensity": budget,
+                        "budget": budget,
+                        "actions": [{"action_type": "observe", "weight": 1.0, "target": ""}],
+                        "rationale": rationale}
+            subs.sort(key=lambda s: s["weight"], reverse=True)
+            subs = subs[: self._max_actions]
+            total = sum(s["weight"] for s in subs) or 1.0
+            for s in subs:
+                s["weight"] = round(s["weight"] / total, 4)
+            primary = subs[0]
+            return {
+                "action_type": primary["action_type"],
+                "target": primary["target"],
+                "intensity": budget,
+                "budget": budget,
+                "actions": subs,
+                "rationale": rationale,
+            }
+
         action = str(data.get("action_type", "observe"))
         if action not in actions:
             action = "observe"
@@ -263,7 +332,7 @@ class StrategicReasoner:
             "action_type": action,
             "target": str(data.get("target", "") or "").strip(),
             "intensity": intensity,
-            "rationale": str(data.get("rationale", ""))[:120],
+            "rationale": rationale,
         }
 
 

@@ -35,6 +35,8 @@ class DeductionOrchestrator:
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
         self._enable_narrate: bool = True
+        self._enable_multi_action: bool = False
+        self._max_actions: int = 3
 
     async def run(self) -> DeductionSession:
         session_id = self.session.id
@@ -81,6 +83,11 @@ class DeductionOrchestrator:
         if isinstance(cfg, str):
             cfg = _json.loads(cfg)
         self._enable_narrate = bool(cfg.get("enable_narrate", True))
+        self._enable_multi_action = bool(cfg.get("enable_multi_action", False))
+        try:
+            self._max_actions = int(cfg.get("max_actions", 3))
+        except (TypeError, ValueError):
+            self._max_actions = 3
         domain = (cfg.get("domain") or "narrative").strip()
         custom = cfg.get("custom_rules")
         if domain in ("", "narrative"):
@@ -216,6 +223,8 @@ class DeductionOrchestrator:
             rule_engine=re_engine,
             states=states if re_engine is not None else None,
             enable_narrate=self._enable_narrate,
+            enable_multi_action=self._enable_multi_action,
+            max_actions=self._max_actions,
         )
 
         rounds: list[SimulationRound] = []
