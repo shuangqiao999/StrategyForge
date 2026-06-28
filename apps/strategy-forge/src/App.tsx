@@ -77,7 +77,7 @@ export default function App() {
   const [optIterations, setOptIterations] = useState(20);
   const [optObjective, setOptObjective] = useState("balanced");
   const [optWinCondition, setOptWinCondition] = useState("");
-  const [optScenarios, setOptScenarios] = useState<Array<{ name: string; directive: string }>>([{ name: "方案 1", directive: "" }]);
+  const [optScenarios, setOptScenarios] = useState<Array<{ name: string; directive: string; entity_ref: string }>>([{ name: "方案 1", directive: "", entity_ref: "" }]);
   const [optRunning, setOptRunning] = useState(false);
   const [optProgress, setOptProgress] = useState<{ done: number; total: number; current: string; best_win: number } | null>(null);
   const [optReport, setOptReport] = useState<any>(null);
@@ -316,12 +316,12 @@ export default function App() {
 
   // ── 策略优化器函数 ──
   const addScenario = useCallback(() => {
-    setOptScenarios(prev => [...prev, { name: `方案 ${prev.length + 1}`, directive: "" }]);
+    setOptScenarios(prev => [...prev, { name: `方案 ${prev.length + 1}`, directive: "", entity_ref: "" }]);
   }, []);
   const removeScenario = useCallback((idx: number) => {
     setOptScenarios(prev => prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx));
   }, []);
-  const updateScenario = useCallback((idx: number, field: "name" | "directive", val: string) => {
+  const updateScenario = useCallback((idx: number, field: "name" | "directive" | "entity_ref", val: string) => {
     setOptScenarios(prev => prev.map((s, i) => i === idx ? { ...s, [field]: val } : s));
   }, []);
 
@@ -346,7 +346,10 @@ export default function App() {
 
   const startOptimize = useCallback(async () => {
     if (!selectedId) return;
-    const scenarios = optScenarios.filter(s => s.directive.trim());
+    const scenarios = optScenarios.filter(s => s.directive.trim()).map(s => ({
+      name: s.name, directive: s.directive,
+      win_target: s.entity_ref.trim() ? { entity_ref: s.entity_ref.trim() } : undefined,
+    }));
     if (scenarios.length === 0) { alert("请至少填写一个方案的策略指令"); return; }
     if (!optWinCondition.trim() && !window.confirm("未填写胜利条件，将尝试使用会话的推演前目标(pre-goal)。是否继续？")) return;
     setOptRunning(true); setOptReport(null); setOptProgress(null); setMainTab("optimize"); setLogs([]);
@@ -525,6 +528,10 @@ export default function App() {
                       <button onClick={() => removeScenario(i)} disabled={optScenarios.length <= 1} style={{ ...btn, height: 26, background: "transparent", color: optScenarios.length <= 1 ? "#475569" : "#f87171", border: "none", cursor: optScenarios.length <= 1 ? "not-allowed" : "pointer" }}>✕</button>
                     </div>
                     <textarea value={s.directive} onChange={e => updateScenario(i, "directive", e.target.value)} placeholder="该方案的战略指令（如：坚决反对招安，独立发展）" style={{ height: 44, fontSize: 12, width: "100%" }} />
+                    <input list={`ents-${i}`} value={s.entity_ref} onChange={e => updateScenario(i, "entity_ref", e.target.value)} placeholder="我方实体（留空=全体存活率；量化模式按此判胜）" style={{ height: 26, fontSize: 12, width: "100%", marginTop: 4 }} />
+                    <datalist id={`ents-${i}`}>
+                      {(graphData?.nodes || []).map(n => <option key={n.id} value={n.name} />)}
+                    </datalist>
                   </div>
                 ))}
                 <button onClick={addScenario} style={{ ...btn, width: "100%", background: "#1e293b", color: "#cbd5e1" }}>＋ 添加方案</button>

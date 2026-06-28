@@ -310,6 +310,7 @@ class StrategyOptimizer:
         objective: str, win_condition: str,
     ) -> dict[str, Any]:
         directive_map = {s.get("name", "方案"): s.get("directive", "") for s in scenarios}
+        ref_map = {s.get("name", "方案"): ((s.get("win_target") or {}).get("entity_ref", "") or "") for s in scenarios}
         grouped: dict[str, list[RunResult]] = {}
         for r in results:
             grouped.setdefault(r.scenario, []).append(r)
@@ -327,6 +328,7 @@ class StrategyOptimizer:
             stats_list.append({
                 "name": name,
                 "directive": directive_map.get(name, ""),
+                "entity_ref": ref_map.get(name, ""),
                 "runs": n,
                 "success_rate": round(succ / n, 4) if n else 0.0,
                 "win_mean": round(mean, 4),
