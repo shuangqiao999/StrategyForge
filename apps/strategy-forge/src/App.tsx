@@ -108,8 +108,6 @@ export default function App() {
   const [domain, setDomain] = useState("auto");
   const [enableNarrate, setEnableNarrate] = useState(true);
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
-  const [weather, setWeather] = useState("");
-  const [terrain, setTerrain] = useState("");
 
   // ── 策略优化器 ──
   const [optEnabled, setOptEnabled] = useState(false);
@@ -292,10 +290,10 @@ export default function App() {
     try {
       await fetch(`${API_BASE}/session/${sessionId}/settings`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions, weather, terrain }),
+        body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions }),
       });
     } catch { /* ignore */ }
-  }, [optMultiAction, optMaxActions, weather, terrain]);
+  }, [optMultiAction, optMaxActions]);
 
   const fetchLogs = useCallback(async (sessionId: string) => {
     try {
@@ -549,24 +547,12 @@ export default function App() {
             <option value="narrative">📖 纯叙事（不量化）</option>
             <option value="custom">✏️ 自定义规则包...</option>
           </select>
-          {/* 环境参数（天气 / 地形） */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <select value={weather} onChange={e => setWeather(e.target.value)} title="天气" style={{ flex: 1, height: 28, fontSize: 12, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
-              <option value="">🌤 天气（无）</option>
-              <option value="clear">☀️ 晴朗</option>
-              <option value="rain">🌧 雨天</option>
-              <option value="snow">❄️ 雪天</option>
-            </select>
-            <select value={terrain} onChange={e => setTerrain(e.target.value)} title="地形" style={{ flex: 1, height: 28, fontSize: 12, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
-              <option value="">🏔 地形（无）</option>
-              <option value="plain">🏞 平原</option>
-              <option value="mountain">⛰ 山地</option>
-              <option value="forest">🌲 森林</option>
-            </select>
-          </div>
-          {/* 自定义规则包上传 */}
-          <div style={{ marginBottom: 6 }}>
-            <label style={{ fontSize: 12, color: "#94a3b8", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+          {domain !== "narrative" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#94a3b8", cursor: "pointer" }}>
+                <Toggle checked={enableNarrate} onChange={setEnableNarrate} />
+                生成叙事解读（关闭可省时）
+              </label>
               <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {
                 const f = e.target.files?.[0]; if (!f) return;
                 const text = await f.text();
@@ -575,14 +561,8 @@ export default function App() {
                 if (r.ok) { await fetchDomains(); alert("规则包已上传并加载"); } else { alert("上传失败: " + (await r.text())); }
                 e.target.value = "";
               }} id="rules-upload" />
-              📤 上传规则包 JSON
-            </label>
-          </div>
-          {domain !== "narrative" && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#94a3b8", marginBottom: 6, cursor: "pointer" }}>
-              <Toggle checked={enableNarrate} onChange={setEnableNarrate} />
-              生成叙事解读（关闭可省时）
-            </label>
+              <label htmlFor="rules-upload" style={{ fontSize: 12, color: "#64748b", cursor: "pointer", borderBottom: "1px dashed #475569", paddingBottom: 1 }}>＋规则包</label>
+            </div>
           )}
           <input
             ref={fileInputRef}
