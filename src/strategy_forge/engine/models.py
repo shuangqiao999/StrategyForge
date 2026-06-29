@@ -140,6 +140,28 @@ class EntityState:
     domain: str = "generic"
     metrics: dict[str, float] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
+    _pending_delays: list[dict[str, Any]] = field(default_factory=list)
+
+    def schedule_delays(self, current_round: int, delay_rounds: int,
+                        effects: dict[str, float]) -> None:
+        """调度延迟效应：在 current_round + delay_rounds 轮结算。"""
+        self._pending_delays.append({
+            "apply_round": current_round + int(delay_rounds),
+            "effects": dict(effects),
+        })
+
+    def resolve_delays(self, current_round: int) -> dict[str, float]:
+        """返回本轮到期的延迟效应累加结果，移除已结算项。"""
+        result: dict[str, float] = {}
+        remaining: list[dict[str, Any]] = []
+        for item in self._pending_delays:
+            if item["apply_round"] <= current_round:
+                for k, v in item["effects"].items():
+                    result[k] = result.get(k, 0.0) + v
+            else:
+                remaining.append(item)
+        self._pending_delays = remaining
+        return result
 
     def get_metric(self, name: str) -> float:
         return self.metrics.get(name, 0.0)

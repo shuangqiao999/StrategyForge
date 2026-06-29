@@ -435,6 +435,17 @@ class SimulationEngine:
 
         decisions = await asyncio.gather(*[decide(a) for a in ordered])
 
+        # ── 轮前：自动效应（条件触发，逐实体结算）+ 延迟效应到期结算 ──
+        ranges = re_engine.ranges()
+        auto_deltas = re_engine.evaluate_auto_effects(states)
+        for eid, d in auto_deltas.items():
+            if eid in states:
+                states[eid].apply_deltas(d, round_number, ranges)
+        for eid, st in states.items():
+            delay_d = st.resolve_delays(round_number)
+            if delay_d:
+                st.apply_deltas(delay_d, round_number, ranges)
+
         # 轮初快照(批量应用语义) + 交互解算（收集逐交互归因，供因果链硬档写入）
         name_to_id = {a.name: a.entity_id for a in self.agents}
         deltas, interactions = re_engine.resolve_round(
@@ -442,10 +453,21 @@ class SimulationEngine:
         inter_by_actor: dict[str, list[dict[str, Any]]] = {}
         for _it in interactions:
             inter_by_actor.setdefault(_it["actor"], []).append(_it)
-        ranges = re_engine.ranges()
         for eid, d in deltas.items():
             if eid in states:
                 states[eid].apply_deltas(d, round_number, ranges)
+
+        # ── 轮后：调度延迟效应（动作触发的 delay_effects）──
+        for dec in decisions:
+            actor = dec.get("actor_id")
+            if actor not in states:
+                continue
+            for action, sub_intensity, _target in re_engine._iter_subactions(dec):
+                delay_cfg = re_engine.pack.get("delay_effects", {}).get(action)
+                if delay_cfg and sub_intensity > 0:
+                    dr = int(delay_cfg.get("delay", 1))
+                    eff = {k: v * sub_intensity for k, v in delay_cfg.get("effects", {}).items()}
+                    states[actor].schedule_delays(round_number, dr, eff)
 
         # 构造行动 + 内存事件历史
         for dec in decisions:

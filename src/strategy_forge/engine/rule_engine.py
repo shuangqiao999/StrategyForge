@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from strategy_forge.core.rule_templates import get_template, list_domains
@@ -53,6 +54,9 @@ class RuleEngine:
         p.setdefault("actions", ["observe"])
         p.setdefault("self_effects", {})
         p.setdefault("target_effects", {})
+        p.setdefault("conditional_effects", {})
+        p.setdefault("delay_effects", {})
+        p.setdefault("auto_effects", {})
         return p
 
     # ── 访问器 ──
@@ -83,11 +87,41 @@ class RuleEngine:
                            metrics={k: float(v) for k, v in self.pack["initial_metrics"].items()})
 
     # ── 单决策 → 增量 ──
+    @staticmethod
+    def _eval_cond(condition: str, state: Any) -> bool:
+        """简单条件表达式求值器：metric op value, 可 and/or 组合。"""
+        if not condition or not isinstance(condition, str):
+            return True
+        for part in condition.split(" or "):
+            subs = part.split(" and ")
+            if all(RuleEngine._eval_atom(a, state) for a in subs):
+                return True
+        return False
+
+    @staticmethod
+    def _eval_atom(atom: str, state: Any) -> bool:
+        m = re.match(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*', atom.strip())
+        if not m:
+            return False
+        metric, op, val = m.group(1), m.group(2), float(m.group(3))
+        mv = state.get_metric(metric)
+        return {"<": mv < val, ">": mv > val, "<=": mv <= val, ">=": mv >= val,
+                "==": mv == val, "!=": mv != val}[op]
+
     def compute_deltas(self, action: str, intensity: float,
-                       env: dict[str, str] | None = None) -> tuple[dict, dict]:
+                       env: dict[str, str] | None = None,
+                       state: Any = None) -> tuple[dict, dict]:
         intensity = max(0.0, min(1.0, float(intensity)))
         self_d = {k: v * intensity for k, v in self.pack["self_effects"].get(action, {}).items()}
         tgt_d = {k: v * intensity for k, v in self.pack["target_effects"].get(action, {}).items()}
+        # 状态依赖条件效应
+        if state is not None:
+            for key, cfg in self.pack.get("conditional_effects", {}).items():
+                if not key.startswith(action):
+                    continue
+                if self._eval_cond(cfg.get("condition", ""), state):
+                    for k, v in cfg.get("self_effects", {}).items():
+                        self_d[k] = self_d.get(k, 0.0) + v * intensity
         if env:
             for key, sel in (("weather_modifiers", env.get("weather")),
                              ("terrain_modifiers", env.get("terrain"))):
@@ -95,6 +129,22 @@ class RuleEngine:
                 for k, v in mods.items():
                     self_d[k] = self_d.get(k, 0.0) + v * intensity
         return self_d, tgt_d
+
+    def evaluate_auto_effects(self, states: dict[str, EntityState]) -> dict[str, dict[str, float]]:
+        """每轮自动效应：按实体评估条件，返回逐实体增量。"""
+        result: dict[str, dict[str, float]] = {}
+        auto = self.pack.get("auto_effects", {})
+        if not auto:
+            return result
+        for eid, st in states.items():
+            deltas: dict[str, float] = {}
+            for _label, cfg in auto.items():
+                if self._eval_cond(cfg.get("condition", ""), st):
+                    for metric, delta in cfg.get("effects", {}).items():
+                        deltas[metric] = deltas.get(metric, 0.0) + float(delta)
+            if deltas:
+                result[eid] = deltas
+        return result
 
     # ── 整轮交互解算（基于快照，批量应用由调用方负责） ──
     def resolve_round(self, snapshot_states: dict[str, EntityState],
@@ -118,7 +168,8 @@ class RuleEngine:
             for action, sub_intensity, target in self._iter_subactions(dec):
                 if sub_intensity <= 0:
                     continue
-                self_d, tgt_d = self.compute_deltas(action, sub_intensity, env)
+                self_d, tgt_d = self.compute_deltas(action, sub_intensity, env,
+                                                       state=snapshot_states.get(actor))
                 _add(actor, self_d)
                 if tgt_d:
                     tid = self._resolve_target(target, name_to_id, exclude=actor)
