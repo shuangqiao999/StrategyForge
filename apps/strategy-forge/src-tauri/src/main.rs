@@ -42,9 +42,9 @@ fn launch_backend() {
                 // 运行期数据：%LOCALAPPDATA%\StrategyForge\data（卸载不丢、无 UAC 虚拟化）
                 let local_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
                 if !local_data.is_empty() {
-                    cmd.env("FORGE_DATA_DIR",
-                            std::path::PathBuf::from(&local_data)
-                                .join("StrategyForge").join("data"));
+                    let data_path = std::path::PathBuf::from(&local_data)
+                        .join("StrategyForge").join("data");
+                    cmd.env("FORGE_DATA_DIR", data_path.to_string_lossy().to_string());
                 }
                 // 内置规则包：安装目录下的 data/rule（只读，随版本更新）
                 cmd.env("FORGE_RULE_DIR", backend_dir.join("data").join("rule"));

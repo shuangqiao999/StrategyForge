@@ -22,7 +22,20 @@ def _get_data_dir() -> Path:
         p = Path(env_data)
         if p.is_absolute():
             return p
+        _log_env_once("FORGE_DATA_DIR", env_data, "not-absolute")
+    else:
+        _log_env_once("FORGE_DATA_DIR", "", "unset")
     return _get_root() / "data"
+
+_data_logged: set = set()
+
+def _log_env_once(key: str, val: str, reason: str):
+    if key in _data_logged:
+        return
+    _data_logged.add(key)
+    import logging
+    logging.getLogger("strategy_forge").info("ENV %s=%s (%s → fallback to %s)",
+        key, val[:80] if val else "(empty)", reason, str(_get_root() / "data" if reason != "unset" else "root/data"))
 
 
 class DeductionConfig:
