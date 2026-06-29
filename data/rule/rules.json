@@ -1,0 +1,120 @@
+{
+  "military": {
+    "name": "\u2694\ufe0f \u519b\u4e8b\u6218\u4e89",
+    "domain": "military",
+    "display_name": "\u519b\u4e8b\u6218\u4e89",
+    "metrics": ["strength", "morale", "supply", "fatigue", "leadership"],
+    "initial_metrics": {"strength": 100, "morale": 80, "supply": 90, "fatigue": 10, "leadership": 70},
+    "thresholds": {"strength": 10, "morale": 10},
+    "actions": ["attack", "defend", "invest", "maneuver", "diplomacy", "observe"],
+    "self_effects": {
+      "attack":    {"strength": -12, "supply": -10, "fatigue": 8, "morale": 5},
+      "defend":    {"strength": -5, "morale": -3, "fatigue": 2, "supply": -2},
+      "invest":    {"supply": -15, "strength": 8, "morale": 5, "fatigue": -3},
+      "maneuver":  {"supply": -6, "fatigue": 5},
+      "diplomacy": {"morale": 3, "supply": -2},
+      "observe":   {"fatigue": -4}
+    },
+    "target_effects": {
+      "attack":    {"strength": -18, "morale": -8, "supply": -5},
+      "maneuver":  {"morale": -3},
+      "diplomacy": {"morale": 2}
+    },
+    "weather_modifiers": {
+      "rain":  {"morale": -5, "supply": -8},
+      "snow":  {"fatigue": 10, "supply": -12},
+      "clear": {"morale": 3, "fatigue": -3}
+    },
+    "terrain_modifiers": {
+      "mountain": {"fatigue": 8, "strength": -5},
+      "plain":    {"morale": 3},
+      "forest":   {"supply": 3, "strength": -3}
+    }
+  },
+  "business": {
+    "name": "\ud83d\udcca \u5546\u4e1a\u7ade\u4e89",
+    "domain": "business",
+    "display_name": "\u5546\u4e1a\u7ade\u4e89",
+    "metrics": ["market_share", "cash_flow", "brand", "rnd", "morale"],
+    "initial_metrics": {"market_share": 20, "cash_flow": 60, "brand": 60, "rnd": 50, "morale": 65},
+    "thresholds": {"cash_flow": 10, "market_share": 5},
+    "actions": ["price_war", "invest_rnd", "marketing", "expand", "partner", "observe"],
+    "self_effects": {
+      "price_war":  {"cash_flow": -15, "market_share": 8, "brand": -5},
+      "invest_rnd": {"cash_flow": -12, "rnd": 12, "morale": 3},
+      "marketing":  {"cash_flow": -8, "brand": 10, "market_share": 4},
+      "expand":     {"cash_flow": -18, "market_share": 6, "morale": -3},
+      "partner":    {"cash_flow": 5, "brand": 4},
+      "observe":    {"cash_flow": 2}
+    },
+    "target_effects": {
+      "price_war": {"market_share": -10, "cash_flow": -6},
+      "marketing": {"market_share": -4},
+      "expand":    {"market_share": -5}
+    }
+  },
+  "politics": {
+    "name": "\ud83c\udfdb\ufe0f \u653f\u6cbb\u535a\u5f08",
+    "domain": "politics",
+    "display_name": "\u653f\u6cbb\u535a\u5f08",
+    "metrics": ["support_rate", "legislative_power", "intl_relations", "economy", "unity"],
+    "initial_metrics": {"support_rate": 50, "legislative_power": 40, "intl_relations": 60, "economy": 55, "unity": 60},
+    "thresholds": {"support_rate": 10},
+    "actions": ["campaign", "legislate", "diplomacy", "reform", "attack_opponent", "observe"],
+    "self_effects": {
+      "campaign":        {"support_rate": 10, "economy": -5, "unity": -3},
+      "legislate":       {"legislative_power": 8, "support_rate": -4},
+      "diplomacy":       {"intl_relations": 10, "support_rate": 2},
+      "reform":          {"economy": 10, "support_rate": -6, "unity": -4},
+      "attack_opponent": {"support_rate": 3, "unity": -5},
+      "observe":         {"unity": 2}
+    },
+    "target_effects": {
+      "attack_opponent": {"support_rate": -8, "unity": -5},
+      "campaign":        {"support_rate": -3},
+      "legislate":       {"legislative_power": -4}
+    }
+  },
+  "ecology": {
+    "name": "\ud83c\udf3f \u751f\u6001\u73af\u5883",
+    "domain": "ecology",
+    "display_name": "\u751f\u6001\u73af\u5883",
+    "metrics": ["population", "resources", "pollution", "biodiversity", "stability"],
+    "initial_metrics": {"population": 60, "resources": 70, "pollution": 20, "biodiversity": 65, "stability": 60},
+    "thresholds": {"population": 10, "resources": 5},
+    "actions": ["exploit", "conserve", "pollute_control", "expand_habitat", "compete", "observe"],
+    "self_effects": {
+      "exploit":         {"resources": -15, "population": 8, "pollution": 10},
+      "conserve":        {"resources": 10, "biodiversity": 8, "population": -2},
+      "pollute_control": {"pollution": -15, "resources": -8, "stability": 5},
+      "expand_habitat":  {"population": 10, "resources": -10},
+      "compete":         {"population": 5, "biodiversity": -5},
+      "observe":         {"stability": 2}
+    },
+    "target_effects": {
+      "compete": {"population": -8, "resources": -5},
+      "exploit": {"resources": -6}
+    }
+  },
+  "urban": {
+    "name": "\ud83c\udfd9\ufe0f \u57ce\u5e02\u89c4\u5212",
+    "domain": "urban",
+    "display_name": "\u57ce\u5e02\u89c4\u5212",
+    "metrics": ["population", "employment", "infrastructure", "finance", "satisfaction"],
+    "initial_metrics": {"population": 50, "employment": 60, "infrastructure": 50, "finance": 55, "satisfaction": 60},
+    "thresholds": {"finance": 10, "satisfaction": 10},
+    "actions": ["build_infra", "develop_industry", "welfare", "attract_talent", "regulate", "observe"],
+    "self_effects": {
+      "build_infra":      {"finance": -15, "infrastructure": 12, "satisfaction": 5},
+      "develop_industry": {"finance": -10, "employment": 10, "population": 5, "satisfaction": -2},
+      "welfare":          {"finance": -12, "satisfaction": 12},
+      "attract_talent":   {"finance": -8, "population": 8, "employment": 4},
+      "regulate":         {"satisfaction": -4, "finance": 5, "infrastructure": 2},
+      "observe":          {"finance": 2}
+    },
+    "target_effects": {
+      "attract_talent":   {"population": -6, "employment": -4},
+      "develop_industry": {"population": -3}
+    }
+  }
+}

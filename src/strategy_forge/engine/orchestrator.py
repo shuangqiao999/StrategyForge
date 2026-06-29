@@ -88,6 +88,8 @@ class DeductionOrchestrator:
             self._max_actions = int(cfg.get("max_actions", 3))
         except (TypeError, ValueError):
             self._max_actions = 3
+        self._weather = str(cfg.get("weather", "") or "").strip()
+        self._terrain = str(cfg.get("terrain", "") or "").strip()
         domain = (cfg.get("domain") or "narrative").strip()
         custom = cfg.get("custom_rules")
         if domain in ("", "narrative"):
@@ -225,6 +227,7 @@ class DeductionOrchestrator:
             enable_narrate=self._enable_narrate,
             enable_multi_action=self._enable_multi_action,
             max_actions=self._max_actions,
+            env={"weather": self._weather, "terrain": self._terrain} if (self._weather or self._terrain) else None,
         )
 
         rounds: list[SimulationRound] = []

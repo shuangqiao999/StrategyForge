@@ -1,25 +1,30 @@
-"""内置领域规则包（量化推演 L2 模板）。
+"""领域规则包 — JSON 外部化 + 动态加载 + 缓存。
 
-规则包数据驱动 EntityState：metrics / initial_metrics / metric_ranges / thresholds /
-actions / self_effects(作用于自身) / target_effects(作用于目标) / weather/terrain 修正。
-新增领域只需在此添加一个条目（或由用户上传自定义 JSON 覆盖），无需改引擎代码。
+规则包以 JSON 文件存放在 data/rule/ 目录下：
+  data/rule/rules.json           — 内置默认规则包（所有领域在一份文件）
+  data/rule/custom/*.json        — 用户自定义规则包（上传 / 手动放置）
 
-约定：
-- 数值为 0-100 归一化（除非 metric_ranges 另行指定）。
-- thresholds: 指标 <= 阈值即判该实体出局(not alive)；只对"越高越好且代表存亡"的指标设置。
-- self_effects / target_effects 的数值为"满强度(intensity=1)"基准，实际按 intensity 线性缩放。
+启动时自动加载；无文件时回退到 FALLBACK_RULES（与旧版 RULE_TEMPLATES 一致，保证向后兼容）。
 """
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 from typing import Any
+
+from .config import _get_data_dir
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_RANGE = [0.0, 100.0]
 
-
-RULE_TEMPLATES: dict[str, dict[str, Any]] = {
+# 最小硬编码兜底（与旧版 RULE_TEMPLATES 逐字一致，确保降级安全）
+_FALLBACK_RULES: dict[str, dict[str, Any]] = {
     "military": {
+        "name": "\u2694\ufe0f \u519b\u4e8b\u6218\u4e89",
         "domain": "military",
-        "display_name": "军事战争",
+        "display_name": "\u519b\u4e8b\u6218\u4e89",
         "metrics": ["strength", "morale", "supply", "fatigue", "leadership"],
         "initial_metrics": {"strength": 100, "morale": 80, "supply": 90, "fatigue": 10, "leadership": 70},
         "thresholds": {"strength": 10, "morale": 10},
@@ -48,10 +53,10 @@ RULE_TEMPLATES: dict[str, dict[str, Any]] = {
             "forest": {"supply": 3, "strength": -3},
         },
     },
-
     "business": {
+        "name": "\ud83d\udcca \u5546\u4e1a\u7ade\u4e89",
         "domain": "business",
-        "display_name": "商业竞争",
+        "display_name": "\u5546\u4e1a\u7ade\u4e89",
         "metrics": ["market_share", "cash_flow", "brand", "rnd", "morale"],
         "initial_metrics": {"market_share": 20, "cash_flow": 60, "brand": 60, "rnd": 50, "morale": 65},
         "thresholds": {"cash_flow": 10, "market_share": 5},
@@ -70,10 +75,10 @@ RULE_TEMPLATES: dict[str, dict[str, Any]] = {
             "expand": {"market_share": -5},
         },
     },
-
     "politics": {
+        "name": "\ud83c\udfdb\ufe0f \u653f\u6cbb\u535a\u5f08",
         "domain": "politics",
-        "display_name": "政治博弈",
+        "display_name": "\u653f\u6cbb\u535a\u5f08",
         "metrics": ["support_rate", "legislative_power", "intl_relations", "economy", "unity"],
         "initial_metrics": {"support_rate": 50, "legislative_power": 40, "intl_relations": 60, "economy": 55, "unity": 60},
         "thresholds": {"support_rate": 10},
@@ -92,10 +97,10 @@ RULE_TEMPLATES: dict[str, dict[str, Any]] = {
             "legislate": {"legislative_power": -4},
         },
     },
-
     "ecology": {
+        "name": "\ud83c\udf3f \u751f\u6001\u73af\u5883",
         "domain": "ecology",
-        "display_name": "生态环境",
+        "display_name": "\u751f\u6001\u73af\u5883",
         "metrics": ["population", "resources", "pollution", "biodiversity", "stability"],
         "initial_metrics": {"population": 60, "resources": 70, "pollution": 20, "biodiversity": 65, "stability": 60},
         "thresholds": {"population": 10, "resources": 5},
@@ -113,10 +118,10 @@ RULE_TEMPLATES: dict[str, dict[str, Any]] = {
             "exploit": {"resources": -6},
         },
     },
-
     "urban": {
+        "name": "\ud83c\udfd9\ufe0f \u57ce\u5e02\u89c4\u5212",
         "domain": "urban",
-        "display_name": "城市规划",
+        "display_name": "\u57ce\u5e02\u89c4\u5212",
         "metrics": ["population", "employment", "infrastructure", "finance", "satisfaction"],
         "initial_metrics": {"population": 50, "employment": 60, "infrastructure": 50, "finance": 55, "satisfaction": 60},
         "thresholds": {"finance": 10, "satisfaction": 10},
@@ -136,11 +141,75 @@ RULE_TEMPLATES: dict[str, dict[str, Any]] = {
     },
 }
 
+# ── 动态加载缓存 ──
+_RULE_CACHE: dict[str, dict[str, Any]] = {}
 
-def list_domains() -> list[dict[str, str]]:
-    """供前端下拉使用的领域清单。"""
-    return [{"domain": k, "display_name": v["display_name"]} for k, v in RULE_TEMPLATES.items()]
+
+def _load_json_file(path: Path) -> dict[str, dict[str, Any]] | None:
+    """加载单个 JSON 文件，返回 domain→rule 映射。"""
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except Exception:
+        logger.debug("[rule_templates] 无法加载 %s，跳过", path)
+        return None
+    # 支持两份格式：{"domain1":{...}, "domain2":{...}} 或 {"domain":"...", ...}
+    if all(isinstance(v, dict) and ("domain" in v or "metrics" in v) for v in data.values()):
+        rules: dict[str, dict[str, Any]] = {}
+        for k, v in data.items():
+            dom = v.get("domain", k)
+            if "name" not in v:
+                v["name"] = v.get("display_name", dom)
+            rules[dom] = v
+        return rules
+    if isinstance(data, dict) and "domain" in data:
+        dom = data.get("domain", "")
+        if dom:
+            if "name" not in data:
+                data["name"] = data.get("display_name", dom)
+            return {dom: data}
+    return None
+
+
+def reload_rules() -> None:
+    """重新扫描 data/rule/ 并加载所有规则包（含内置 rules.json 与 custom/）。"""
+    global _RULE_CACHE
+    try:
+        rule_dir = _get_data_dir() / "rule"
+    except Exception:
+        logger.warning("[rule_templates] 无法确定数据目录，使用兜底规则")
+        _RULE_CACHE = dict(_FALLBACK_RULES)
+        return
+
+    loaded: dict[str, dict[str, Any]] = {}
+    if rule_dir.exists():
+        # 1) 内置
+        default_file = rule_dir / "rules.json"
+        if default_file.exists():
+            rules = _load_json_file(default_file)
+            if rules:
+                loaded.update(rules)
+                logger.info("[rule_templates] 加载内置规则: %d 个领域", len(rules))
+        # 2) 用户自定义
+        custom_dir = rule_dir / "custom"
+        if custom_dir.is_dir():
+            for f in sorted(custom_dir.glob("*.json")):
+                rules = _load_json_file(f)
+                if rules:
+                    loaded.update(rules)
+                    logger.info("[rule_templates] 加载自定义规则: %s", f.name)
+
+    _RULE_CACHE = loaded if loaded else dict(_FALLBACK_RULES)
 
 
 def get_template(domain: str) -> dict[str, Any] | None:
-    return RULE_TEMPLATES.get(domain)
+    return _RULE_CACHE.get(domain)
+
+
+def list_domains() -> list[dict[str, str]]:
+    """供前端下拉使用的领域清单。优先使用 name 字段。"""
+    return [{"domain": k, "name": v.get("name", v.get("display_name", k))}
+            for k, v in _RULE_CACHE.items()]
+
+
+# ── 模块加载即初始化 ──
+reload_rules()

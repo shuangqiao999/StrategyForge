@@ -89,6 +89,9 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize">("graph");
   const [domain, setDomain] = useState("auto");
   const [enableNarrate, setEnableNarrate] = useState(true);
+  const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
+  const [weather, setWeather] = useState("");
+  const [terrain, setTerrain] = useState("");
 
   // ── 策略优化器 ──
   const [optEnabled, setOptEnabled] = useState(false);
@@ -166,6 +169,9 @@ export default function App() {
     tick();
     return () => { cancelled = true; };
   }, [fetchConfig]);
+
+  // 动态加载规则包领域列表（内置 + 自定义），解耦前端硬编码
+  useEffect(() => { fetchDomains(); }, []);
 
   const fetchModels = useCallback(async () => {
     const base = settingsTab === "llm" ? cfgLLMBase : cfgEmbedBase;
@@ -256,15 +262,22 @@ export default function App() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchDomains = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/domains`);
+      if (r.ok) setDomains((await r.json()).domains || []);
+    } catch { /* ignore */ }
+  }, []);
+
   // 运行前把多动作设置写入会话 config_json（普通推演与优化器统一读取）
   const persistSettings = useCallback(async (sessionId: string) => {
     try {
       await fetch(`${API_BASE}/session/${sessionId}/settings`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions }),
+        body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions, weather, terrain }),
       });
     } catch { /* ignore */ }
-  }, [optMultiAction, optMaxActions]);
+  }, [optMultiAction, optMaxActions, weather, terrain]);
 
   const fetchLogs = useCallback(async (sessionId: string) => {
     try {
@@ -514,13 +527,39 @@ export default function App() {
             style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 12 }}
           >
             <option value="auto">🤖 自动识别领域（量化）</option>
-            <option value="military">⚔️ 军事战争</option>
-            <option value="business">📊 商业竞争</option>
-            <option value="politics">🏛️ 政治博弈</option>
-            <option value="ecology">🌿 生态环境</option>
-            <option value="urban">🏙️ 城市规划</option>
+            {domains.map(d => <option key={d.domain} value={d.domain}>{d.name}</option>)}
             <option value="narrative">📖 纯叙事（不量化）</option>
+            <option value="custom">✏️ 自定义规则包...</option>
           </select>
+          {/* 环境参数（天气 / 地形） */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+            <select value={weather} onChange={e => setWeather(e.target.value)} title="天气" style={{ flex: 1, height: 28, fontSize: 11, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+              <option value="">🌤 天气（无）</option>
+              <option value="clear">☀️ 晴朗</option>
+              <option value="rain">🌧 雨天</option>
+              <option value="snow">❄️ 雪天</option>
+            </select>
+            <select value={terrain} onChange={e => setTerrain(e.target.value)} title="地形" style={{ flex: 1, height: 28, fontSize: 11, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+              <option value="">🏔 地形（无）</option>
+              <option value="plain">🏞 平原</option>
+              <option value="mountain">⛰ 山地</option>
+              <option value="forest">🌲 森林</option>
+            </select>
+          </div>
+          {/* 自定义规则包上传 */}
+          <div style={{ marginBottom: 6 }}>
+            <label style={{ fontSize: 11, color: "#94a3b8", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {
+                const f = e.target.files?.[0]; if (!f) return;
+                const text = await f.text();
+                try { JSON.parse(text); } catch { alert("无效 JSON 文件"); return; }
+                const r = await fetch(`${API_BASE}/rules/upload`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ domain: f.name.replace(".json",""), content: text }) });
+                if (r.ok) { await fetchDomains(); alert("规则包已上传并加载"); } else { alert("上传失败: " + (await r.text())); }
+                e.target.value = "";
+              }} id="rules-upload" />
+              📤 上传规则包 JSON
+            </label>
+          </div>
           {domain !== "narrative" && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
               <input type="checkbox" checked={enableNarrate} onChange={e => setEnableNarrate(e.target.checked)} />

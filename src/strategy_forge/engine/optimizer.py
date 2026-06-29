@@ -124,6 +124,7 @@ class StrategyOptimizer:
         base_states: dict[str, Any] = {}
         enable_multi_action = False
         max_actions = 3
+        opt_env: dict[str, str] | None = None
         try:
             data = self.engine.session_store.get(session_id)
             cfg = (data or {}).get("config_json", {}) or {}
@@ -135,6 +136,9 @@ class StrategyOptimizer:
                 max_actions = int(cfg.get("max_actions", 3))
             except (TypeError, ValueError):
                 max_actions = 3
+            weather = str(cfg.get("weather", "") or "").strip()
+            terrain = str(cfg.get("terrain", "") or "").strip()
+            opt_env = {"weather": weather, "terrain": terrain} if (weather or terrain) else None
             domain = (cfg.get("domain") or "narrative").strip()
             if domain not in ("", "narrative"):
                 from strategy_forge.engine.rule_engine import RuleEngine
@@ -183,6 +187,7 @@ class StrategyOptimizer:
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
+                        env=opt_env,
                     )
                     actions: list[Any] = []
                     for rnd in range(1, total_rounds + 1):
@@ -264,6 +269,7 @@ class StrategyOptimizer:
                         seed=20240101, temperature=0.6, persist_events=True, max_concurrent=1,
                         rule_engine=rule_engine, states=rep_states, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
+                        env=opt_env,
                     )
                     rep_rounds = []
                     for rnd in range(1, total_rounds + 1):

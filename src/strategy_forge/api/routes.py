@@ -192,6 +192,8 @@ class OptimizeRequest(BaseModel):
 class SettingsRequest(BaseModel):
     enable_multi_action: bool = False
     max_actions: int = 3
+    weather: str = ""
+    terrain: str = ""
 
 
 def _opt_state(app):
@@ -374,9 +376,44 @@ async def update_settings(session_id: str, req: SettingsRequest, request: Reques
         config = json.loads(config)
     config["enable_multi_action"] = bool(req.enable_multi_action)
     config["max_actions"] = max(1, int(req.max_actions or 3))
+    config["weather"] = (req.weather or "").strip()
+    config["terrain"] = (req.terrain or "").strip()
     engine.session_store.update(session_id, config_json=json.dumps(config, ensure_ascii=False))
     return {"session_id": session_id, "enable_multi_action": config["enable_multi_action"],
-            "max_actions": config["max_actions"]}
+            "max_actions": config["max_actions"], "weather": config["weather"], "terrain": config["terrain"]}
+
+
+@router.get("/domains")
+async def list_domains_route():
+    """返回所有已加载规则包的 domain / name 列表（内置 + 自定义）。"""
+    from strategy_forge.core.rule_templates import list_domains as get_domains
+    return {"domains": get_domains()}
+
+
+class RulesUpload(BaseModel):
+    domain: str
+    content: str  # JSON 文本（前端 readAsText 或直接传字符串）
+
+
+@router.post("/rules/upload")
+async def upload_rules(body: RulesUpload, request: Request):
+    """上传/覆盖自定义规则包 JSON。保存到 data/rule/custom/{domain}.json 并重载缓存。"""
+    dom = (body.domain or "").strip()
+    if not dom:
+        raise HTTPException(400, "domain 不能为空")
+    try:
+        rule = json.loads(body.content)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "content 无效 JSON")
+    if "domain" not in rule:
+        rule["domain"] = dom
+    from strategy_forge.core.config import config
+    from strategy_forge.core.rule_templates import reload_rules
+    out_dir = Path(config.deduction_data_dir) / "rule" / "custom"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{dom}.json").write_text(json.dumps(rule, indent=2, ensure_ascii=False), encoding="utf-8")
+    reload_rules()
+    return {"status": "ok", "domain": dom}
 
 
 # ── Data export ──

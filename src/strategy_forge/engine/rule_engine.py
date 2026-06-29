@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from strategy_forge.core.rule_templates import RULE_TEMPLATES, list_domains
+from strategy_forge.core.rule_templates import get_template, list_domains
 
 from .models import EntityState
 
@@ -34,7 +34,7 @@ class RuleEngine:
     # ── 构造 ──
     @classmethod
     def from_domain(cls, domain: str) -> "RuleEngine":
-        tpl = RULE_TEMPLATES.get(domain)
+        tpl = get_template(domain)
         if tpl is None:
             raise ValueError(f"未知领域规则包: {domain}")
         return cls(tpl)
@@ -256,7 +256,7 @@ class RuleEngine:
             if isinstance(data, dict):
                 dom = str(data.get("domain", "narrative"))
                 conf = float(data.get("confidence", 0.0))
-                if dom in RULE_TEMPLATES and conf >= confidence_floor:
+                if get_template(dom) is not None and conf >= confidence_floor:
                     return dom
         except Exception as e:
             logger.warning("[RuleEngine] detect_domain 失败，回退叙事: %s", e)
