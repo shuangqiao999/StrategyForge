@@ -110,6 +110,15 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const graphRef = useRef<any>(null);
+  const causalGraphRef = useRef<any>(null);
+
+  const zoomGraph = (rf: React.RefObject<any>, factor: number) => {
+    const fg = rf.current; if (!fg) return;
+    const pos = fg.cameraPosition();
+    fg.cameraPosition({ x: pos.x * factor, y: pos.y * factor, z: pos.z * factor }, { x: 0, y: 0, z: 0 } as any, 300);
+  };
+  const resetGraph = (rf: React.RefObject<any>) => { rf.current?.zoomToFit(400, 50); };
 
   // ── Settings ──
   const [showSettings, setShowSettings] = useState(false);
@@ -703,23 +712,36 @@ export default function App() {
             <div style={{ overflow: "auto", position: "relative", background: mainTab === "graph" ? "#0d1117" : "transparent" }}>
               {mainTab === "graph" && (
                 graphData && graphData.nodes.length > 0 ? (
-                  <ForceGraph3D
-                    graphData={{
-                      nodes: graphData.nodes.map(n => ({ id: n.id, name: n.name, group: n.type, desc: n.description })),
-                      links: graphData.links.map(l => ({ source: l.source, target: l.target, value: l.relation })),
-                    }}
-                    nodeLabel={(n: any) => `${n.name}\n${n.group}`}
-                    nodeColor={(n: any) => {
-                      const colors: Record<string, string> = { Person: "#60a5fa", Organization: "#f59e0b", Event: "#ef4444", Concept: "#34d399", Location: "#a78bfa" };
-                      return colors[n.group] || "#94a3b8";
-                    }}
-                    nodeVal={(n: any) => (graphData.links.filter(l => l.source === n.id || l.target === n.id).length || 1) * 2}
-                    linkLabel={(l: any) => String(l.value)}
-                    linkWidth={0.5}
-                    backgroundColor="#0d1117"
-                    width={window.innerWidth - 340}
-                    height={520}
-                  />
+                  <div style={{ width: "100%", height: "100%", position: "relative" }}>
+                    <ForceGraph3D
+                      ref={graphRef}
+                      graphData={{
+                        nodes: graphData.nodes.map(n => ({ id: n.id, name: n.name, group: n.type, desc: n.description })),
+                        links: graphData.links.map(l => ({ source: l.source, target: l.target, value: l.relation })),
+                      }}
+                      nodeLabel={(n: any) => `${n.name}\n${n.group}`}
+                      nodeColor={(n: any) => {
+                        const colors: Record<string, string> = { Person: "#60a5fa", Organization: "#f59e0b", Event: "#ef4444", Concept: "#34d399", Location: "#a78bfa" };
+                        return colors[n.group] || "#94a3b8";
+                      }}
+                      nodeVal={(n: any) => (graphData.links.filter(l => l.source === n.id || l.target === n.id).length || 1) * 2}
+                      linkLabel={(l: any) => String(l.value)}
+                      linkWidth={0.5}
+                      backgroundColor="#0d1117"
+                    />
+                    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
+                      {[
+                        { label: "＋", title: "放大", onClick: () => zoomGraph(graphRef, 0.7) },
+                        { label: "−", title: "缩小", onClick: () => zoomGraph(graphRef, 1.4) },
+                        { label: "⊡", title: "重置视图（显示全部节点与连线）", onClick: () => resetGraph(graphRef) },
+                      ].map(b => (
+                        <button key={b.label} title={b.title} onClick={b.onClick}
+                          style={{ width: 28, height: 28, borderRadius: 4, cursor: "pointer", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", border: "1px solid #334155", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ color: "#64748b", textAlign: "center", paddingTop: 200, fontSize: 14 }}>
                     {selected.status === "created" ? "上传文档或粘贴原文后启动推演" : "推演进行中或暂无图谱数据..."}
@@ -728,7 +750,7 @@ export default function App() {
               )}
 
               {mainTab === "report" && (
-                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13 }}>
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, overflowY: "auto" }}>
                   {report ? (
                     <>
                       {report.quantified && report.final_states && (
@@ -803,12 +825,13 @@ export default function App() {
               )}
 
               {mainTab === "timeline" && (
-                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13 }}>
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, display: "flex", flexDirection: "column", height: "100%" }}>
                   <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
                     {(["timeline", "causal"] as const).map(v => (
                       <button key={v} onClick={() => setTimelineView(v)} style={{ padding: "3px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #334155", background: timelineView === v ? "#3b82f6" : "#0f172a", color: timelineView === v ? "#fff" : "#94a3b8" }}>{v === "timeline" ? "时间线" : "因果图"}</button>
                     ))}
                   </div>
+                  <div style={{ flex: 1, overflow: "auto" }}>
                   {timelineView === "timeline" ? (
                   timeline && (timeline.timelines.length > 0 || timeline.sequence.length > 0) ? (
                     <>
@@ -850,8 +873,9 @@ export default function App() {
                   ) : (
                     causal && causal.nodes.length > 0 ? (
                       <>
-                        <div style={{ height: 360, marginBottom: 12, background: "#0d1117", borderRadius: 6 }}>
+                        <div style={{ flex: 1, minHeight: 250, marginBottom: 12, background: "#0d1117", borderRadius: 6, position: "relative" }}>
                           <ForceGraph3D
+                            ref={causalGraphRef}
                             graphData={{
                               nodes: causal.nodes.map(n => ({ id: n.id, name: n.label, group: n.kind })),
                               links: causal.links.map(l => ({ source: l.source, target: l.target, value: l.label })),
@@ -862,6 +886,18 @@ export default function App() {
                             linkDirectionalArrowLength={3}
                             backgroundColor="#0d1117"
                           />
+                          <div style={{ position: "absolute", top: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
+                            {[
+                              { label: "＋", title: "放大", onClick: () => zoomGraph(causalGraphRef, 0.7) },
+                              { label: "−", title: "缩小", onClick: () => zoomGraph(causalGraphRef, 1.4) },
+                              { label: "⊡", title: "重置视图（显示全部节点与连线）", onClick: () => resetGraph(causalGraphRef) },
+                            ].map(b => (
+                              <button key={b.label} title={b.title} onClick={b.onClick}
+                                style={{ width: 28, height: 28, borderRadius: 4, cursor: "pointer", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", border: "1px solid #334155", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {b.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", marginBottom: 6, borderLeft: "3px solid #ef4444", paddingLeft: 8 }}>因果归因（源 → 目标 累计指标影响，负=致衰）</div>
@@ -878,6 +914,7 @@ export default function App() {
                       </div>
                     )
                   )}
+                </div>
                 </div>
               )}
 
