@@ -134,6 +134,7 @@ jobs:
         shell: bash
         run: |
           RES="apps/strategy-forge/src-tauri/resources"
+          mkdir -p "$RES"                          # 确保目标父目录存在
           rm -rf "$RES/strategy-forge-backend"
           cp -r dist/strategy-forge-backend "$RES/strategy-forge-backend"
 
