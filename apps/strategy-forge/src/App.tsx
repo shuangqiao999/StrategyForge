@@ -106,7 +106,6 @@ export default function App() {
   const [timelineView, setTimelineView] = useState<"timeline" | "causal">("timeline");
   const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize">("graph");
   const [domain, setDomain] = useState("auto");
-  const [enableNarrate, setEnableNarrate] = useState(true);
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
 
   // ── 策略优化器 ──
@@ -330,7 +329,7 @@ export default function App() {
       const r = await fetch(`${API_BASE}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, enable_narrate: enableNarrate } }),
+        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain } }),
       });
       if (r.ok) {
         const data = await r.json();
@@ -339,7 +338,7 @@ export default function App() {
       }
     } catch { /* ignore */ }
     setCreating(false);
-  }, [title, sourceMaterial, domain, enableNarrate]);
+  }, [title, sourceMaterial, domain]);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -548,11 +547,7 @@ export default function App() {
             <option value="custom">✏️ 自定义规则包...</option>
           </select>
           {domain !== "narrative" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#94a3b8", cursor: "pointer" }}>
-                <Toggle checked={enableNarrate} onChange={setEnableNarrate} />
-                生成叙事解读（关闭可省时）
-              </label>
+            <div style={{ marginBottom: 6 }}>
               <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {
                 const f = e.target.files?.[0]; if (!f) return;
                 const text = await f.text();
@@ -561,7 +556,10 @@ export default function App() {
                 if (r.ok) { await fetchDomains(); alert("规则包已上传并加载"); } else { alert("上传失败: " + (await r.text())); }
                 e.target.value = "";
               }} id="rules-upload" />
-              <label htmlFor="rules-upload" style={{ fontSize: 12, color: "#64748b", cursor: "pointer", borderBottom: "1px dashed #475569", paddingBottom: 1 }}>＋规则包</label>
+              <button
+                style={{ width: "100%", height: 30, fontSize: 12, background: "#1e293b", border: "1px solid #374151", borderRadius: 6, cursor: "pointer", color: "#cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                onClick={() => (document.getElementById("rules-upload") as HTMLInputElement)?.click()}
+              >📤 上传自定义规则包</button>
             </div>
           )}
           <input
