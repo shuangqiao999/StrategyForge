@@ -39,7 +39,15 @@ fn launch_backend() {
             // 导致 forge_config.json 与 Kuzu/LanceDB 数据分散到不同位置。
             if let Some(backend_dir) = path.parent() {
                 cmd.current_dir(backend_dir);
-                cmd.env("FORGE_DATA_DIR", backend_dir.join("data"));
+                // 运行期数据：%LOCALAPPDATA%\StrategyForge\data（卸载不丢、无 UAC 虚拟化）
+                let local_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
+                if !local_data.is_empty() {
+                    cmd.env("FORGE_DATA_DIR",
+                            std::path::PathBuf::from(&local_data)
+                                .join("StrategyForge").join("data"));
+                }
+                // 内置规则包：安装目录下的 data/rule（只读，随版本更新）
+                cmd.env("FORGE_RULE_DIR", backend_dir.join("data").join("rule"));
             }
             apply_no_window(&mut cmd);
             child_opt = cmd.spawn().ok();

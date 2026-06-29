@@ -171,32 +171,52 @@ def _load_json_file(path: Path) -> dict[str, dict[str, Any]] | None:
 
 
 def reload_rules() -> None:
-    """重新扫描 data/rule/ 并加载所有规则包（含内置 rules.json 与 custom/）。"""
+    """扫描内置与自定义规则包。
+
+    打包环境：
+      FORGE_RULE_DIR  → 内置规则（安装目录，只读，随安装包更新）
+      FORGE_DATA_DIR  → 用户自定义规则 (data/rule/custom/)，持久化、卸载不丢
+    开发环境（FORGE_RULE_DIR 未设置）：回退到单一 data/rule/ 目录。
+    """
     global _RULE_CACHE
     try:
-        rule_dir = _get_data_dir() / "rule"
+        data_dir = _get_data_dir()
     except Exception:
         logger.warning("[rule_templates] 无法确定数据目录，使用兜底规则")
         _RULE_CACHE = dict(_FALLBACK_RULES)
         return
 
+    import os
+    rule_root = os.getenv("FORGE_RULE_DIR", "")
     loaded: dict[str, dict[str, Any]] = {}
-    if rule_dir.exists():
-        # 1) 内置
-        default_file = rule_dir / "rules.json"
-        if default_file.exists():
-            rules = _load_json_file(default_file)
-            if rules:
-                loaded.update(rules)
-                logger.info("[rule_templates] 加载内置规则: %d 个领域", len(rules))
-        # 2) 用户自定义
-        custom_dir = rule_dir / "custom"
-        if custom_dir.is_dir():
-            for f in sorted(custom_dir.glob("*.json")):
-                rules = _load_json_file(f)
+    if rule_root:
+        bundle_dir = Path(rule_root)
+        if bundle_dir.is_dir():
+            # 1) 内置规则包（安装包提供）
+            default_file = bundle_dir / "rules.json"
+            if default_file.exists():
+                rules = _load_json_file(default_file)
                 if rules:
                     loaded.update(rules)
-                    logger.info("[rule_templates] 加载自定义规则: %s", f.name)
+                    logger.info("[rule_templates] 加载内置规则(FORGE_RULE_DIR): %d 个领域", len(rules))
+    else:
+        # 开发模式：回退到 data/rule/
+        bundle_dir = data_dir / "rule"
+        if bundle_dir.is_dir():
+            default_file = bundle_dir / "rules.json"
+            if default_file.exists():
+                rules = _load_json_file(default_file)
+                if rules:
+                    loaded.update(rules)
+                    logger.info("[rule_templates] 加载内置规则(data/rule): %d 个领域", len(rules))
+    # 2) 用户自定义规则（持久化目录，卸载不丢）
+    custom_dir = data_dir / "rule" / "custom"
+    if custom_dir.is_dir():
+        for f in sorted(custom_dir.glob("*.json")):
+            rules = _load_json_file(f)
+            if rules:
+                loaded.update(rules)
+                logger.info("[rule_templates] 加载自定义规则: %s", f.name)
 
     _RULE_CACHE = loaded if loaded else dict(_FALLBACK_RULES)
 
@@ -206,8 +226,10 @@ def get_template(domain: str) -> dict[str, Any] | None:
 
 
 def list_domains() -> list[dict[str, str]]:
-    """供前端下拉使用的领域清单。优先使用 name 字段。"""
-    return [{"domain": k, "name": v.get("name", v.get("display_name", k))}
+    """供前端下拉使用的领域清单。优先使用 name 字段（自动过滤 surrogate 字符）。"""
+    def _safe(s: str) -> str:
+        return "".join(ch if ord(ch) < 0xD800 or ord(ch) > 0xDFFF else "?" for ch in s)
+    return [{"domain": k, "name": _safe(v.get("name", v.get("display_name", k)))}
             for k, v in _RULE_CACHE.items()]
 
 
