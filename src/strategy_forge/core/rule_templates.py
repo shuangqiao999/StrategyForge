@@ -143,6 +143,7 @@ _FALLBACK_RULES: dict[str, dict[str, Any]] = {
 
 # ── 动态加载缓存 ──
 _RULE_CACHE: dict[str, dict[str, Any]] = {}
+_rules_loaded_from_file: bool = False
 
 
 def _load_json_file(path: Path) -> dict[str, dict[str, Any]] | None:
@@ -178,12 +179,13 @@ def reload_rules() -> None:
       FORGE_DATA_DIR  → 用户自定义规则 (data/rule/custom/)，持久化、卸载不丢
     开发环境（FORGE_RULE_DIR 未设置）：回退到单一 data/rule/ 目录。
     """
-    global _RULE_CACHE
+    global _RULE_CACHE, _rules_loaded_from_file
     try:
         data_dir = _get_data_dir()
     except Exception:
         logger.warning("[rule_templates] 无法确定数据目录，使用兜底规则")
         _RULE_CACHE = dict(_FALLBACK_RULES)
+        _rules_loaded_from_file = False
         return
 
     import os
@@ -218,7 +220,12 @@ def reload_rules() -> None:
                 loaded.update(rules)
                 logger.info("[rule_templates] 加载自定义规则: %s", f.name)
 
-    _RULE_CACHE = loaded if loaded else dict(_FALLBACK_RULES)
+    if loaded:
+        _RULE_CACHE = loaded
+        _rules_loaded_from_file = True
+    else:
+        _RULE_CACHE = dict(_FALLBACK_RULES)
+        _rules_loaded_from_file = False
 
 
 def get_template(domain: str) -> dict[str, Any] | None:
@@ -226,7 +233,12 @@ def get_template(domain: str) -> dict[str, Any] | None:
 
 
 def list_domains() -> list[dict[str, str]]:
-    """供前端下拉使用的领域清单。优先使用 name 字段（自动过滤 surrogate 字符）。"""
+    """供前端下拉使用的领域清单（仅返回从 JSON 文件加载成功的规则包）。
+
+    _rules_loaded_from_file 为 False 时返回空列表——前端如实显示"无规则包"。
+    """
+    if not _rules_loaded_from_file:
+        return []
     def _safe(s: str) -> str:
         return "".join(ch if ord(ch) < 0xD800 or ord(ch) > 0xDFFF else "?" for ch in s)
     return [{"domain": k, "name": _safe(v.get("name", v.get("display_name", k)))}

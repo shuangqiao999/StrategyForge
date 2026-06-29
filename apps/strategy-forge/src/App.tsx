@@ -542,9 +542,11 @@ export default function App() {
             style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13 }}
           >
             <option value="auto">🤖 自动识别领域（量化）</option>
-            {domains.map(d => <option key={d.domain} value={d.domain}>{d.name}</option>)}
+            {domains.length === 0
+              ? <option disabled value="">⚠️ 请上传规则包 JSON（无内置规则包可用）</option>
+              : domains.map(d => <option key={d.domain} value={d.domain}>{d.name}</option>)
+            }
             <option value="narrative">📖 纯叙事（不量化）</option>
-            <option value="custom">✏️ 自定义规则包...</option>
           </select>
           {domain !== "narrative" && (
             <div style={{ marginBottom: 6 }}>
