@@ -3,9 +3,9 @@ import ForceGraph3D from "react-force-graph-3d";
 
 const API_BASE = import.meta.env.DEV ? "/api/forge" : "http://127.0.0.1:8000/api/forge";
 
-const lbl: React.CSSProperties = { fontSize: 12, color: "#94a3b8", marginBottom: 4, display: "block" };
+const lbl: React.CSSProperties = { fontSize: 13, color: "#94a3b8", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%" };
-const btn: React.CSSProperties = { height: 28, fontSize: 12, borderRadius: 6, border: "1px solid #334155", cursor: "pointer", padding: "0 12px" };
+const btn: React.CSSProperties = { height: 28, fontSize: 13, borderRadius: 6, border: "1px solid #334155", cursor: "pointer", padding: "0 12px" };
 
 // ── Types ──
 
@@ -72,6 +72,24 @@ const PHASE_LABELS: Record<string, string> = {
   failed: "失败",
   paused: "已暂停",
 };
+
+const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
+  <label style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, cursor: "pointer" }}>
+    <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
+      style={{ position: "absolute", opacity: 0, width: 0, height: 0 }} />
+    <span style={{
+      position: "relative", display: "inline-block", width: 36, height: 20,
+      borderRadius: 10, background: checked ? "#22c55e" : "#475569",
+      transition: "background 0.2s ease",
+    }}>
+      <span style={{
+        position: "absolute", top: 2, left: checked ? 18 : 2,
+        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+        transition: "left 0.2s ease", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+      }} />
+    </span>
+  </label>
+);
 
 // ── Main App ──
 
@@ -498,7 +516,7 @@ export default function App() {
       <div style={{ borderRight: "1px solid #374151", overflow: "auto", padding: 12 }}>
         <h3 style={{ margin: "0 0 8px", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>StrategyForge 战略推演</span>
-          <button onClick={() => { fetchConfig(); setShowSettings(true); }} style={{ background: "#334155", border: "1px solid #475569", color: "#e2e8f0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 11 }}>⚙ 配置</button>
+          <button onClick={() => { fetchConfig(); setShowSettings(true); }} style={{ background: "#334155", border: "1px solid #475569", color: "#e2e8f0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12 }}>⚙ 配置</button>
         </h3>
 
         <div className="card" style={{ marginBottom: 10 }}>
@@ -509,13 +527,13 @@ export default function App() {
             onChange={e => setTitle(e.target.value)}
           />
           <textarea
-            style={{ height: 100, fontSize: 12, marginBottom: 6, width: "100%" }}
+            style={{ height: 100, fontSize: 13, marginBottom: 6, width: "100%" }}
             placeholder="粘贴种子材料（或点击上传文档）"
             value={sourceMaterial}
             onChange={e => setSourceMaterial(e.target.value)}
           />
           <textarea
-            style={{ height: 48, fontSize: 12, marginBottom: 6, width: "100%" }}
+            style={{ height: 48, fontSize: 13, marginBottom: 6, width: "100%" }}
             placeholder="推演前愿景/目标（可选）"
             value={preGoal}
             onChange={e => setPreGoal(e.target.value)}
@@ -524,7 +542,7 @@ export default function App() {
             value={domain}
             onChange={e => setDomain(e.target.value)}
             title="推演领域：选具体领域或自动识别进入量化推演；纯叙事保持 1.0 行为"
-            style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 12 }}
+            style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13 }}
           >
             <option value="auto">🤖 自动识别领域（量化）</option>
             {domains.map(d => <option key={d.domain} value={d.domain}>{d.name}</option>)}
@@ -533,13 +551,13 @@ export default function App() {
           </select>
           {/* 环境参数（天气 / 地形） */}
           <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <select value={weather} onChange={e => setWeather(e.target.value)} title="天气" style={{ flex: 1, height: 28, fontSize: 11, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+            <select value={weather} onChange={e => setWeather(e.target.value)} title="天气" style={{ flex: 1, height: 28, fontSize: 12, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
               <option value="">🌤 天气（无）</option>
               <option value="clear">☀️ 晴朗</option>
               <option value="rain">🌧 雨天</option>
               <option value="snow">❄️ 雪天</option>
             </select>
-            <select value={terrain} onChange={e => setTerrain(e.target.value)} title="地形" style={{ flex: 1, height: 28, fontSize: 11, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+            <select value={terrain} onChange={e => setTerrain(e.target.value)} title="地形" style={{ flex: 1, height: 28, fontSize: 12, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
               <option value="">🏔 地形（无）</option>
               <option value="plain">🏞 平原</option>
               <option value="mountain">⛰ 山地</option>
@@ -548,7 +566,7 @@ export default function App() {
           </div>
           {/* 自定义规则包上传 */}
           <div style={{ marginBottom: 6 }}>
-            <label style={{ fontSize: 11, color: "#94a3b8", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+            <label style={{ fontSize: 12, color: "#94a3b8", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
               <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {
                 const f = e.target.files?.[0]; if (!f) return;
                 const text = await f.text();
@@ -561,8 +579,8 @@ export default function App() {
             </label>
           </div>
           {domain !== "narrative" && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
-              <input type="checkbox" checked={enableNarrate} onChange={e => setEnableNarrate(e.target.checked)} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#94a3b8", marginBottom: 6, cursor: "pointer" }}>
+              <Toggle checked={enableNarrate} onChange={setEnableNarrate} />
               生成叙事解读（关闭可省时）
             </label>
           )}
@@ -574,7 +592,7 @@ export default function App() {
             style={{ display: "none" }}
           />
           <button
-            style={{ width: "100%", height: 28, fontSize: 12, marginBottom: 6, background: "#1e293b", border: "1px solid #374151", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8" }}
+            style={{ width: "100%", height: 28, fontSize: 13, marginBottom: 6, background: "#1e293b", border: "1px solid #374151", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8" }}
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
           >
@@ -594,10 +612,10 @@ export default function App() {
         {/* ── 策略优化器面板（高级，默认关闭） ── */}
         <div style={{ marginBottom: 10, background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: 10 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#e2e8f0" }}>
-            <input type="checkbox" checked={optEnabled} onChange={e => setOptEnabled(e.target.checked)} />
+            <Toggle checked={optEnabled} onChange={setOptEnabled} />
             策略优化器
-            <span style={{ fontSize: 10, color: "#94a3b8", background: "#1e293b", borderRadius: 8, padding: "1px 6px" }}>Beta</span>
-            <span style={{ marginLeft: "auto", fontSize: 11, color: optEnabled ? "#34d399" : "#64748b" }}>{optEnabled ? "已启用" : "默认关闭"}</span>
+            <span style={{ fontSize: 11, color: "#94a3b8", background: "#1e293b", borderRadius: 8, padding: "1px 6px" }}>Beta</span>
+            <span style={{ marginLeft: "auto", fontSize: 12, color: optEnabled ? "#34d399" : "#64748b" }}>{optEnabled ? "已启用" : "默认关闭"}</span>
           </label>
           {optEnabled && (
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -615,18 +633,18 @@ export default function App() {
               </div>
               <div>
                 <label style={lbl}>胜利条件（统一判定标准）</label>
-                <textarea value={optWinCondition} onChange={e => setOptWinCondition(e.target.value)} placeholder="例：核心势力长期存续且主要人物善终（留空则用会话的推演前目标）" style={{ height: 50, fontSize: 12, width: "100%" }} />
+                <textarea value={optWinCondition} onChange={e => setOptWinCondition(e.target.value)} placeholder="例：核心势力长期存续且主要人物善终（留空则用会话的推演前目标）" style={{ height: 50, fontSize: 13, width: "100%" }} />
               </div>
               <div>
                 <label style={lbl}>候选方案（不同战略指令，逐一对比）</label>
                 {optScenarios.map((s, i) => (
                   <div key={i} style={{ marginBottom: 6, background: "#1e293b", borderRadius: 6, padding: 6 }}>
                     <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                      <input value={s.name} onChange={e => updateScenario(i, "name", e.target.value)} placeholder="方案名" style={{ flex: 1, height: 26, fontSize: 12 }} />
+                      <input value={s.name} onChange={e => updateScenario(i, "name", e.target.value)} placeholder="方案名" style={{ flex: 1, height: 26, fontSize: 13 }} />
                       <button onClick={() => removeScenario(i)} disabled={optScenarios.length <= 1} style={{ ...btn, height: 26, background: "transparent", color: optScenarios.length <= 1 ? "#475569" : "#f87171", border: "none", cursor: optScenarios.length <= 1 ? "not-allowed" : "pointer" }}>✕</button>
                     </div>
-                    <textarea value={s.directive} onChange={e => updateScenario(i, "directive", e.target.value)} placeholder="该方案的战略指令（如：坚决反对招安，独立发展）" style={{ height: 44, fontSize: 12, width: "100%" }} />
-                    <input list={`ents-${i}`} value={s.entity_ref} onChange={e => updateScenario(i, "entity_ref", e.target.value)} placeholder="我方实体（留空=全体存活率；量化模式按此判胜）" style={{ height: 26, fontSize: 12, width: "100%", marginTop: 4 }} />
+                    <textarea value={s.directive} onChange={e => updateScenario(i, "directive", e.target.value)} placeholder="该方案的战略指令（如：坚决反对招安，独立发展）" style={{ height: 44, fontSize: 13, width: "100%" }} />
+                    <input list={`ents-${i}`} value={s.entity_ref} onChange={e => updateScenario(i, "entity_ref", e.target.value)} placeholder="我方实体（留空=全体存活率；量化模式按此判胜）" style={{ height: 26, fontSize: 13, width: "100%", marginTop: 4 }} />
                     <datalist id={`ents-${i}`}>
                       {(graphData?.nodes || []).map(n => <option key={n.id} value={n.name} />)}
                     </datalist>
@@ -634,9 +652,9 @@ export default function App() {
                 ))}
                 <button onClick={addScenario} style={{ ...btn, width: "100%", background: "#1e293b", color: "#cbd5e1" }}>＋ 添加方案</button>
               </div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>
                 ⏱ 共 {optScenarios.length} 方案 × {optIterations} 次 = {optScenarios.length * optIterations} 次完整推演
-                <span style={{ display: "block", fontSize: 10, color: "#475569" }}>本地 LM Studio 串行排队，单次约数分钟，建议先用小次数试跑</span>
+                <span style={{ display: "block", fontSize: 11, color: "#475569" }}>本地 LM Studio 串行排队，单次约数分钟，建议先用小次数试跑</span>
               </div>
             </div>
           )}
@@ -644,7 +662,7 @@ export default function App() {
 
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>会话列表（历史推演记录）</div>
         {sessions.length === 0 && (
-          <div style={{ color: "#94a3b8", fontSize: 12, textAlign: "center", padding: 20 }}>
+          <div style={{ color: "#94a3b8", fontSize: 13, textAlign: "center", padding: 20 }}>
             暂无推演会话，请创建新会话开始
           </div>
         )}
@@ -672,12 +690,12 @@ export default function App() {
                 >🗑</button>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4, alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: "#cbd5e1", background: "#0f172a", borderRadius: 4, padding: "1px 6px" }}>{PHASE_LABELS[s.status] || s.status}</span>
-                {s.entity_count > 0 && <span style={{ fontSize: 10, color: "#94a3b8" }}>{s.entity_count} 实体</span>}
-                {s.agent_count > 0 && <span style={{ fontSize: 10, color: "#94a3b8" }}>{s.agent_count} 智能体</span>}
-                {s.current_round > 0 && <span style={{ fontSize: 10, color: "#94a3b8" }}>{s.current_round}/{s.total_rounds} 轮</span>}
+                <span style={{ fontSize: 11, color: "#cbd5e1", background: "#0f172a", borderRadius: 4, padding: "1px 6px" }}>{PHASE_LABELS[s.status] || s.status}</span>
+                {s.entity_count > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.entity_count} 实体</span>}
+                {s.agent_count > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.agent_count} 智能体</span>}
+                {s.current_round > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.current_round}/{s.total_rounds} 轮</span>}
               </div>
-              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{(s.created_at || "").slice(0, 19).replace("T", " ")}</div>
+              <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{(s.created_at || "").slice(0, 19).replace("T", " ")}</div>
             </div>
           );
         })}
@@ -697,12 +715,12 @@ export default function App() {
                 {selected.current_round > 0 && <span className="pill">{selected.current_round}/{selected.total_rounds} 轮</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <label title="启用资源分配（多动作）：每方每轮可同时把资源分配给多个动作（如进攻+防守），运行前生效" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#cbd5e1", cursor: "pointer" }}>
-                  <input type="checkbox" checked={optMultiAction} onChange={e => setOptMultiAction(e.target.checked)} />
+                <label title="启用资源分配（多动作）：每方每轮可同时把资源分配给多个动作（如进攻+防守），运行前生效" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#cbd5e1", cursor: "pointer" }}>
+                  <Toggle checked={optMultiAction} onChange={setOptMultiAction} />
                   多动作
                 </label>
                 {optMultiAction && (
-                  <select value={optMaxActions} onChange={e => setOptMaxActions(parseInt(e.target.value))} title="每方最多动作数" style={{ height: 24, fontSize: 11, background: "#0f172a", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
+                  <select value={optMaxActions} onChange={e => setOptMaxActions(parseInt(e.target.value))} title="每方最多动作数" style={{ height: 24, fontSize: 12, background: "#0f172a", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}>
                     <option value={2}>最多2</option>
                     <option value={3}>最多3</option>
                     <option value={4}>最多4</option>
@@ -739,7 +757,7 @@ export default function App() {
                   key={k}
                   onClick={() => setMainTab(k)}
                   style={{
-                    padding: "4px 16px", borderRadius: 6, fontSize: 12, cursor: "pointer",
+                    padding: "4px 16px", borderRadius: 6, fontSize: 13, cursor: "pointer",
                     border: "1px solid #334155",
                     background: mainTab === k ? "#3b82f6" : "#0f172a",
                     color: mainTab === k ? "#fff" : "#94a3b8",
@@ -751,7 +769,7 @@ export default function App() {
             <div style={{ overflow: "auto", position: "relative", background: mainTab === "graph" ? "#0d1117" : "transparent" }}>
               {mainTab === "graph" && (
                 graphData && graphData.nodes.length > 0 ? (
-                  <div style={{ width: "100%", height: "100%", position: "relative" }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
                     <ForceGraph3D
                       ref={graphRef}
                       graphData={{
@@ -802,14 +820,14 @@ export default function App() {
                               <div style={{ fontWeight: 600 }}>
                                 {s.name}{" "}
                                 {s.alive
-                                  ? <span style={{ fontSize: 10, color: "#34d399" }}>存活</span>
-                                  : <span style={{ fontSize: 10, color: "#f87171" }}>★出局★</span>}
+                                  ? <span style={{ fontSize: 11, color: "#34d399" }}>存活</span>
+                                  : <span style={{ fontSize: 11, color: "#f87171" }}>★出局★</span>}
                               </div>
-                              <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 2 }}>
+                              <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 2 }}>
                                 {Object.entries(s.metrics).map(([k, v]) => `${k}=${Number(v).toFixed(0)}`).join("  ·  ")}
                               </div>
                               {s.history && s.history.length > 0 && (
-                                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
                                   轨迹：{s.history.slice(-6).map((h: any, j: number) => (
                                     <span key={j} style={{ marginRight: 8 }}>[R{h.round}]{h.metric}{h.delta >= 0 ? "+" : ""}{Number(h.delta).toFixed(1)}</span>
                                   ))}
@@ -867,7 +885,7 @@ export default function App() {
                 <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, display: "flex", flexDirection: "column", height: "100%" }}>
                   <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
                     {(["timeline", "causal"] as const).map(v => (
-                      <button key={v} onClick={() => setTimelineView(v)} style={{ padding: "3px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "1px solid #334155", background: timelineView === v ? "#3b82f6" : "#0f172a", color: timelineView === v ? "#fff" : "#94a3b8" }}>{v === "timeline" ? "时间线" : "因果图"}</button>
+                      <button key={v} onClick={() => setTimelineView(v)} style={{ padding: "3px 12px", borderRadius: 6, fontSize: 13, cursor: "pointer", border: "1px solid #334155", background: timelineView === v ? "#3b82f6" : "#0f172a", color: timelineView === v ? "#fff" : "#94a3b8" }}>{v === "timeline" ? "时间线" : "因果图"}</button>
                     ))}
                   </div>
                   <div style={{ flex: 1, overflow: "auto" }}>
@@ -913,7 +931,8 @@ export default function App() {
                     causal && causal.nodes.length > 0 ? (
                       <>
                         <div style={{ flex: 1, minHeight: 250, marginBottom: 12, background: "#0d1117", borderRadius: 6, position: "relative" }}>
-                          <ForceGraph3D
+                          <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+                            <ForceGraph3D
                             ref={causalGraphRef}
                             graphData={{
                               nodes: causal.nodes.map(n => ({ id: n.id, name: n.label, group: n.kind })),
@@ -925,6 +944,7 @@ export default function App() {
                             linkDirectionalArrowLength={3}
                             backgroundColor="#0d1117"
                           />
+                          </div>
                           <div style={{ position: "absolute", top: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
                             {[
                               { label: "＋", title: "放大", onClick: () => zoomGraph(causalGraphRef, 0.7) },
@@ -958,7 +978,7 @@ export default function App() {
               )}
 
               {mainTab === "logs" && (
-                <div ref={logsRef} style={{ padding: 8, fontSize: 11 }}>
+                <div ref={logsRef} style={{ padding: 8, fontSize: 12 }}>
                   {logs.length === 0 && (
                     <div style={{ color: "#94a3b8", textAlign: "center", padding: 10 }}>暂无日志</div>
                   )}
@@ -998,7 +1018,7 @@ export default function App() {
                       {optReport.recommended && (
                         <div style={{ marginBottom: 16, background: "#0f172a", border: "1px solid #3b82f6", borderRadius: 8, padding: 12 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 4 }}>🏆 推荐方案：{optReport.recommended.name}</div>
-                          <div style={{ fontSize: 12 }}>
+                          <div style={{ fontSize: 13 }}>
                             胜率 {(optReport.recommended.win_mean * 100).toFixed(0)}%
                             （95%CI {(optReport.recommended.win_ci95[0] * 100).toFixed(0)}–{(optReport.recommended.win_ci95[1] * 100).toFixed(0)}%）
                             · 成功率 {(optReport.recommended.success_rate * 100).toFixed(0)}%
@@ -1030,14 +1050,14 @@ export default function App() {
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>各方案统计</div>
                       {optReport.scenarios && optReport.scenarios.map((s: any, i: number) => (
                         <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 8, borderLeft: `3px solid ${s.is_pareto ? "#34d399" : "#475569"}` }}>
-                          <div style={{ fontWeight: 600 }}>{s.name} {s.is_pareto && <span style={{ fontSize: 10, color: "#34d399" }}>（帕累托）</span>}</div>
-                          <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                          <div style={{ fontWeight: 600 }}>{s.name} {s.is_pareto && <span style={{ fontSize: 11, color: "#34d399" }}>（帕累托）</span>}</div>
+                          <div style={{ fontSize: 13, color: "#94a3b8" }}>
                             胜率 {(s.win_mean * 100).toFixed(0)}% ± {((s.win_ci95 ? (s.win_ci95[1] - s.win_mean) : 0) * 100).toFixed(0)}%
                             · 成功率 {(s.success_rate * 100).toFixed(0)}%
                             · 成本 {s.cost_mean.toFixed(2)}
                             · {s.runs} 次
                           </div>
-                          {s.directive && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>指令：{s.directive}</div>}
+                          {s.directive && <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>指令：{s.directive}</div>}
                         </div>
                       ))}
                     </>
@@ -1049,7 +1069,7 @@ export default function App() {
             {selected.status === "simulating" && (
               <div style={{ display: "flex", gap: 6, padding: "6px 12px", borderTop: "1px solid #374151", background: "#1e293b" }}>
                 <input
-                  style={{ flex: 1, height: 28, fontSize: 12, width: "100%" }}
+                  style={{ flex: 1, height: 28, fontSize: 13, width: "100%" }}
                   placeholder="输入干预指令（例如：全体转向保守策略）"
                   value={interventionText}
                   onChange={e => setInterventionText(e.target.value)}
@@ -1057,7 +1077,7 @@ export default function App() {
                 />
                 <button
                   className="btnSmall btnSmallPrimary"
-                  style={{ height: 28, fontSize: 11 }}
+                  style={{ height: 28, fontSize: 12 }}
                   onClick={sendIntervention}
                   disabled={sending || !interventionText.trim()}
                 >
@@ -1092,7 +1112,7 @@ export default function App() {
               <>
                 <label style={lbl}>服务商</label>
                 {cfgProviders.length === 0 ? (
-                  <div style={{ color: "#f59e0b", fontSize: 12, marginBottom: 8 }}>⚠ 无法加载服务商列表 — 请确认后端已启动 (http://127.0.0.1:8000/health)</div>
+                  <div style={{ color: "#f59e0b", fontSize: 13, marginBottom: 8 }}>⚠ 无法加载服务商列表 — 请确认后端已启动 (http://127.0.0.1:8000/health)</div>
                 ) : (
                 <select value={cfgLLMProvider} onChange={e => { setCfgLLMProvider(e.target.value); const p = cfgProviders.find(x => x.slug === e.target.value); if (p?.default_llm_base_url) { setCfgLLMBase(p.default_llm_base_url); setCfgLLMTest(""); } }} style={{ ...inp, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6 }}>
                   <option value="">选择服务商...</option>
@@ -1142,13 +1162,13 @@ export default function App() {
             {/* Model list */}
             {cfgFetchedModels.length > 0 && (
               <div style={{ maxHeight: 180, overflow: "auto", marginBottom: 16, background: "#0f172a", borderRadius: 6, padding: 8 }}>
-                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>可用模型 ({cfgFetchedModels.length})</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>可用模型 ({cfgFetchedModels.length})</div>
                 {cfgFetchedModels.map(m => (
-                  <div key={m} onClick={() => { if (settingsTab === "llm") setCfgLLMModel(m); else setCfgEmbedModel(m); }} style={{ padding: "3px 6px", cursor: "pointer", borderRadius: 4, fontSize: 12, color: (settingsTab === "llm" ? cfgLLMModel : cfgEmbedModel) === m ? "#3b82f6" : "#cbd5e1" }}>{m}</div>
+                  <div key={m} onClick={() => { if (settingsTab === "llm") setCfgLLMModel(m); else setCfgEmbedModel(m); }} style={{ padding: "3px 6px", cursor: "pointer", borderRadius: 4, fontSize: 13, color: (settingsTab === "llm" ? cfgLLMModel : cfgEmbedModel) === m ? "#3b82f6" : "#cbd5e1" }}>{m}</div>
                 ))}
               </div>
             )}
-            {cfgModelError && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 12 }}>{cfgModelError}</div>}
+            {cfgModelError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{cfgModelError}</div>}
 
             <button onClick={saveConfig} disabled={cfgSaving} style={{ ...btn, width: "100%", background: "#3b82f6", color: "#fff", height: 36, fontSize: 14 }}>
               {cfgSaving ? "保存中..." : "保存配置"}

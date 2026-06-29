@@ -33,9 +33,7 @@ a = Analysis(
     ['src/strategy_forge/main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[
-        ('data', 'data'),
-    ],
+    datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
