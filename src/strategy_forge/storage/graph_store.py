@@ -288,8 +288,13 @@ class DeductionGraphStore:
         items.sort(key=lambda x: x["amount"])
         return items[:limit]
 
-    def get_causal_subgraph(self, limit: int = 200) -> dict[str, Any]:
-        """因果子图（Agent→Event→Entity，CAUSED 带 metric/amount），供前端因果视图。"""
+    def get_causal_subgraph(self, limit: int = 3000) -> dict[str, Any]:
+        """因果子图（Agent→Event→Entity，CAUSED 带 metric/amount），供前端因果视图。
+
+        ACTED 上限 3000 + CAUSED 上限 12000，确保大量轮次时仍覆盖全图。
+        当 CAUSED 引用了 ACTED 批次以外的 Event ID 时，自动补全 Event 节点，
+        避免前端出现"零散圆锥体、无线条"的孤儿节点。
+        """
         nodes: dict[str, dict[str, Any]] = {}
         links: list[dict[str, Any]] = []
         rows = self.query(
@@ -310,10 +315,20 @@ class DeductionGraphStore:
         )
         for r in crows:
             eid, tid, tname, metric, amount = r[0], r[1], r[2], r[3], r[4]
+            # 补全：CAUSED 边的源 Event 若在 ACTED 批次被截断，仍创建节点（避免孤儿 entity）
+            nodes.setdefault(eid, {"id": eid, "kind": "event",
+                                   "label": f"EV:{eid[:8]}", "desc": ""})
             nodes.setdefault(tid, {"id": tid, "kind": "entity", "label": tname or tid[:8]})
             lbl = f"{metric}{amount:+.0f}" if amount is not None else (metric or "")
             links.append({"source": eid, "target": tid, "type": "CAUSED", "label": lbl})
-        return {"nodes": list(nodes.values()), "links": links}
+        # 硬上限：预防极端数据量导致前端力导图卡死
+        MAX_NODES = 5000
+        node_list = list(nodes.values())
+        if len(node_list) > MAX_NODES:
+            node_list = node_list[:MAX_NODES]
+            keep_ids = {n["id"] for n in node_list}
+            links = [l for l in links if l["source"] in keep_ids and l["target"] in keep_ids]
+        return {"nodes": node_list, "links": links}
 
     def export_graph_data(self) -> dict[str, Any]:
         nodes: list[dict[str, Any]] = []
