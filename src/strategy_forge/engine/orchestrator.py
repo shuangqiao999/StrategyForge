@@ -27,12 +27,14 @@ class DeductionOrchestrator:
         session_store: SessionStore,
         logger_fn: Callable[[str, str], None] | None = None,
         cancel_event: Any = None,
+        round_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         self.session = session
         self.graph = graph
         self.store = session_store
         self._log = logger_fn or (lambda p, m: None)
         self._cancel = cancel_event
+        self._round_callback = round_callback
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -246,6 +248,8 @@ class DeductionOrchestrator:
             self.session.current_round = rnd
             self.store.update(self.session.id, current_round=rnd)
             self._log("simulation", f"  第 {rnd} 轮完成: {len(result.actions)} 个动作")
+            if self._round_callback:
+                self._round_callback(rnd, total_rounds)
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "

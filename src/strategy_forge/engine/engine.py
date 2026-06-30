@@ -5,6 +5,7 @@ Created once per Agent (like KnowledgeBaseManager).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,8 @@ class DeductionEngine:
         self.session_store = SessionStore(self._data_dir / "sessions.db")
         self.graph: DeductionGraphStore | None = None
         self._graph_sid: str | None = None
+        self._stream_events: dict[str, asyncio.Event] = {}
+        self._round_data: dict[str, dict[str, int]] = {}
 
     def get_graph(self, session_id: str) -> DeductionGraphStore:
         # 句柄按 session_id 缓存；切换会话时先释放旧库句柄，避免多会话串库。
@@ -92,9 +95,33 @@ class DeductionEngine:
 
     def log(self, session_id: str, phase: str, message: str) -> None:
         self.session_store.append_log(session_id, phase, message)
+        ev = self._stream_events.get(session_id)
+        if ev:
+            ev.set()
 
     def get_logs(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
         return self.session_store.get_logs(session_id, limit=limit)
+
+    def _ensure_event(self, session_id: str) -> asyncio.Event:
+        if session_id not in self._stream_events:
+            self._stream_events[session_id] = asyncio.Event()
+        return self._stream_events[session_id]
+
+    def get_stream_event(self, session_id: str) -> asyncio.Event:
+        return self._ensure_event(session_id)
+
+    def signal_round_complete(self, session_id: str, round_num: int, total_rounds: int) -> None:
+        self._round_data[session_id] = {"round": round_num, "total": total_rounds}
+        ev = self._stream_events.get(session_id)
+        if ev:
+            ev.set()
+
+    def get_round_data(self, session_id: str) -> dict[str, int]:
+        return self._round_data.get(session_id, {})
+
+    def cleanup_events(self, session_id: str) -> None:
+        self._stream_events.pop(session_id, None)
+        self._round_data.pop(session_id, None)
 
     async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)
@@ -110,6 +137,7 @@ class DeductionEngine:
             session_store=self.session_store,
             logger_fn=lambda phase, msg: self.log(session_id, phase, msg),
             cancel_event=cancel_event,
+            round_callback=lambda rnd, total: self.signal_round_complete(session_id, rnd, total),
         )
 
         await orchestrator.run()

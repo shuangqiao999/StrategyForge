@@ -377,14 +377,11 @@ export default function App() {
       await persistSettings(selectedId);
       const r = await fetch(`${API_BASE}/session/${selectedId}/start`, { method: "POST" });
       if (!r.ok) throw new Error(await r.text());
+      setLoading(false);
+      // /start 立即返回 started，轮询一次状态让按钮切到"取消推演"
       await fetchSessions();
-      await fetchGraph(selectedId);
-      await fetchLogs(selectedId);
-      await fetchReport(selectedId);
-      await fetchTimeline(selectedId);
-      await fetchCausal(selectedId);
-      setMainTab("report");
     } catch (e: any) {
+      setLoading(false);
       alert("推演启动失败: " + (e.message || "未知错误"));
     }
     setLoading(false);
@@ -490,18 +487,30 @@ export default function App() {
     setSending(false);
   }, [selectedId, interventionText, fetchLogs]);
 
-  // SSE auto-refresh logs during simulation
+  // SSE auto-refresh logs, graph, timeline during ALL running phases
   useEffect(() => {
     if (!selectedId) return;
     const selected = sessions.find(s => s.id === selectedId);
-    if (!selected || (selected.status !== "simulating" && selected.status !== "optimizing")) return;
+    if (!selected) return;
+    const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
+    if (!runningSet.has(selected.status)) return;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
     es.onmessage = (ev: MessageEvent) => {
       if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); return; }
       try {
         const d = JSON.parse(ev.data);
-        setLogs(prev => [...prev.slice(-200), { phase: d.phase || d.type || "", message: d.message || "", timestamp: d.timestamp || "" }]);
-        if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
+        if (d.type === "round") {
+          fetchGraph(selectedId);
+          fetchTimeline(selectedId);
+          fetchCausal(selectedId);
+        } else if (d.type === "status") {
+          fetchSessions();
+        } else if (d.type === "error") {
+          // ignore
+        } else {
+          setLogs(prev => [...prev.slice(-200), { phase: d.phase || "", message: d.message || "", timestamp: d.timestamp || "" }]);
+          if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
+        }
       } catch { /* ignore */ }
     };
     es.onerror = () => { es.close(); };

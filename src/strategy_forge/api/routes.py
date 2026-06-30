@@ -184,17 +184,20 @@ async def start_deduction(session_id: str, request: Request):
     cancel_event = asyncio.Event()
     cancels[session_id] = cancel_event
     try:
-        updated = await engine.start(session_id, cancel_event=cancel_event)
-        return {
-            "session_id": updated.id,
-            "status": updated.status.value,
-            "report": {
-                "summary": updated.report.summary if updated.report else "",
-            } if updated.report else None,
-        }
+        # 后台异步执行推演，立即返回——前端通过轮询状态感知"推演中"并显示取消按钮
+        asyncio.create_task(_run_deduction(engine, session_id, cancel_event, cancels))
+        return {"session_id": session_id, "status": "started"}
     except Exception as e:
         logger.exception("[StrategyForge] start failed")
+        cancels.pop(session_id, None)
         raise HTTPException(500, str(e))
+
+
+async def _run_deduction(engine, session_id: str, cancel_event, cancels: dict):
+    try:
+        await engine.start(session_id, cancel_event=cancel_event)
+    except Exception:
+        logger.exception("[StrategyForge] background deduction failed")
     finally:
         cancels.pop(session_id, None)
 
@@ -516,23 +519,68 @@ async def get_logs(session_id: str, limit: int = Query(200), request: Request = 
 
 # ── SSE Stream ──
 
+_RUNNING_STATUSES = frozenset({
+    "ontology_running", "graph_running", "agents_running",
+    "simulating", "reporting", "optimizing",
+})
+
+_TERMINAL_STATUSES = frozenset({"complete", "failed", "paused"})
+
+
 @router.get("/session/{session_id}/stream")
 async def stream_deduction(session_id: str, request: Request):
+
     async def event_generator():
         engine = _get_engine(request)
         last_log_id = 0
+        last_round = 0
+
+        session = engine.get_session(session_id)
+        if session is None:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'session not found'}, ensure_ascii=False)}\n\n"
+            return
+        if session.status.value not in _RUNNING_STATUSES and session.status.value not in _TERMINAL_STATUSES:
+            yield f"data: {json.dumps({'type': 'status', 'status': session.status.value}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Push existing logs on connect so the frontend can catch up
+        existing = engine.get_logs(session_id, limit=200)
+        for log_entry in existing:
+            last_log_id = max(last_log_id, log_entry.get("id", 0))
+            yield f"data: {json.dumps(log_entry, ensure_ascii=False)}\n\n"
+
+        ev = engine.get_stream_event(session_id)
+        ev.clear()
+
         while True:
-            logs = engine.get_logs(session_id, limit=50)
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
+            ev.clear()
+
+            # ── push new log entries ──
+            logs = engine.get_logs(session_id, limit=100)
             new_logs = [l for l in logs if l.get("id", 0) > last_log_id]
             for log_entry in new_logs:
                 last_log_id = max(last_log_id, log_entry.get("id", 0))
                 yield f"data: {json.dumps(log_entry, ensure_ascii=False)}\n\n"
+
+            # ── push round-complete event (triggers graph/timeline refresh) ──
+            rd = engine.get_round_data(session_id)
+            cr = rd.get("round", 0)
+            if cr > last_round:
+                last_round = cr
+                yield f"data: {json.dumps({'type': 'round', 'round': cr, 'total': rd.get('total', 0)}, ensure_ascii=False)}\n\n"
+
+            # ── check terminal status ──
             session = engine.get_session(session_id)
-            if session and session.status.value in ("complete", "failed", "paused"):
+            if session and session.status.value in _TERMINAL_STATUSES:
                 yield f"data: {json.dumps({'type': 'status', 'status': session.status.value}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
+                engine.cleanup_events(session_id)
                 return
-            await asyncio.sleep(1)
 
     return StreamingResponse(
         event_generator(),
