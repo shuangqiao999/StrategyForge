@@ -64,6 +64,7 @@ class DeductionOrchestrator:
 
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
+            self._clear_state_snapshot(session_id)
             self._log("orchestrator", "全部五阶段推演完成")
         except _PhaseCancelledError:
             self._save_pause_snapshot(session_id)
@@ -107,9 +108,14 @@ class DeductionOrchestrator:
     def _load_state_snapshot(cfg: dict[str, Any]) -> dict[str, Any] | None:
         return cfg.get("state_snapshot")
 
-    @staticmethod
-    def _load_state_snapshot(cfg: dict[str, Any]) -> dict[str, Any] | None:
-        return cfg.get("state_snapshot")
+    def _clear_state_snapshot(self, session_id: str) -> None:
+        data = self.store.get(session_id)
+        cfg = (data or {}).get("config_json", {}) or {}
+        if isinstance(cfg, str):
+            cfg = _json.loads(cfg)
+        if "state_snapshot" in cfg:
+            del cfg["state_snapshot"]
+            self.store.update(session_id, config_json=_json.dumps(cfg, ensure_ascii=False))
 
     async def _resume_from_pause(self) -> None:
         """从 paused 状态续推：恢复内存态，跳过 Phase 1-3。"""
@@ -190,6 +196,7 @@ class DeductionOrchestrator:
         self.store.update(self.session.id,
                           status=SessionStatus.SIMULATING.value,
                           phase=DeductionPhase.SIMULATION.value)
+        self._clear_state_snapshot(self.session.id)
         self._log("orchestrator", f"续推就绪，从第 {self._resume_start_round + 1} 轮开始")
 
     async def _phase1_ontology(self) -> None:
