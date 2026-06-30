@@ -1,6 +1,7 @@
-﻿"""Deduction Orchestrator — five-stage pipeline coordinator."""
+﻿"""Deduction Orchestrator — five-stage pipeline coordinator with pause/resume."""
 from __future__ import annotations
 
+import json as _json
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -18,6 +19,10 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+class _PhaseCancelledError(Exception):
+    """用户取消推演（非错误，应持久化进度为 paused）。"""
+
+
 class DeductionOrchestrator:
 
     def __init__(
@@ -28,6 +33,7 @@ class DeductionOrchestrator:
         logger_fn: Callable[[str, str], None] | None = None,
         cancel_event: Any = None,
         round_callback: Callable[[int, int], None] | None = None,
+        resume_start_round: int = 0,
     ) -> None:
         self.session = session
         self.graph = graph
@@ -35,6 +41,7 @@ class DeductionOrchestrator:
         self._log = logger_fn or (lambda p, m: None)
         self._cancel = cancel_event
         self._round_callback = round_callback
+        self._resume_start_round = resume_start_round
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -45,16 +52,22 @@ class DeductionOrchestrator:
     async def run(self) -> DeductionSession:
         session_id = self.session.id
         try:
-            await self._phase1_ontology()
-            await self._phase1_5_quantify()
-            await self._phase2_graph()
-            await self._phase3_agents()
+            if self._resume_start_round > 0:
+                await self._resume_from_pause()
+            else:
+                await self._phase1_ontology()
+                await self._phase1_5_quantify()
+                await self._phase2_graph()
+                await self._phase3_agents()
             await self._phase4_simulation()
             await self._phase5_report()
 
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
             self._log("orchestrator", "全部五阶段推演完成")
+        except _PhaseCancelledError:
+            self._save_pause_snapshot(session_id)
+            self._log("orchestrator", "推演已暂停，进度已保存")
         except Exception as e:
             logger.exception("[Deduction] Pipeline failed: %s", e)
             self.store.update(session_id, status=SessionStatus.FAILED.value,
@@ -62,7 +75,125 @@ class DeductionOrchestrator:
             self._log("orchestrator", f"推演失败: {e}")
         return self.session
 
+    def _check_cancel(self) -> None:
+        if self._cancel is not None and self._cancel.is_set():
+            raise _PhaseCancelledError()
+
+    def _save_pause_snapshot(self, session_id: str) -> None:
+        """Serialize in-memory state (EntityState metrics/history/delays) into config_json."""
+        snapshot: dict[str, Any] = {}
+        states = getattr(self, "_states", None)
+        if states:
+            snapshot["states"] = {
+                eid: {
+                    "id": st.id,
+                    "name": getattr(st, "name", eid),
+                    "domain": getattr(st, "domain", ""),
+                    "metrics": dict(getattr(st, "metrics", {})),
+                    "history": getattr(st, "history", [])[-100:],
+                    "pending_delays": getattr(st, "_pending_delays", []),
+                }
+                for eid, st in states.items()
+            }
+        data = self.store.get(session_id)
+        cfg = (data or {}).get("config_json", {}) or {}
+        if isinstance(cfg, str):
+            cfg = _json.loads(cfg)
+        cfg["state_snapshot"] = snapshot
+        self.store.update(session_id, config_json=_json.dumps(cfg, ensure_ascii=False),
+                          status=SessionStatus.PAUSED.value)
+
+    @staticmethod
+    def _load_state_snapshot(cfg: dict[str, Any]) -> dict[str, Any] | None:
+        return cfg.get("state_snapshot")
+
+    @staticmethod
+    def _load_state_snapshot(cfg: dict[str, Any]) -> dict[str, Any] | None:
+        return cfg.get("state_snapshot")
+
+    async def _resume_from_pause(self) -> None:
+        """从 paused 状态续推：恢复内存态，跳过 Phase 1-3。"""
+        self._log("orchestrator", "从暂停点恢复推演...")
+        data = self.store.get(self.session.id)
+        cfg = (data or {}).get("config_json", {}) or {}
+        if isinstance(cfg, str):
+            cfg = _json.loads(cfg)
+
+        # 1. 恢复配置参数
+        self._enable_narrate = bool(cfg.get("enable_narrate", True))
+        self._enable_multi_action = bool(cfg.get("enable_multi_action", False))
+        try:
+            self._max_actions = int(cfg.get("max_actions", 3))
+        except (TypeError, ValueError):
+            self._max_actions = 3
+        self._weather = str(cfg.get("weather", "") or "").strip()
+        self._terrain = str(cfg.get("terrain", "") or "").strip()
+
+        # 2. 恢复规则包
+        domain = (cfg.get("domain") or "").strip()
+        custom = cfg.get("custom_rules")
+        if domain and domain != "narrative":
+            from .rule_engine import RuleEngine
+            try:
+                if domain == "custom" and custom:
+                    self._rule_engine = RuleEngine.from_custom(custom)
+                else:
+                    self._rule_engine = RuleEngine.from_domain(domain)
+                self._log("orchestrator",
+                          f"恢复规则包: {self._rule_engine.pack.get('display_name', domain)}")
+            except Exception as e:
+                logger.warning("[Orchestrator] 规则包恢复失败，回退叙事: %s", e)
+                self._rule_engine = None
+
+        # 3. 恢复预处理器 (打开已有 LanceDB 表)
+        from strategy_forge.core.config import config as forge_config
+        from .preprocessor import DeductionPreprocessor
+        self._preprocessor = DeductionPreprocessor(
+            workspace_root=forge_config.project_root,
+            session_id=self.session.id,
+        )
+        self._pre_goals = cfg.get("pre_goals", [])
+
+        # 4. 从 Kuzu 图重建 Agent 列表
+        self._log("orchestrator", "从图谱重建智能体...")
+        try:
+            from .agent_factory import create_agents_from_graph
+            agents = await create_agents_from_graph(
+                graph=self.graph,
+                source_material=self.session.source_material,
+                log_fn=self._log,
+                preprocessor=self._preprocessor,
+            )
+            self._agents = agents
+            self.session.agent_count = len(agents)
+        except Exception as e:
+            logger.warning("[Orchestrator] 智能体重建失败: %s", e)
+
+        # 5. 恢复量化状态 (EntityState metrics / history / pending delays)
+        snapshot = self._load_state_snapshot(cfg)
+        if snapshot and self._rule_engine is not None:
+            states_raw = snapshot.get("states", {})
+            restored: dict[str, Any] = {}
+            for eid, raw in states_raw.items():
+                st = self._rule_engine.init_state(
+                    raw.get("id", eid),
+                    raw.get("name", eid),
+                )
+                st.metrics = dict(raw.get("metrics", {}))
+                st.history = list(raw.get("history", []))
+                st._pending_delays = list(raw.get("pending_delays", []))
+                restored[eid] = st
+            self._states = restored
+            self._log("orchestrator",
+                      f"恢复量化状态: {len(restored)} 个实体")
+
+        self.store.update(self.session.id,
+                          status=SessionStatus.SIMULATING.value,
+                          phase=DeductionPhase.SIMULATION.value)
+        self._log("orchestrator", f"续推就绪，从第 {self._resume_start_round + 1} 轮开始")
+
     async def _phase1_ontology(self) -> None:
+        self._check_cancel()
         self._log("ontology", "阶段1: 本体生成开始")
         self.store.update(self.session.id,
                           status=SessionStatus.ONTOLOGY_RUNNING.value,
@@ -80,7 +211,7 @@ class DeductionOrchestrator:
 
     async def _phase1_5_quantify(self) -> None:
         """阶段1.5（仅量化模式）：确定规则包。叙事模式或识别失败则保持 _rule_engine=None。"""
-        import json as _json
+        self._check_cancel()
 
         data = self.store.get(self.session.id)
         cfg = (data or {}).get("config_json", {}) or {}
@@ -125,6 +256,7 @@ class DeductionOrchestrator:
             self._log("quantify", f"规则包加载失败，回退叙事模式: {e}")
 
     async def _phase2_graph(self) -> None:
+        self._check_cancel()
         self._log("graph", "阶段2: GraphRAG 知识图谱构建开始")
 
         # 预处理: 语义分块 + 实体提取 + LanceDB 索引
@@ -160,10 +292,8 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.AGENTS.value)
 
     async def _phase3_agents(self) -> None:
+        self._check_cancel()
         self._log("agents", "阶段3: 智能体工厂开始")
-
-        # Load pre-goals from session config
-        import json as _json
 
         from .agent_factory import create_agents_from_graph
         cfg_data = self.store.get(self.session.id)
@@ -205,6 +335,7 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.SIMULATION.value)
 
     async def _phase4_simulation(self) -> None:
+        self._check_cancel()
         total_rounds = self.session.total_rounds
         re_engine = self._rule_engine
         states: dict[str, Any] = {}
@@ -236,12 +367,11 @@ class DeductionOrchestrator:
         )
 
         rounds: list[SimulationRound] = []
-        for rnd in range(1, total_rounds + 1):
+        start_rnd = self._resume_start_round + 1
+        for rnd in range(start_rnd, total_rounds + 1):
             if self._cancel is not None and self._cancel.is_set():
                 self._log("simulation", "推演收到取消信号，提前终止")
-                self.store.update(self.session.id, status=SessionStatus.FAILED.value,
-                                  error="用户取消推演")
-                return
+                raise _PhaseCancelledError()
             self._log("simulation", f"  第 {rnd}/{total_rounds} 轮开始")
             result = await engine.run_round(rnd)
             rounds.append(result)

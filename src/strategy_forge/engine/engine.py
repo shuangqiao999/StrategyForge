@@ -131,6 +131,14 @@ class DeductionEngine:
             return session
 
         graph = self.get_graph(session_id)
+
+        is_resume = session.status == SessionStatus.PAUSED
+        resume_start_round = 0
+        if is_resume:
+            resume_start_round = max(session.current_round, 0)
+            self.log(session_id, "orchestrator",
+                      f"检测到暂停记录 (第 {resume_start_round} 轮), 从断点继续推演")
+
         orchestrator = DeductionOrchestrator(
             session=session,
             graph=graph,
@@ -138,6 +146,7 @@ class DeductionEngine:
             logger_fn=lambda phase, msg: self.log(session_id, phase, msg),
             cancel_event=cancel_event,
             round_callback=lambda rnd, total: self.signal_round_complete(session_id, rnd, total),
+            resume_start_round=resume_start_round,
         )
 
         await orchestrator.run()

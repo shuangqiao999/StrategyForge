@@ -534,6 +534,7 @@ async def stream_deduction(session_id: str, request: Request):
         engine = _get_engine(request)
         last_log_id = 0
         last_round = 0
+        last_status = ""
 
         session = engine.get_session(session_id)
         if session is None:
@@ -549,6 +550,11 @@ async def stream_deduction(session_id: str, request: Request):
         for log_entry in existing:
             last_log_id = max(last_log_id, log_entry.get("id", 0))
             yield f"data: {json.dumps(log_entry, ensure_ascii=False)}\n\n"
+
+        # Push initial status so frontend syncs immediately
+        if session.status.value:
+            last_status = session.status.value
+            yield f"data: {json.dumps({'type': 'status', 'status': last_status}, ensure_ascii=False)}\n\n"
 
         ev = engine.get_stream_event(session_id)
         ev.clear()
@@ -574,10 +580,14 @@ async def stream_deduction(session_id: str, request: Request):
                 last_round = cr
                 yield f"data: {json.dumps({'type': 'round', 'round': cr, 'total': rd.get('total', 0)}, ensure_ascii=False)}\n\n"
 
-            # ── check terminal status ──
+            # ── push status changes (every transition, not just terminal) ──
             session = engine.get_session(session_id)
+            if session and session.status.value != last_status:
+                last_status = session.status.value
+                yield f"data: {json.dumps({'type': 'status', 'status': last_status}, ensure_ascii=False)}\n\n"
+
+            # ── check terminal status ──
             if session and session.status.value in _TERMINAL_STATUSES:
-                yield f"data: {json.dumps({'type': 'status', 'status': session.status.value}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
                 engine.cleanup_events(session_id)
                 return

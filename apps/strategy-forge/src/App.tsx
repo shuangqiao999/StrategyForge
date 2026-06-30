@@ -75,6 +75,7 @@ const PHASE_LABELS: Record<string, string> = {
   failed: "失败",
   paused: "已暂停",
 };
+const RUNNING_SET = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
 
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
   <label style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, cursor: "pointer" }}>
@@ -386,6 +387,16 @@ export default function App() {
     }
     setLoading(false);
   }, [selectedId, fetchSessions, fetchGraph, fetchLogs, fetchReport, fetchTimeline, fetchCausal, persistSettings]);
+
+  const handleCancel = useCallback(async () => {
+    if (!selectedId) return;
+    setLoading(true);
+    try {
+      await fetch(`${API_BASE}/session/${selectedId}/start/cancel`, { method: "POST" });
+    } catch { /* ignore */ }
+    setLoading(false);
+    await fetchSessions();
+  }, [selectedId, fetchSessions]);
 
   const handleDelete = useCallback(async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -725,18 +736,17 @@ export default function App() {
                     </button>
                   ) : (
                     <button className="btnSmall btnSmallPrimary" style={{ marginRight: 6 }} onClick={startOptimize}
-                      disabled={selected.status === "simulating" || selected.status === "optimizing"}>
+                      disabled={selected ? RUNNING_SET.has(selected.status) : false}>
                       启动优化
                     </button>
                   )
-                ) : selected.status === "simulating" ? (
-                  <button className="btnSmall" style={{ marginRight: 6, background: "#ef4444", color: "#fff", border: "none" }} onClick={async () => {
-                    if (!selectedId) return;
-                    setLoading(true);
-                    try { await fetch(`${API_BASE}/session/${selectedId}/start/cancel`, { method: "POST" }); } catch { }
-                    setLoading(false);
-                  }}>
-                    取消推演
+                ) : selected && RUNNING_SET.has(selected.status) ? (
+                  <button className="btnSmall" style={{ marginRight: 6, background: "#22c55e", color: "#fff", border: "none" }} onClick={handleCancel} disabled={loading}>
+                    {selected.status === "simulating" ? "推演中" : "推演中"}
+                  </button>
+                ) : selected?.status === "paused" ? (
+                  <button className="btnSmall" style={{ marginRight: 6, background: "#3b82f6", color: "#fff", border: "none" }} onClick={handleStart} disabled={loading}>
+                    继续推演
                   </button>
                 ) : (
                   <button
@@ -745,7 +755,7 @@ export default function App() {
                     onClick={handleStart}
                     disabled={loading}
                   >
-                    {selected.status === "complete" ? "重新推演" : "启动推演"}
+                    {selected?.status === "complete" ? "重新推演" : "启动推演"}
                   </button>
                 )}
               </div>
