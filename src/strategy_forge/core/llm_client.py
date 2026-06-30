@@ -6,11 +6,13 @@ Only implements what the deduction engine actually uses: chat().
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
 
 from .config import config
+from .token_counter import TokenStats
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,11 @@ class TextBlock:
 class DeductionLLMResponse:
     """LLM response wrapper, compatible with the three parsing paths in _utils.extract_text()."""
 
-    def __init__(self, content: str):
+    def __init__(self, content: str, token_stats: TokenStats | None = None):
         self.text = content
         self.content = content  # string path (simulator.py custom extract path)
         self.choices: list = []  # dict path
+        self.token_stats = token_stats or TokenStats()
 
     def get(self, key: str, default=None):
         return getattr(self, key, default)
@@ -97,14 +100,29 @@ class DeductionLLMClient:
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
+        t0 = time.monotonic()
         try:
             resp = await self._http.post(
                 f"{self.api_base}/chat/completions", json=payload
             )
             resp.raise_for_status()
             data = resp.json()
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
             content = data["choices"][0]["message"]["content"]
-            return DeductionLLMResponse(content)
+            usage = data.get("usage", {})
+            stats = TokenStats(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=self.model,
+                duration_ms=elapsed_ms,
+            )
+            # Auto-accumulate if context is set
+            from .token_counter import _current_session, _current_phase, _current_round, accumulator
+            sid = _current_session.get()
+            if sid:
+                accumulator.record(sid, _current_phase.get(), _current_round.get(), stats)
+            return DeductionLLMResponse(content, token_stats=stats)
         except Exception as e:
             logger.error("[LLM] Chat request failed: %s", e)
             raise

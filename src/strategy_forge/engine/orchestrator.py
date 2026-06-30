@@ -8,6 +8,11 @@ from typing import Any
 
 from strategy_forge.storage.graph_store import DeductionGraphStore
 from strategy_forge.storage.session_store import SessionStore
+from strategy_forge.core.token_counter import (
+    _current_session,
+    _current_phase,
+    _current_round,
+)
 
 from .models import (
     DeductionPhase,
@@ -51,6 +56,7 @@ class DeductionOrchestrator:
 
     async def run(self) -> DeductionSession:
         session_id = self.session.id
+        _current_session.set(session_id)
         try:
             if self._resume_start_round > 0:
                 await self._resume_from_pause()
@@ -119,6 +125,7 @@ class DeductionOrchestrator:
 
     async def _resume_from_pause(self) -> None:
         """从 paused 状态续推：恢复内存态，跳过 Phase 1-3。"""
+        _current_phase.set("resume")
         self._log("orchestrator", "从暂停点恢复推演...")
         data = self.store.get(self.session.id)
         cfg = (data or {}).get("config_json", {}) or {}
@@ -200,6 +207,7 @@ class DeductionOrchestrator:
         self._log("orchestrator", f"续推就绪，从第 {self._resume_start_round + 1} 轮开始")
 
     async def _phase1_ontology(self) -> None:
+        _current_phase.set("ontology")
         self._check_cancel()
         self._log("ontology", "阶段1: 本体生成开始")
         self.store.update(self.session.id,
@@ -218,6 +226,7 @@ class DeductionOrchestrator:
 
     async def _phase1_5_quantify(self) -> None:
         """阶段1.5（仅量化模式）：确定规则包。叙事模式或识别失败则保持 _rule_engine=None。"""
+        _current_phase.set("quantify")
         self._check_cancel()
 
         data = self.store.get(self.session.id)
@@ -263,6 +272,7 @@ class DeductionOrchestrator:
             self._log("quantify", f"规则包加载失败，回退叙事模式: {e}")
 
     async def _phase2_graph(self) -> None:
+        _current_phase.set("graph")
         self._check_cancel()
         self._log("graph", "阶段2: GraphRAG 知识图谱构建开始")
 
@@ -299,6 +309,7 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.AGENTS.value)
 
     async def _phase3_agents(self) -> None:
+        _current_phase.set("agents")
         self._check_cancel()
         self._log("agents", "阶段3: 智能体工厂开始")
 
@@ -342,6 +353,7 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.SIMULATION.value)
 
     async def _phase4_simulation(self) -> None:
+        _current_phase.set("simulation")
         self._check_cancel()
         total_rounds = self.session.total_rounds
         re_engine = self._rule_engine
@@ -379,6 +391,7 @@ class DeductionOrchestrator:
             if self._cancel is not None and self._cancel.is_set():
                 self._log("simulation", "推演收到取消信号，提前终止")
                 raise _PhaseCancelledError()
+            _current_round.set(rnd)
             self._log("simulation", f"  第 {rnd}/{total_rounds} 轮开始")
             result = await engine.run_round(rnd)
             rounds.append(result)
@@ -396,6 +409,7 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.REPORT.value)
 
     async def _phase5_report(self) -> None:
+        _current_phase.set("report")
         self._log("report", "阶段5: 报告生成开始")
 
         from .reporter import generate_report

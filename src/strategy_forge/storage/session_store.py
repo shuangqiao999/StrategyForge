@@ -79,6 +79,11 @@ class SessionStore:
                     "ALTER TABLE deduction_sessions "
                     "ADD COLUMN optimization_report_json TEXT DEFAULT '{}'"
                 )
+            if "token_json" not in cols:
+                conn.execute(
+                    "ALTER TABLE deduction_sessions "
+                    "ADD COLUMN token_json TEXT DEFAULT '{}'"
+                )
             conn.commit()
 
     def create(self, session_id: str, title: str, source_material: str,
@@ -120,6 +125,7 @@ class SessionStore:
         d["config_json"] = json.loads(d.get("config_json", "{}") or "{}")
         d["report_json"] = json.loads(d.get("report_json", "{}") or "{}")
         d["optimization_report_json"] = json.loads(d.get("optimization_report_json", "{}") or "{}")
+        d["token_json"] = json.loads(d.get("token_json", "{}") or "{}")
         return d
 
     def list_all(self, limit: int = 50) -> list[dict[str, Any]]:

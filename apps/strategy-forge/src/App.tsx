@@ -62,6 +62,14 @@ interface ReportData {
   conclusion?: string;
 }
 
+interface TokenStats {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  phases: Record<string, { prompt: number; completion: number; total: number }>;
+  rounds: Record<string, { prompt: number; completion: number; total: number }>;
+}
+
 // ── Phase Labels ──
 
 const PHASE_LABELS: Record<string, string> = {
@@ -108,8 +116,9 @@ export default function App() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [timeline, setTimeline] = useState<TimelineData | null>(null);
   const [causal, setCausal] = useState<CausalData | null>(null);
+  const [tokenData, setTokenData] = useState<TokenStats | null>(null);
   const [timelineView, setTimelineView] = useState<"timeline" | "causal">("timeline");
-  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize">("graph");
+  const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize" | "token">("graph");
   const [domain, setDomain] = useState("auto");
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
 
@@ -283,6 +292,16 @@ export default function App() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchTokens = useCallback(async (sessionId: string) => {
+    try {
+      const r = await fetch(`${API_BASE}/session/${sessionId}/tokens`);
+      if (r.ok) {
+        const d = await r.json();
+        setTokenData(d.stats && Object.keys(d.stats).length > 0 ? d.stats : null);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   const fetchDomains = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/domains`);
@@ -326,6 +345,7 @@ export default function App() {
     fetchReport(id);
     fetchTimeline(id);
     fetchCausal(id);
+    fetchTokens(id);
   }, [fetchGraph, fetchLogs, fetchReport, fetchTimeline, fetchCausal]);
 
   const handleCreate = useCallback(async () => {
@@ -509,7 +529,7 @@ export default function App() {
     if (!runningSet.has(selected.status)) return;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
     es.onmessage = (ev: MessageEvent) => {
-      if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); return; }
+      if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); fetchTokens(selectedId); return; }
       try {
         const d = JSON.parse(ev.data);
         if (d.type === "round") {
@@ -529,6 +549,21 @@ export default function App() {
     es.onerror = () => { es.close(); };
     return () => es.close();
   }, [selectedId, sessions, fetchSessions, fetchGraph, fetchTimeline, fetchCausal]);
+
+  // Token 统计每 2 分钟自动刷新
+  useEffect(() => {
+    if (!selectedId) return;
+    const tick = () => {
+      const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
+      const sel = sessions.find(s => s.id === selectedId);
+      if (sel && runningSet.has(sel.status)) {
+        fetchTokens(selectedId);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 120000);
+    return () => window.clearInterval(id);
+  }, [selectedId, sessions, fetchTokens]);
 
   const selected = sessions.find(s => s.id === selectedId);
 
@@ -765,7 +800,7 @@ export default function App() {
 
             {/* 主区标签切换: 图谱 / 报告 / 日志 */}
             <div style={{ display: "flex", gap: 4, padding: "6px 12px 0" }}>
-              {(["graph", "report", "logs", "timeline", "optimize"] as const).map(k => (
+              {(["graph", "report", "logs", "timeline", "optimize", "token"] as const).map(k => (
                 <button
                   key={k}
                   onClick={() => setMainTab(k)}
@@ -775,7 +810,7 @@ export default function App() {
                     background: mainTab === k ? "#3b82f6" : "#0f172a",
                     color: mainTab === k ? "#fff" : "#94a3b8",
                   }}
-                >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : k === "timeline" ? "时间线" : "优化"}</button>
+                >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : k === "timeline" ? "时间线" : k === "token" ? "Token" : "优化"}</button>
               ))}
             </div>
 
@@ -1187,6 +1222,107 @@ export default function App() {
                         </div>
                       ))}
                     </>
+                  )}
+                </div>
+              )}
+
+              {mainTab === "token" && (
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, overflowY: "auto" }}>
+                  {tokenData ? (
+                    <>
+                      {/* 总览卡片 */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 20 }}>
+                        {[
+                          { label: "总 Tokens", value: (tokenData.total_tokens / 1_000_000).toFixed(2) + " M", color: "#3b82f6" },
+                          { label: "输入", value: (tokenData.total_prompt_tokens / 1_000_000).toFixed(2) + " M", color: "#8b5cf6" },
+                          { label: "输出", value: (tokenData.total_completion_tokens / 1_000_000).toFixed(2) + " M", color: "#06b6d4" },
+                          { label: "输入/输出比", value: tokenData.total_prompt_tokens > 0 ? `1:${(tokenData.total_completion_tokens / tokenData.total_prompt_tokens).toFixed(2)}` : "N/A", color: "#f59e0b" },
+                        ].map(c => (
+                          <div key={c.label} style={{ background: "#0f172a", borderRadius: 8, padding: 12, borderLeft: `3px solid ${c.color}` }}>
+                            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{c.label}</div>
+                            <div style={{ fontSize: 18, fontWeight: 700, color: c.color }}>{c.value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 各阶段分布 */}
+                      {tokenData.phases && Object.keys(tokenData.phases).length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>各阶段分布</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {Object.entries(tokenData.phases).map(([phase, pdata]) => (
+                              <div key={phase} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ width: 80, fontSize: 12, color: "#94a3b8", textAlign: "right", flexShrink: 0 }}>{phase === "ontology" ? "本体生成" : phase === "quantify" ? "量化识别" : phase === "graph" ? "图谱构建" : phase === "agents" ? "智能体工厂" : phase === "simulation" ? "模拟推演" : phase === "report" ? "报告生成" : phase === "resume" ? "续推恢复" : phase}</span>
+                                <div style={{ flex: 1, height: 20, background: "#0f172a", borderRadius: 4, overflow: "hidden", display: "flex" }}>
+                                  {tokenData.total_tokens > 0 && (
+                                    <>
+                                      <div style={{ height: "100%", background: "#8b5cf6", width: `${(pdata.prompt / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输入 ${(pdata.prompt/1_000_000).toFixed(2)}M`} />
+                                      <div style={{ height: "100%", background: "#06b6d4", width: `${(pdata.completion / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输出 ${(pdata.completion/1_000_000).toFixed(2)}M`} />
+                                    </>
+                                  )}
+                                </div>
+                                <span style={{ width: 60, fontSize: 11, color: "#64748b", textAlign: "left", flexShrink: 0 }}>{(pdata.total / 1_000_000).toFixed(2)} M</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "#64748b" }}>
+                            <span><span style={{ color: "#8b5cf6" }}>■</span> 输入</span>
+                            <span><span style={{ color: "#06b6d4" }}>■</span> 输出</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 轮次柱状图 */}
+                      {tokenData.rounds && Object.keys(tokenData.rounds).length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>Token 消耗趋势 (每轮)</div>
+                          {(() => {
+                            const rounds = Object.entries(tokenData.rounds);
+                            if (rounds.length === 0) return null;
+                            const maxTotal = Math.max(...rounds.map(([, r]) => r.total), 1);
+                            const barW = Math.max(12, Math.min(40, 800 / rounds.length));
+                            const svgH = 160; const svgW = rounds.length * (barW + 6) + 40;
+                            const chartH = 120; const padL = 50; const padB = 30;
+                            return (
+                              <div style={{ overflowX: "auto" }}>
+                                <svg width={svgW} height={svgH} style={{ display: "block" }}>
+                                  {/* Y axis labels */}
+                                  {[0, 1, 2, 3, 4].map(i => {
+                                    const y = chartH - (i / 4) * chartH + 10;
+                                    const val = (maxTotal / 1_000_000 * i / 4).toFixed(1);
+                                    return <text key={i} x={padL - 8} y={y + 4} textAnchor="end" fill="#64748b" fontSize={10}>{val}M</text>;
+                                  })}
+                                  {/* Grid lines */}
+                                  {[0, 1, 2, 3, 4].map(i => {
+                                    const y = chartH - (i / 4) * chartH + 10;
+                                    return <line key={i} x1={padL} y1={y} x2={svgW} y2={y} stroke="#1e293b" strokeWidth={1} />;
+                                  })}
+                                  {rounds.map(([rnd, rdata], idx) => {
+                                    const x = padL + idx * (barW + 6);
+                                    const hPrompt = maxTotal > 0 ? (rdata.prompt / maxTotal) * chartH : 0;
+                                    const hCompl = maxTotal > 0 ? (rdata.completion / maxTotal) * chartH : 0;
+                                    const yBase = chartH + 10;
+                                    return (
+                                      <g key={rnd}>
+                                        <rect x={x} y={yBase - hPrompt - hCompl} width={barW} height={hPrompt + hCompl} fill="#1e293b" rx={2} />
+                                        <rect x={x} y={yBase - hPrompt - hCompl} width={barW} height={hPrompt} fill="#8b5cf6" rx={2} />
+                                        <rect x={x} y={yBase - hCompl} width={barW} height={hCompl} fill="#06b6d4" rx={2} />
+                                        <text x={x + barW / 2} y={yBase + 14} textAnchor="middle" fill="#64748b" fontSize={9}>R{rnd}</text>
+                                        <title>{`R${rnd}: 入${(rdata.prompt/1_000_000).toFixed(3)}M 出${(rdata.completion/1_000_000).toFixed(3)}M 合计${(rdata.total/1_000_000).toFixed(3)}M`}</title>
+                                      </g>
+                                    );
+                                  })}
+                                </svg>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
+                      {selected?.status && RUNNING_SET.has(selected.status) ? "等待 LLM 调用统计..." : "暂无 Token 统计数据"}
+                    </div>
                   )}
                 </div>
               )}

@@ -517,6 +517,25 @@ async def get_logs(session_id: str, limit: int = Query(200), request: Request = 
     return engine.get_logs(session_id, limit=limit)
 
 
+@router.get("/session/{session_id}/tokens")
+async def get_tokens(session_id: str, request: Request):
+    engine = _get_engine(request)
+    # Merge live accumulator stats with stored token_json
+    from strategy_forge.core.token_counter import accumulator
+    live = accumulator.get_session_stats(session_id)
+    data = engine.session_store.get(session_id)
+    stored = {}
+    if data:
+        stored = data.get("token_json", {}) or {}
+        if isinstance(stored, str):
+            stored = json.loads(stored)
+    merged = {**stored, **(live or {})}
+    # If live data exists, it supersedes stored for same-phase keys
+    if live:
+        merged = stored if not stored else live
+    return {"session_id": session_id, "stats": merged or stored}
+
+
 # ── SSE Stream ──
 
 _RUNNING_STATUSES = frozenset({

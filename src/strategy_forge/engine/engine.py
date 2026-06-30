@@ -151,6 +151,14 @@ class DeductionEngine:
 
         await orchestrator.run()
 
+        # Persist token stats
+        import json
+        from strategy_forge.core.token_counter import accumulator
+        stats = accumulator.get_session_stats(session_id)
+        if stats:
+            self.session_store.update(session_id,
+                                      token_json=json.dumps(stats, ensure_ascii=False))
+
         updated = self.get_session(session_id)
         if updated is None:
             raise RuntimeError("Session lost after pipeline")
