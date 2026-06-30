@@ -265,6 +265,9 @@ class DeductionOrchestrator:
             "key_events": report.key_events,
             "risk_alerts": report.risk_alerts,
             "recommendations": report.recommendations,
+            "causal_summary": report.causal_summary,
+            "stage_narratives": report.stage_narratives,
+            "conclusion": report.conclusion,
         }
         if self._rule_engine is not None and self._states:
             report_payload["quantified"] = True

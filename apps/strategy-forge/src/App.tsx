@@ -56,6 +56,9 @@ interface ReportData {
   quantified?: boolean;
   domain?: string;
   final_states?: Record<string, { name: string; metrics: Record<string, number>; history?: any[]; alive: boolean }>;
+  causal_summary?: string[];
+  stage_narratives?: Array<{ stage: string; round_range: string; start_state: string; key_decisions: string; causal_logic: string; end_state: string }>;
+  conclusion?: string;
 }
 
 // ── Phase Labels ──
@@ -837,6 +840,34 @@ export default function App() {
                           <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
                             {report.recommendations.map((x, i) => <li key={i}>{x}</li>)}
                           </ul>
+                        </div>
+                      )}
+                      {report.conclusion && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #60a5fa", paddingLeft: 8 }}>整体结论与启示</div>
+                          <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{report.conclusion}</div>
+                        </div>
+                      )}
+                      {report.causal_summary && report.causal_summary.length > 0 && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 6, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>关键因果链</div>
+                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                            {report.causal_summary.map((c: string, i: number) => <li key={i} style={{ color: "#cbd5e1" }}>{c}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {report.stage_narratives && report.stage_narratives.length > 0 && (
+                        <div style={{ marginBottom: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa", marginBottom: 6, borderLeft: "3px solid #a78bfa", paddingLeft: 8 }}>时序因果叙事（按阶段）</div>
+                          {report.stage_narratives.map((s: any, i: number) => (
+                            <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10 }}>
+                              <div style={{ fontWeight: 600, color: "#a78bfa", marginBottom: 4 }}>{s.stage || `阶段${i+1}`} · {s.round_range || ""}</div>
+                              {s.start_state && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>起始：{s.start_state}</div>}
+                              {s.key_decisions && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 2 }}>核心决策：{s.key_decisions}</div>}
+                              {s.causal_logic && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>因果逻辑：{s.causal_logic}</div>}
+                              {s.end_state && <div style={{ fontSize: 12, color: "#64748b" }}>终点：{s.end_state}</div>}
+                            </div>
+                          ))}
                         </div>
                       )}
                       {report.key_events && report.key_events.length > 0 && (

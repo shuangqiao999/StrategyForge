@@ -18,9 +18,14 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
 
 ## 推演概览
 - 会话标题: {title}
+- 推演领域: {domain}
 - 智能体数量: {agent_count}
 - 模拟轮数: {round_count}
 - 图谱实体数: {entity_count}, 关系数: {relation_count}
+- 不可变目标: {immutable_goals}
+
+## 智能体总览
+{agent_overview}
 
 ## 关键事件（最近 20 个）
 {key_events}
@@ -40,7 +45,7 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
 ## 输出 JSON
 ```json
 {{
-  "summary": "推演总结 (100-200字)",
+  "summary": "推演总结 (150-300字)",
   "key_events": [
     {{"round": 1, "description": "事件描述", "significance": "高/中/低"}}
   ],
@@ -48,9 +53,29 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
     "agent_id": ["行动1", "行动2"]
   }},
   "risk_alerts": ["风险预警1", "风险预警2"],
-  "recommendations": ["策略建议1", "策略建议2"]
+  "recommendations": ["策略建议1", "策略建议2"],
+  "causal_summary": [
+    "→ 因果链1：A做了什么 → B发生了什么 → 最终导致C（引用具体轮次与数值）",
+    "→ 因果链2：..."
+  ],
+  "stage_narratives": [
+    {{
+      "stage": "阶段名称（如试探期/对抗期/决战期）",
+      "round_range": "第X-Y轮",
+      "start_state": "阶段起始状态",
+      "key_decisions": "核心决策与行动",
+      "causal_logic": "因果逻辑描述（为什么A导致B）",
+      "end_state": "阶段终点与为下一阶段埋下的伏笔"
+    }},
+    ...
+  ],
+  "conclusion": "整体结论与启示（100-200字）"
 }}
 ```
+
+- causal_summary: 识别推演中最重要的3-5条因果链，用箭头式表述，引用具体轮次和量化变化值
+- stage_narratives: 将整个推演按局势转折分为2-4个阶段，每阶段描述起因-经过-结果的完整逻辑链
+- conclusion: 对推演整体规律的提炼，特别关注不可变目标的达成情况及其偏离原因
 
 只返回 JSON，不要解释。"""
 
@@ -138,14 +163,39 @@ async def generate_report(
         except Exception as e:
             logger.debug("[Reporter] 因果归因查询失败: %s", e)
 
+    # 推演设定上下文
+    domain_text = "叙事模式（无量化）"
+    agent_overview = "（无智能体数据）"
+    if graph is not None:
+        try:
+            agents = graph.query(
+                f"MATCH (a:{graph.AGENT_TABLE}) RETURN a.name, a.persona ORDER BY a.name")
+            if agents:
+                agent_overview = "\n".join(
+                    f"- {r[0]}: {r[1][:60]}" for r in agents[:12] if r[0])
+                log_fn("report", f"智能体总览 {len(agents)} 个注入报告")
+        except Exception:
+            pass
+        try:
+            dom = graph.query(
+                f"MATCH (a:{graph.AGENT_TABLE}) RETURN a.name LIMIT 1")
+            if dom:
+                # 从 agent area 推断 domain（有限）
+                pass
+        except Exception:
+            pass
+
     client = LLMClient()
     system = "你是推演分析专家，生成结构化推演报告。只输出 JSON。"
     messages = [Message(role="user", content=_REPORT_PROMPT.format(
         title=session.title or "推演会话",
+        domain=domain_text,
+        immutable_goals="（无）",
         agent_count=session.agent_count,
         round_count=session.current_round,
         entity_count=session.entity_count,
         relation_count=session.relation_count,
+        agent_overview=agent_overview,
         key_events="\n".join(key_events[-20:]),
         source_snippet=session.source_material[:1000],
         key_relations=key_relations,
@@ -178,6 +228,9 @@ async def generate_report(
         agent_trajectories=report_data.get("agent_trajectories", default_report.agent_trajectories),
         risk_alerts=report_data.get("risk_alerts", []),
         recommendations=report_data.get("recommendations", []),
+        causal_summary=report_data.get("causal_summary", []),
+        stage_narratives=report_data.get("stage_narratives", []),
+        conclusion=report_data.get("conclusion", ""),
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
 
