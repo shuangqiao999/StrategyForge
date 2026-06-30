@@ -304,5 +304,168 @@
       "audience_fatigue": {"condition": "media_reach > 70", "effects": {"public_trust": -1, "polarization": 1}},
       "truth_decay": {"condition": "public_trust < 20 and polarization > 60", "effects": {"narrative_dominance": -3, "public_trust": -3}}
     }
+  },
+
+  "geo_strategy": {
+    "name": "🌐 大国博弈（跨域联动）",
+    "domain": "geo_strategy",
+    "display_name": "大国博弈",
+    "metrics": [
+      "strength", "morale", "supply", "fatigue",
+      "cash_flow", "supply_chain",
+      "support_rate", "intl_relations", "unity",
+      "tech_lead",
+      "public_trust", "polarization"
+    ],
+    "initial_metrics": {
+      "strength": 100, "morale": 75, "supply": 85, "fatigue": 10,
+      "cash_flow": 65, "supply_chain": 70,
+      "support_rate": 55, "intl_relations": 60, "unity": 55,
+      "tech_lead": 50,
+      "public_trust": 65, "polarization": 35
+    },
+    "thresholds": {
+      "strength": 15, "morale": 20, "supply": 10,
+      "cash_flow": 10, "supply_chain": 15,
+      "support_rate": 15, "unity": 10,
+      "tech_lead": 15,
+      "public_trust": 15
+    },
+    "actions": [
+      "military_offensive",
+      "economic_mobilization",
+      "diplomatic_engagement",
+      "tech_investment",
+      "domestic_propaganda",
+      "trade_warfare",
+      "defensive_buildup",
+      "observe"
+    ],
+    "self_effects": {
+      "military_offensive": {
+        "strength": -15, "supply": -12, "fatigue": 10, "morale": -5,
+        "cash_flow": -10, "supply_chain": -5,
+        "support_rate": -3, "intl_relations": -8, "unity": -2
+      },
+      "economic_mobilization": {
+        "cash_flow": -12, "supply_chain": 12, "strength": 5, "morale": 3,
+        "support_rate": -2, "unity": -1
+      },
+      "diplomatic_engagement": {
+        "intl_relations": 12, "support_rate": 2, "public_trust": 3,
+        "cash_flow": 5, "unity": 2
+      },
+      "tech_investment": {
+        "cash_flow": -20, "tech_lead": 12,
+        "strength": 5, "supply_chain": 3
+      },
+      "domestic_propaganda": {
+        "support_rate": 8, "unity": 3, "morale": 5,
+        "public_trust": -5, "polarization": 6, "intl_relations": -3
+      },
+      "trade_warfare": {
+        "cash_flow": -8, "supply_chain": 10, "support_rate": -3,
+        "intl_relations": -10, "public_trust": -4
+      },
+      "defensive_buildup": {
+        "strength": -3, "supply": -5, "fatigue": -2, "morale": 5,
+        "cash_flow": -8, "support_rate": 2
+      },
+      "observe": {
+        "fatigue": -5, "morale": 1, "unity": 1, "public_trust": 1
+      }
+    },
+    "target_effects": {
+      "military_offensive": {
+        "strength": -20, "morale": -12, "supply": -8,
+        "supply_chain": -10, "cash_flow": -8,
+        "intl_relations": -5, "public_trust": -4
+      },
+      "trade_warfare": {
+        "supply_chain": -25, "cash_flow": -12,
+        "support_rate": -6, "intl_relations": -8,
+        "tech_lead": -5
+      },
+      "domestic_propaganda": {
+        "public_trust": -6, "intl_relations": -3
+      },
+      "diplomatic_engagement": {
+        "intl_relations": 3
+      }
+    },
+    "conditional_effects": {
+      "offensive_weariness": {
+        "condition": "fatigue > 65",
+        "self_effects": {"morale": -5, "support_rate": -4}
+      },
+      "war_economy_boom": {
+        "condition": "support_rate > 70 and cash_flow > 60",
+        "self_effects": {"supply_chain": 5, "morale": 3}
+      },
+      "tech_catchup_bonus": {
+        "condition": "tech_lead < 30",
+        "self_effects": {"tech_lead": 8, "strength": 3}
+      },
+      "propaganda_backfire": {
+        "condition": "public_trust < 30",
+        "self_effects": {"support_rate": -8, "polarization": 5}
+      },
+      "diplomatic_isolation": {
+        "condition": "intl_relations < 25",
+        "self_effects": {"cash_flow": -6, "supply_chain": -8, "support_rate": -3}
+      },
+      "rally_around_flag": {
+        "condition": "strength < 30 and support_rate > 50",
+        "self_effects": {"morale": 10, "unity": 5, "strength": 3}
+      }
+    },
+    "delay_effects": {
+      "economic_mobilization": {
+        "delay": 2,
+        "effects": {"cash_flow": 10, "supply_chain": 8, "strength": 8, "support_rate": 3}
+      },
+      "tech_investment": {
+        "delay": 2,
+        "effects": {"tech_lead": 8, "strength": 5, "cash_flow": 8}
+      },
+      "diplomatic_engagement": {
+        "delay": 1,
+        "effects": {"intl_relations": 6, "cash_flow": 5}
+      }
+    },
+    "auto_effects": {
+      "war_exhaustion": {
+        "condition": "fatigue > 60 and strength > 40",
+        "effects": {"support_rate": -2, "morale": -3, "unity": -1}
+      },
+      "economic_strain": {
+        "condition": "cash_flow < 20",
+        "effects": {"supply_chain": -3, "strength": -3, "morale": -5, "support_rate": -4}
+      },
+      "diplomatic_decay": {
+        "condition": "intl_relations > 80",
+        "effects": {"intl_relations": -2}
+      },
+      "polarization_erosion": {
+        "condition": "polarization > 60",
+        "effects": {"public_trust": -2, "support_rate": -3, "unity": -2}
+      },
+      "tech_race_pressure": {
+        "condition": "tech_lead < 40",
+        "effects": {"cash_flow": -4, "tech_lead": 2}
+      },
+      "supply_chain_attrition": {
+        "condition": "supply_chain < 30 and fatigue > 40",
+        "effects": {"strength": -5, "supply": -5, "morale": -4}
+      },
+      "internal_resilience": {
+        "condition": "unity > 70 and support_rate > 60",
+        "effects": {"strength": 2, "morale": 2}
+      },
+      "collapse_spiral": {
+        "condition": "unity < 20 and support_rate < 25",
+        "effects": {"cash_flow": -8, "strength": -8, "intl_relations": -5, "public_trust": -5}
+      }
+    }
   }
 }
