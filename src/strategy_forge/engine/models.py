@@ -109,6 +109,7 @@ class DeductionReport:
     raw_graph_stats: dict[str, Any] = field(default_factory=dict)
     causal_summary: list[str] = field(default_factory=list)
     stage_narratives: list[dict[str, Any]] = field(default_factory=list)
+    deviation_analysis: list[dict[str, Any]] = field(default_factory=list)
     conclusion: str = ""
 
 

@@ -42,6 +42,9 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
 ## 因果归因（确定性·来自数值真值：源 → 目标 累计指标影响，负值=致衰）
 {causal_attribution}
 
+## 量化指标轨迹（每轮各实体关键指标变化，含具体数值）
+{quantified_context}
+
 ## 输出 JSON
 ```json
 {{
@@ -55,29 +58,82 @@ _REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，
   "risk_alerts": ["风险预警1", "风险预警2"],
   "recommendations": ["策略建议1", "策略建议2"],
   "causal_summary": [
-    "→ 因果链1：A做了什么 → B发生了什么 → 最终导致C（引用具体轮次与数值）",
+    "→ 因果链1：A做了什么 → B发生了什么 → 最终导致C（引用具体轮次与数值变化，如+12/-8）",
     "→ 因果链2：..."
   ],
   "stage_narratives": [
     {{
       "stage": "阶段名称（如试探期/对抗期/决战期）",
       "round_range": "第X-Y轮",
-      "start_state": "阶段起始状态",
+      "start_state": "阶段起始状态（含关键指标值）",
       "key_decisions": "核心决策与行动",
       "causal_logic": "因果逻辑描述（为什么A导致B）",
       "end_state": "阶段终点与为下一阶段埋下的伏笔"
     }},
     ...
   ],
+  "deviation_analysis": [
+    {{
+      "round": 1,
+      "agent": "行为体名称",
+      "decision": "具体决策描述",
+      "deviation_level": "显著/轻微",
+      "reason": "偏离不可变目标的原因分析"
+    }}
+  ],
   "conclusion": "整体结论与启示（100-200字）"
 }}
 ```
 
-- causal_summary: 识别推演中最重要的3-5条因果链，用箭头式表述，引用具体轮次和量化变化值
+- causal_summary: 识别推演中最重要的3-5条因果链，用箭头式表述，**必须引用具体轮次和量化变化值**（如"第3轮宋江决策→民心**+12**→第5轮获得新兵源"）
 - stage_narratives: 将整个推演按局势转折分为2-4个阶段，每阶段描述起因-经过-结果的完整逻辑链
+- deviation_analysis: 识别推演中哪些决策**偏离了不可变目标的方向**，分析原因。若无偏离则返回空数组
 - conclusion: 对推演整体规律的提炼，特别关注不可变目标的达成情况及其偏离原因
 
 只返回 JSON，不要解释。"""
+
+
+def _build_quantified_context(
+    rounds: list[SimulationRound],
+    states: dict[str, Any] | None,
+) -> str:
+    """Build structured quantified trajectory text for the LLM prompt."""
+    if not states:
+        return "（叙事模式，无量化指标数据）"
+
+    parts: list[str] = []
+    # Per-entity metric snapshots at key rounds (first, last, and every ~3rd round)
+    sample_rounds = set()
+    if rounds:
+        total = max(r.round_number for r in rounds)
+        sample_rounds = {r.round_number for r in rounds
+                         if r.round_number in (1, total)
+                         or r.round_number % max(1, total // 4) == 0}
+    for eid, st in states.items():
+        name = getattr(st, "name", eid[:8])
+        history = getattr(st, "history", []) or []
+        # Group history by round for per-round summaries
+        by_round: dict[int, list[dict]] = {}
+        for h in history:
+            rnd = h.get("round", 0)
+            if rnd not in by_round:
+                by_round[rnd] = []
+            by_round[rnd].append(h)
+        # Show key round snapshots
+        snapshots: list[str] = []
+        for rnd in sorted(by_round.keys()):
+            if rnd in sample_rounds or len(snapshots) < 3:
+                deltas = ", ".join(
+                    f"{h.get('metric','?')}{h.get('delta',0):+.1f}"
+                    for h in by_round[rnd][:6]
+                )
+                snapshots.append(f"  R{rnd}: {deltas}")
+        if snapshots:
+            parts.append(f"- {name}:"
+                         f"\n{'  '.join(snapshots[:8])}")
+    if not parts:
+        parts.append("- （无量化轨迹数据）")
+    return "\n".join(parts)
 
 
 async def generate_report(
@@ -86,6 +142,8 @@ async def generate_report(
     rounds: list[SimulationRound],
     log_fn: Callable[[str, str], None],
     preprocessor: Any = None,
+    pre_goals: list[str] | None = None,
+    states: dict[str, Any] | None = None,
 ) -> DeductionReport:
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
@@ -186,11 +244,13 @@ async def generate_report(
             pass
 
     client = LLMClient()
+    quantified_context = _build_quantified_context(rounds, states)
+    immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
     system = "你是推演分析专家，生成结构化推演报告。只输出 JSON。"
     messages = [Message(role="user", content=_REPORT_PROMPT.format(
         title=session.title or "推演会话",
         domain=domain_text,
-        immutable_goals="（无）",
+        immutable_goals=immutable_goals,
         agent_count=session.agent_count,
         round_count=session.current_round,
         entity_count=session.entity_count,
@@ -201,6 +261,7 @@ async def generate_report(
         key_relations=key_relations,
         action_timeline=action_timeline,
         causal_attribution=causal_attribution,
+        quantified_context=quantified_context,
     ))]
 
     default_report = DeductionReport(
@@ -230,6 +291,7 @@ async def generate_report(
         recommendations=report_data.get("recommendations", []),
         causal_summary=report_data.get("causal_summary", []),
         stage_narratives=report_data.get("stage_narratives", []),
+        deviation_analysis=report_data.get("deviation_analysis", []),
         conclusion=report_data.get("conclusion", ""),
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )

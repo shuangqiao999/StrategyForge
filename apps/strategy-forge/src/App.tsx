@@ -58,6 +58,7 @@ interface ReportData {
   final_states?: Record<string, { name: string; metrics: Record<string, number>; history?: any[]; alive: boolean }>;
   causal_summary?: string[];
   stage_narratives?: Array<{ stage: string; round_range: string; start_state: string; key_decisions: string; causal_logic: string; end_state: string }>;
+  deviation_analysis?: Array<{ round: number; agent: string; decision: string; deviation_level: string; reason: string }>;
   conclusion?: string;
 }
 
@@ -124,6 +125,7 @@ export default function App() {
   const [optProgress, setOptProgress] = useState<{ done: number; total: number; current: string; best_win: number } | null>(null);
   const [optReport, setOptReport] = useState<any>(null);
   const optPollRef = useRef<number | null>(null);
+  const [selectedCausalNode, setSelectedCausalNode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -821,11 +823,12 @@ export default function App() {
                 <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, overflowY: "auto" }}>
                   {report ? (
                     <>
-                      {report.quantified && report.final_states && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>
-                            量化最终状态（领域：{report.domain}）
-                          </div>
+                      {/* ── 一、推演设定 ── */}
+                      {report.quantified && report.final_states ? (
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", cursor: "pointer", borderLeft: "3px solid #3b82f6", paddingLeft: 8, marginBottom: 6 }}>
+                            一、量化最终状态（领域：{report.domain}）
+                          </summary>
                           {Object.values(report.final_states).map((s, i) => (
                             <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 8, borderLeft: `3px solid ${s.alive ? "#34d399" : "#ef4444"}` }}>
                               <div style={{ fontWeight: 600 }}>
@@ -846,61 +849,115 @@ export default function App() {
                               )}
                             </div>
                           ))}
-                        </div>
-                      )}
+                        </details>
+                      ) : null}
+
+                      {/* ── 推演总结 ── */}
                       {report.summary && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>推演总结</div>
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #3b82f6", paddingLeft: 8, marginBottom: 6 }}>
+                            推演总结
+                          </summary>
                           <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{report.summary}</div>
-                        </div>
+                        </details>
                       )}
-                      {report.risk_alerts && report.risk_alerts.length > 0 && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", marginBottom: 6, borderLeft: "3px solid #ef4444", paddingLeft: 8 }}>风险预警</div>
-                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                            {report.risk_alerts.map((x, i) => <li key={i}>{x}</li>)}
-                          </ul>
-                        </div>
-                      )}
-                      {report.recommendations && report.recommendations.length > 0 && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#34d399", marginBottom: 6, borderLeft: "3px solid #10b981", paddingLeft: 8 }}>策略建议</div>
-                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                            {report.recommendations.map((x, i) => <li key={i}>{x}</li>)}
-                          </ul>
-                        </div>
-                      )}
-                      {report.conclusion && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #60a5fa", paddingLeft: 8 }}>整体结论与启示</div>
-                          <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{report.conclusion}</div>
-                        </div>
-                      )}
+
+                      {/* ── 二、关键因果链 ── */}
                       {report.causal_summary && report.causal_summary.length > 0 && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 6, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>关键因果链</div>
-                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                            {report.causal_summary.map((c: string, i: number) => <li key={i} style={{ color: "#cbd5e1" }}>{c}</li>)}
-                          </ul>
-                        </div>
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", cursor: "pointer", borderLeft: "3px solid #f59e0b", paddingLeft: 8, marginBottom: 6 }}>
+                            关键因果链（{report.causal_summary.length} 条）
+                          </summary>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {report.causal_summary.map((c: string, i: number) => (
+                              <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #f59e0b", fontSize: 12, lineHeight: 1.7 }}>
+                                {c}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
                       )}
+
+                      {/* ── 三、时序因果叙事 ── */}
                       {report.stage_narratives && report.stage_narratives.length > 0 && (
-                        <div style={{ marginBottom: 18 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa", marginBottom: 6, borderLeft: "3px solid #a78bfa", paddingLeft: 8 }}>时序因果叙事（按阶段）</div>
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#a78bfa", cursor: "pointer", borderLeft: "3px solid #a78bfa", paddingLeft: 8, marginBottom: 6 }}>
+                            时序因果叙事（{report.stage_narratives.length} 阶段）
+                          </summary>
                           {report.stage_narratives.map((s: any, i: number) => (
-                            <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10 }}>
-                              <div style={{ fontWeight: 600, color: "#a78bfa", marginBottom: 4 }}>{s.stage || `阶段${i+1}`} · {s.round_range || ""}</div>
-                              {s.start_state && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>起始：{s.start_state}</div>}
-                              {s.key_decisions && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 2 }}>核心决策：{s.key_decisions}</div>}
-                              {s.causal_logic && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2 }}>因果逻辑：{s.causal_logic}</div>}
-                              {s.end_state && <div style={{ fontSize: 12, color: "#64748b" }}>终点：{s.end_state}</div>}
+                            <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "2px solid #a78bfa" }}>
+                              <div style={{ fontWeight: 600, color: "#c4b5fd", marginBottom: 6 }}>
+                                <span style={{ background: "#312e81", padding: "1px 8px", borderRadius: 4, fontSize: 11, marginRight: 8 }}>
+                                  {s.round_range || `第${(i*3+1)}-${(i+1)*3}轮`}
+                                </span>
+                                {s.stage || `阶段${i+1}`}
+                              </div>
+                              {s.start_state && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, lineHeight: 1.6 }}>◉ 起始状态：{s.start_state}</div>}
+                              {s.key_decisions && <div style={{ fontSize: 12, color: "#e2e8f0", marginBottom: 4, lineHeight: 1.6 }}>◉ 核心决策：{s.key_decisions}</div>}
+                              {s.causal_logic && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 4, lineHeight: 1.6 }}>◉ 因果逻辑：{s.causal_logic}</div>}
+                              {s.end_state && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>◉ 阶段终点：{s.end_state}</div>}
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
+
+                      {/* ── 四、偏离分析 ── */}
+                      {report.deviation_analysis && report.deviation_analysis.length > 0 && (
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#fb923c", cursor: "pointer", borderLeft: "3px solid #fb923c", paddingLeft: 8, marginBottom: 6 }}>
+                            决策偏离分析（{report.deviation_analysis.length} 次偏离）
+                          </summary>
+                          {report.deviation_analysis.map((d: any, i: number) => (
+                            <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "2px solid #fb923c" }}>
+                              <div style={{ fontWeight: 600, color: "#fdba74", marginBottom: 4 }}>
+                                第{d.round}轮 · {d.agent}
+                                <span style={{ fontSize: 11, marginLeft: 8, background: d.deviation_level === "显著" ? "#7c2d12" : "#422006", padding: "1px 6px", borderRadius: 4, color: d.deviation_level === "显著" ? "#fdba74" : "#f59e0b" }}>
+                                  {d.deviation_level}偏离
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#e2e8f0", marginBottom: 2 }}>决策：{d.decision}</div>
+                              <div style={{ fontSize: 12, color: "#94a3b8" }}>原因：{d.reason}</div>
+                            </div>
+                          ))}
+                        </details>
+                      )}
+
+                      {/* ── 五、结论与建议 ── */}
+                      {(report.conclusion || (report.risk_alerts && report.risk_alerts.length > 0) || (report.recommendations && report.recommendations.length > 0)) && (
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #60a5fa", paddingLeft: 8, marginBottom: 6 }}>
+                            结论与建议
+                          </summary>
+                          {report.conclusion && (
+                            <div style={{ marginBottom: 12, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+                              {report.conclusion}
+                            </div>
+                          )}
+                          {report.risk_alerts && report.risk_alerts.length > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#f87171", marginBottom: 4 }}>风险预警</div>
+                              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                                {report.risk_alerts.map((x, i) => <li key={i}>{x}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {report.recommendations && report.recommendations.length > 0 && (
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#34d399", marginBottom: 4 }}>策略建议</div>
+                              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                                {report.recommendations.map((x, i) => <li key={i}>{x}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </details>
+                      )}
+
+                      {/* ── 附录：关键事件 ── */}
                       {report.key_events && report.key_events.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #a78bfa", paddingLeft: 8 }}>关键事件</div>
+                        <details style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#64748b", cursor: "pointer", borderLeft: "3px solid #475569", paddingLeft: 8, marginBottom: 6 }}>
+                            附录 · 关键事件 ({report.key_events.length} 条)
+                          </summary>
                           <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
                             {report.key_events.map((ev, i) => {
                               const text = typeof ev === "string" ? ev : (ev?.description || JSON.stringify(ev));
@@ -909,7 +966,7 @@ export default function App() {
                               return <li key={i}>{round}{text}{sig}</li>;
                             })}
                           </ul>
-                        </div>
+                        </details>
                       )}
                     </>
                   ) : (
@@ -967,45 +1024,75 @@ export default function App() {
                     </div>
                   )
                   ) : (
-                    causal && causal.nodes.length > 0 ? (
-                      <>
-                        <div style={{ flex: 1, minHeight: 250, marginBottom: 12, background: "#0d1117", borderRadius: 6, position: "relative" }}>
-                          <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
-                            <ForceGraph3D
-                            ref={causalGraphRef}
-                            graphData={{
-                              nodes: causal.nodes.map(n => ({ id: n.id, name: n.label, group: n.kind })),
-                              links: causal.links.map(l => ({ source: l.source, target: l.target, value: l.label })),
-                            }}
-                            nodeLabel={(n: any) => `${n.name}\n${n.group}`}
-                            nodeColor={(n: any) => n.group === "agent" ? "#3b82f6" : n.group === "event" ? "#a78bfa" : "#f59e0b"}
-                            linkLabel={(l: any) => String(l.value)}
-                            linkDirectionalArrowLength={3}
-                            backgroundColor="#0d1117"
-                          />
-                          </div>
-                          <div style={{ position: "absolute", top: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
-                            {[
-                              { label: "＋", title: "放大", onClick: () => zoomGraph(causalGraphRef, 0.7) },
-                              { label: "−", title: "缩小", onClick: () => zoomGraph(causalGraphRef, 1.4) },
-                              { label: "⊡", title: "重置视图（显示全部节点与连线）", onClick: () => resetGraph(causalGraphRef) },
-                            ].map(b => (
-                              <button key={b.label} title={b.title} onClick={b.onClick}
-                                style={{ width: 28, height: 28, borderRadius: 4, cursor: "pointer", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", border: "1px solid #334155", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                {b.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", marginBottom: 6, borderLeft: "3px solid #ef4444", paddingLeft: 8 }}>因果归因（源 → 目标 累计指标影响，负=致衰）</div>
-                          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                            {causal.summary.map((s, i) => (
-                              <li key={i}><span style={{ color: "#94a3b8" }}>{s.source}</span> → <span style={{ color: "#94a3b8" }}>{s.target}</span>: {s.metric}{s.amount >= 0 ? "+" : ""}{s.amount}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </>
+                     causal && causal.nodes.length > 0 ? (
+                       <>
+                         <div style={{ flex: 1, minHeight: 250, marginBottom: 12, background: "#0d1117", borderRadius: 6, position: "relative" }}>
+                           <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+                             <ForceGraph3D
+                             ref={causalGraphRef}
+                             graphData={{
+                               nodes: causal.nodes.map(n => ({ id: n.id, name: n.label, group: n.kind })),
+                               links: causal.links.map(l => ({ source: l.source, target: l.target, value: l.label })),
+                             }}
+                             nodeLabel={(n: any) => `${n.name}\n${n.group}`}
+                             nodeColor={(n: any) => n.group === "agent" ? "#3b82f6" : n.group === "event" ? "#a78bfa" : "#f59e0b"}
+                             linkLabel={(l: any) => String(l.value)}
+                             linkDirectionalArrowLength={3}
+                             backgroundColor="#0d1117"
+                             onNodeClick={(n: any) => setSelectedCausalNode(n ? n.id : null)}
+                             />
+                           </div>
+                           <div style={{ position: "absolute", top: 8, right: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
+                             {[
+                               { label: "＋", title: "放大", onClick: () => zoomGraph(causalGraphRef, 0.7) },
+                               { label: "−", title: "缩小", onClick: () => zoomGraph(causalGraphRef, 1.4) },
+                               { label: "⊡", title: "重置视图（显示全部节点与连线）", onClick: () => resetGraph(causalGraphRef) },
+                             ].map(b => (
+                               <button key={b.label} title={b.title} onClick={b.onClick}
+                                 style={{ width: 28, height: 28, borderRadius: 4, cursor: "pointer", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", border: "1px solid #334155", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                 {b.label}
+                               </button>
+                             ))}
+                           </div>
+                         </div>
+                         {selectedCausalNode && (
+                           <div style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "3px solid #60a5fa" }}>
+                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                               <span style={{ fontWeight: 600, color: "#60a5fa", fontSize: 12 }}>
+                                 📌 选中：{causal.nodes.find(n => n.id === selectedCausalNode)?.label || selectedCausalNode}
+                               </span>
+                               <button onClick={() => setSelectedCausalNode(null)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 14 }}>✕</button>
+                             </div>
+                             <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>
+                               {(() => {
+                                 const node = causal.nodes.find(n => n.id === selectedCausalNode);
+                                 if (!node) return null;
+                                 const descParts: string[] = [];
+                                 if (node.kind) descParts.push(`类型：${node.kind}`);
+                                 if (node.desc) descParts.push(node.desc);
+                                 const relatedLinks = causal.links.filter(l => l.source === selectedCausalNode || l.target === selectedCausalNode);
+                                 if (relatedLinks.length > 0) {
+                                   descParts.push(`关联（${relatedLinks.length} 条因果边）`);
+                                   relatedLinks.slice(0, 5).forEach(l => {
+                                     const dir = l.source === selectedCausalNode ? "→" : "←";
+                                     const other = l.source === selectedCausalNode ? causal.nodes.find(n => n.id === l.target)?.label : causal.nodes.find(n => n.id === l.source)?.label;
+                                     descParts.push(`  ${dir} ${other}: ${l.label}`);
+                                   });
+                                 }
+                                 return descParts.map((p, idx) => <div key={idx}>{p}</div>);
+                               })()}
+                             </div>
+                           </div>
+                         )}
+                         <div>
+                           <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", marginBottom: 6, borderLeft: "3px solid #ef4444", paddingLeft: 8 }}>因果归因（源 → 目标 累计指标影响，负=致衰）</div>
+                           <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+                             {causal.summary.map((s, i) => (
+                               <li key={i}><span style={{ color: "#94a3b8" }}>{s.source}</span> → <span style={{ color: "#94a3b8" }}>{s.target}</span>: {s.metric}{s.amount >= 0 ? "+" : ""}{s.amount}</li>
+                             ))}
+                           </ul>
+                         </div>
+                       </>
                     ) : (
                       <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
                         {selected.status === "complete" ? "暂无因果数据" : "推演完成后将生成因果图"}

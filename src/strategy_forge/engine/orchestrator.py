@@ -405,6 +405,8 @@ class DeductionOrchestrator:
             rounds=getattr(self, "_simulation_rounds", []),
             log_fn=self._log,
             preprocessor=getattr(self, "_preprocessor", None),
+            pre_goals=getattr(self, "_pre_goals", []),
+            states=getattr(self, "_states", None),
         )
         self.session.report = report
 
@@ -416,6 +418,7 @@ class DeductionOrchestrator:
             "recommendations": report.recommendations,
             "causal_summary": report.causal_summary,
             "stage_narratives": report.stage_narratives,
+            "deviation_analysis": report.deviation_analysis,
             "conclusion": report.conclusion,
         }
         if self._rule_engine is not None and self._states:
