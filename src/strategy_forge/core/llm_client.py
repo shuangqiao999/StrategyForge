@@ -122,6 +122,9 @@ class DeductionLLMClient:
             sid = _current_session.get()
             if sid:
                 accumulator.record(sid, _current_phase.get(), _current_round.get(), stats)
+            else:
+                logger.debug("[Token] session context not set, skipping accumulation (phase=%s tokens=%d)",
+                             _current_phase.get(), stats.total_tokens)
             return DeductionLLMResponse(content, token_stats=stats)
         except Exception as e:
             logger.error("[LLM] Chat request failed: %s", e)

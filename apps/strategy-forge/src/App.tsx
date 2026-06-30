@@ -550,20 +550,31 @@ export default function App() {
     return () => es.close();
   }, [selectedId, sessions, fetchSessions, fetchGraph, fetchTimeline, fetchCausal]);
 
-  // Token 统计每 2 分钟自动刷新
+  // Token 统计：前 3 次每 10 秒拉取，之后每 2 分钟
   useEffect(() => {
     if (!selectedId) return;
+    let count = 0;
+    let timer: number;
+    const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
     const tick = () => {
-      const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
       const sel = sessions.find(s => s.id === selectedId);
       if (sel && runningSet.has(sel.status)) {
         fetchTokens(selectedId);
       }
+      count++;
+      const delay = count < 3 ? 10000 : 120000;
+      timer = window.setTimeout(tick, delay);
     };
     tick();
-    const id = window.setInterval(tick, 120000);
-    return () => window.clearInterval(id);
+    return () => window.clearTimeout(timer);
   }, [selectedId, sessions, fetchTokens]);
+
+  // 切换到 Token tab 时立即拉取
+  useEffect(() => {
+    if (mainTab === "token" && selectedId) {
+      fetchTokens(selectedId);
+    }
+  }, [mainTab, selectedId, fetchTokens]);
 
   const selected = sessions.find(s => s.id === selectedId);
 
