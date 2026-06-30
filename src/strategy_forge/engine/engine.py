@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -33,20 +34,25 @@ class DeductionEngine:
         self.session_store = SessionStore(self._data_dir / "sessions.db")
         self.graph: DeductionGraphStore | None = None
         self._graph_sid: str | None = None
+        self._graph_lock = threading.Lock()
         self._stream_events: dict[str, asyncio.Event] = {}
         self._round_data: dict[str, dict[str, int]] = {}
 
     def get_graph(self, session_id: str) -> DeductionGraphStore:
-        # 句柄按 session_id 缓存；切换会话时先释放旧库句柄，避免多会话串库。
-        if self.graph is not None and self._graph_sid == session_id:
+        with self._graph_lock:
+            if self.graph is not None and self._graph_sid == session_id:
+                return self.graph
+            self._close_graph_locked()
+            path = self._data_dir / "graphs" / session_id / "kuzu"
+            self.graph = DeductionGraphStore(path)
+            self._graph_sid = session_id
             return self.graph
-        self.close_graph()
-        path = self._data_dir / "graphs" / session_id / "kuzu"
-        self.graph = DeductionGraphStore(path)
-        self._graph_sid = session_id
-        return self.graph
 
     def close_graph(self) -> None:
+        with self._graph_lock:
+            self._close_graph_locked()
+
+    def _close_graph_locked(self) -> None:
         if self.graph is not None:
             self.graph.close()
             self.graph = None

@@ -24,6 +24,8 @@ class DeductionGraphStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn: Any = None
+        self._db: Any = None
+        self._closed = False
         self._init()
 
     def _init(self) -> None:
@@ -71,8 +73,17 @@ class DeductionGraphStore:
                 "FROM Event TO Entity, metric STRING, amount DOUBLE)"
             )
 
+    def _check_conn(self) -> None:
+        if self._conn is None or self._closed:
+            import traceback
+            msg = "[DeductionGraph] Kuzu connection is None (closed=%s)" % self._closed
+            logger.error(msg)
+            traceback.print_stack()
+            raise RuntimeError(msg)
+
     def upsert_entity(self, entity_id: str, name: str, etype: str,
                       description: str = "", properties: str = "{}") -> None:
+        self._check_conn()
         # Kuzu 0.11.3 支持 $param 仅限 MERGE 节点匹配，不支持 MATCH..SET = $param。
         # 因此用参数化 MERGE + 内联转义 SET（已验证无 SQL 注入风险）。
         with self._lock:
@@ -93,6 +104,7 @@ class DeductionGraphStore:
 
     def upsert_relation(self, source_id: str, target_id: str,
                         relation: str, weight: float = 1.0, evidence: str = "") -> None:
+        self._check_conn()
         with self._lock:
             self._conn.execute(
                 f"MATCH (a:{self.NODE_TABLE} {{id: $sid}}), (b:{self.NODE_TABLE} {{id: $tid}}) "
@@ -115,6 +127,7 @@ class DeductionGraphStore:
     def add_event(self, event_id: str, description: str, event_type: str,
                   timestamp: str, agent_id: str = "", round_number: int = 0,
                   target_id: str = "") -> None:
+        self._check_conn()
         safe = {
             "id": event_id.replace("'", "\\'"),
             "desc": description.replace("'", "\\'")[:500],
@@ -133,6 +146,7 @@ class DeductionGraphStore:
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:
+        self._check_conn()
         with self._lock:
             self._conn.execute(
                 f"MATCH (a:{self.AGENT_TABLE} {{id: $aid}}), (ev:{self.EVENT_TABLE} {{id: $eid}}) "
@@ -142,6 +156,7 @@ class DeductionGraphStore:
 
     def add_targets(self, event_id: str, target_id: str) -> None:
         """事件指向的目标实体（因果链：行动作用于谁）。"""
+        self._check_conn()
         with self._lock:
             self._conn.execute(
                 f"MATCH (ev:{self.EVENT_TABLE} {{id: $eid}}), (e:{self.NODE_TABLE} {{id: $tid}}) "
@@ -151,6 +166,7 @@ class DeductionGraphStore:
 
     def add_caused(self, event_id: str, target_id: str, metric: str, amount: float) -> None:
         """事件对目标某指标造成的精确数值影响（因果链：造成什么后果）。"""
+        self._check_conn()
         with self._lock:
             self._conn.execute(
                 f"MATCH (ev:{self.EVENT_TABLE} {{id: $eid}}), (e:{self.NODE_TABLE} {{id: $tid}}) "
@@ -161,6 +177,7 @@ class DeductionGraphStore:
     # ── Query helpers ──
 
     def query(self, cypher: str, params: dict | None = None) -> list[list[Any]]:
+        self._check_conn()
         result = self._conn.execute(cypher, params or {})
         rows: list[list[Any]] = []
         while result.has_next():
@@ -168,16 +185,19 @@ class DeductionGraphStore:
         return rows
 
     def count_entities(self) -> int:
+        self._check_conn()
         result = self._conn.execute(f"MATCH (e:{self.NODE_TABLE}) RETURN count(e)")
         row = result.get_next()
         return row[0] if row else 0
 
     def count_relations(self) -> int:
+        self._check_conn()
         result = self._conn.execute("MATCH ()-[r:RELATES]->() RETURN count(r)")
         row = result.get_next()
         return row[0] if row else 0
 
     def get_entities_by_type(self, etype: str) -> list[dict[str, Any]]:
+        self._check_conn()
         result = self._conn.execute(
             f"MATCH (e:{self.NODE_TABLE}) WHERE e.type = $t RETURN e.id, e.name, e.type, e.description",
             {"t": etype},
@@ -331,6 +351,7 @@ class DeductionGraphStore:
         return {"nodes": node_list, "links": links}
 
     def export_graph_data(self) -> dict[str, Any]:
+        self._check_conn()
         nodes: list[dict[str, Any]] = []
         result = self._conn.execute(
             f"MATCH (e:{self.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
@@ -350,6 +371,7 @@ class DeductionGraphStore:
         return {"nodes": nodes, "links": links}
 
     def close(self) -> None:
+        self._closed = True
         self._conn = None
         self._db = None
         logger.info("[DeductionGraph] Kuzu database closed")
