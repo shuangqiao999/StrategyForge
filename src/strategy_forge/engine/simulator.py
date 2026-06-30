@@ -98,6 +98,7 @@ class SimulationEngine:
         env: dict[str, str] | None = None,
         enable_multi_action: bool = False,
         max_actions: int = 3,
+        cancel_event: Any = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -107,6 +108,7 @@ class SimulationEngine:
         self._preprocessor = preprocessor
         self._chat_fn = chat_fn
         self._immutable_goals: list[str] = list(pre_goals or [])
+        self._cancel = cancel_event
         # 蒙特卡洛隔离与可控性参数
         self._persist_events = persist_events
         self._temperature = temperature
@@ -433,6 +435,8 @@ class SimulationEngine:
                 d["actor_id"] = agent.entity_id
                 return d
 
+        if self._cancel is not None and self._cancel.is_set():
+            return sim_round
         decisions = await asyncio.gather(*[decide(a) for a in ordered])
 
         # ── 轮前：自动效应（条件触发，逐实体结算）+ 延迟效应到期结算 ──

@@ -65,13 +65,15 @@ class DeductionEngine:
     def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         return self.session_store.list_all(limit=limit)
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str, force: bool = False) -> None:
         existing = self.session_store.get(session_id)
         if existing and existing.get("status") in (
             "ontology_running", "graph_running", "agents_running",
             "simulating", "reporting", "optimizing",
         ):
-            raise ValueError("推演/优化进行中，无法删除该会话")
+            if not force:
+                raise ValueError("推演/优化进行中，无法删除该会话（可传 force=true 强制删除）")
+            logger.warning("[Engine] 强制删除进行中的会话: %s (status=%s)", session_id, existing.get("status"))
         self.close_graph()
         self.session_store.delete(session_id)
         # 清理 LanceDB 向量表 (物理回收磁盘空间)
@@ -94,7 +96,7 @@ class DeductionEngine:
     def get_logs(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
         return self.session_store.get_logs(session_id, limit=limit)
 
-    async def start(self, session_id: str) -> DeductionSession:
+    async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)
         if session is None:
             raise ValueError(f"Session {session_id} not found")
@@ -107,6 +109,7 @@ class DeductionEngine:
             graph=graph,
             session_store=self.session_store,
             logger_fn=lambda phase, msg: self.log(session_id, phase, msg),
+            cancel_event=cancel_event,
         )
 
         await orchestrator.run()

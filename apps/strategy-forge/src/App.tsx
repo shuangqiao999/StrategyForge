@@ -720,14 +720,23 @@ export default function App() {
                       启动优化
                     </button>
                   )
+                ) : selected.status === "simulating" ? (
+                  <button className="btnSmall" style={{ marginRight: 6, background: "#ef4444", color: "#fff", border: "none" }} onClick={async () => {
+                    if (!selectedId) return;
+                    setLoading(true);
+                    try { await fetch(`${API_BASE}/session/${selectedId}/start/cancel`, { method: "POST" }); } catch { }
+                    setLoading(false);
+                  }}>
+                    取消推演
+                  </button>
                 ) : (
                   <button
                     className="btnSmall btnSmallPrimary"
                     style={{ marginRight: 6 }}
                     onClick={handleStart}
-                    disabled={loading || selected.status === "simulating"}
+                    disabled={loading}
                   >
-                    {selected.status === "complete" ? "重新推演" : loading ? "运行中..." : "启动推演"}
+                    {selected.status === "complete" ? "重新推演" : "启动推演"}
                   </button>
                 )}
               </div>

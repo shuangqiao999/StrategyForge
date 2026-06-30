@@ -157,7 +157,20 @@ async def delete_session(session_id: str, request: Request):
     return {"deleted": session_id}
 
 
+@router.delete("/session/{session_id}/force")
+async def force_delete_session(session_id: str, request: Request):
+    engine = _get_engine(request)
+    engine.delete_session(session_id, force=True)
+    return {"deleted": session_id}
+
+
 # ── Pipeline control ──
+
+def _ded_cancel_state(app):
+    if not hasattr(app.state, "ded_cancels"):
+        app.state.ded_cancels = {}
+    return app.state.ded_cancels
+
 
 @router.post("/session/{session_id}/start")
 async def start_deduction(session_id: str, request: Request):
@@ -165,8 +178,13 @@ async def start_deduction(session_id: str, request: Request):
     session = engine.get_session(session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
+    cancels = _ded_cancel_state(request.app)
+    if session_id in cancels and not cancels[session_id].is_set():
+        raise HTTPException(409, "该会话的推演任务正在运行中")
+    cancel_event = asyncio.Event()
+    cancels[session_id] = cancel_event
     try:
-        updated = await engine.start(session_id)
+        updated = await engine.start(session_id, cancel_event=cancel_event)
         return {
             "session_id": updated.id,
             "status": updated.status.value,
@@ -177,6 +195,18 @@ async def start_deduction(session_id: str, request: Request):
     except Exception as e:
         logger.exception("[StrategyForge] start failed")
         raise HTTPException(500, str(e))
+    finally:
+        cancels.pop(session_id, None)
+
+
+@router.post("/session/{session_id}/start/cancel")
+async def cancel_deduction(session_id: str, request: Request):
+    cancels = _ded_cancel_state(request.app)
+    ev = cancels.get(session_id)
+    if ev is not None:
+        ev.set()
+        return {"cancelled": True}
+    return {"cancelled": False}
 
 
 # ── 策略优化器 (蒙特卡洛多方案对比) ──

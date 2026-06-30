@@ -26,11 +26,13 @@ class DeductionOrchestrator:
         graph: DeductionGraphStore,
         session_store: SessionStore,
         logger_fn: Callable[[str, str], None] | None = None,
+        cancel_event: Any = None,
     ) -> None:
         self.session = session
         self.graph = graph
         self.store = session_store
         self._log = logger_fn or (lambda p, m: None)
+        self._cancel = cancel_event
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -228,10 +230,16 @@ class DeductionOrchestrator:
             enable_multi_action=self._enable_multi_action,
             max_actions=self._max_actions,
             env={"weather": self._weather, "terrain": self._terrain} if (self._weather or self._terrain) else None,
+            cancel_event=self._cancel,
         )
 
         rounds: list[SimulationRound] = []
         for rnd in range(1, total_rounds + 1):
+            if self._cancel is not None and self._cancel.is_set():
+                self._log("simulation", "推演收到取消信号，提前终止")
+                self.store.update(self.session.id, status=SessionStatus.FAILED.value,
+                                  error="用户取消推演")
+                return
             self._log("simulation", f"  第 {rnd}/{total_rounds} 轮开始")
             result = await engine.run_round(rnd)
             rounds.append(result)
