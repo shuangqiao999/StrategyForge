@@ -44,7 +44,7 @@ class DeductionConfig:
     def __init__(self):
         self.project_root = _get_root()
         self.deduction_data_dir = _get_data_dir()
-        self.deduction_max_agents = int(os.getenv("FORGE_MAX_AGENTS", "200"))
+        self.deduction_max_agents = int(os.getenv("FORGE_MAX_AGENTS", "10000"))
         self.deduction_default_rounds = int(os.getenv("FORGE_DEFAULT_ROUNDS", "10"))
         self.deduction_candidate_count = int(os.getenv("FORGE_CANDIDATE_COUNT", "3"))
         self.deduction_llm_temperature = float(os.getenv("FORGE_LLM_TEMPERATURE", "0.3"))
