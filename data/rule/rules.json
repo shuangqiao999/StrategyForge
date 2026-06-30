@@ -80,63 +80,50 @@
     "display_name": "商业竞争",
     "metrics": ["market_share", "cash_flow", "brand", "rnd", "morale", "supply_chain"],
     "initial_metrics": {"market_share": 20, "cash_flow": 65, "brand": 60, "rnd": 50, "morale": 70, "supply_chain": 70},
-    "thresholds": {"cash_flow": 15, "market_share": 5, "supply_chain": 15},
+    "thresholds": {"cash_flow": 10, "market_share": 5, "supply_chain": 15},
     "actions": ["price_war", "invest_rnd", "marketing", "expand", "partner", "ipo", "embargo", "poach_talent", "observe"],
     "self_effects": {
-      "price_war":    {"cash_flow": -18, "market_share": 10, "brand": -8},
-      "invest_rnd":   {"cash_flow": -15, "rnd": 10, "morale": 2},
-      "marketing":    {"cash_flow": -10, "brand": 8, "market_share": 3},
-      "expand":       {"cash_flow": -20, "market_share": 8, "morale": -5, "supply_chain": -5},
-      "partner":      {"cash_flow": 8, "brand": 3, "supply_chain": 5},
-      "ipo":          {"cash_flow": 40, "morale": -15, "brand": -8, "supply_chain": -5},
-      "embargo":      {"cash_flow": -8, "brand": -5, "market_share": -3},
-      "poach_talent": {"cash_flow": -10, "rnd": 10, "morale": 5},
-      "observe":      {"cash_flow": -1}
+      "price_war":    {"cash_flow": -12, "market_share": 10, "brand": -6, "morale": -2},
+      "invest_rnd":   {"cash_flow": -15, "rnd": 10, "morale": 2, "brand": 1},
+      "marketing":    {"cash_flow": -10, "brand": 8, "market_share": 3, "morale": 1},
+      "expand":       {"cash_flow": -15, "market_share": 8, "morale": -4, "supply_chain": -4, "brand": 2},
+      "partner":      {"cash_flow": 15, "brand": 5, "supply_chain": 8, "morale": 3, "rnd": 2},
+      "ipo":          {"cash_flow": 50, "morale": -10, "brand": -5, "supply_chain": -3, "market_share": 2},
+      "embargo":      {"cash_flow": -5, "brand": -4, "market_share": -2, "supply_chain": -3},
+      "poach_talent": {"cash_flow": -8, "rnd": 10, "morale": 5, "brand": 2},
+      "observe":      {"cash_flow": -1, "morale": 1}
     },
     "target_effects": {
-      "price_war":    {"market_share": -12, "cash_flow": -8, "morale": -5},
-      "marketing":    {"market_share": -5},
-      "expand":       {"market_share": -6},
-      "embargo":      {"supply_chain": -25, "market_share": -10, "cash_flow": -5},
-      "poach_talent": {"rnd": -12, "morale": -8}
+      "price_war":    {"market_share": -12, "cash_flow": -6, "morale": -4, "brand": -3},
+      "marketing":    {"market_share": -5, "brand": -2},
+      "expand":       {"market_share": -6, "supply_chain": -3},
+      "embargo":      {"supply_chain": -25, "market_share": -8, "cash_flow": -4, "morale": -3},
+      "poach_talent": {"rnd": -12, "morale": -6, "brand": -2},
+      "ipo":          {"market_share": -3, "brand": -2}
     },
     "conditional_effects": {
-      "price_war_diminishing": {
-        "condition": "market_share > 40",
-        "self_effects": {"market_share": 3, "cash_flow": -5}
-      },
-      "price_war_capped": {
-        "condition": "market_share > 60",
-        "self_effects": {"market_share": 1}
-      },
-      "expand_cautious": {
-        "condition": "cash_flow < 30",
-        "self_effects": {"morale": -8, "cash_flow": -5}
-      }
+      "price_war_diminishing":  {"condition": "market_share > 40", "self_effects": {"market_share": 3, "cash_flow": -3}},
+      "price_war_capped":       {"condition": "market_share > 60", "self_effects": {"market_share": 1}},
+      "expand_cautious":        {"condition": "cash_flow < 30", "self_effects": {"morale": -6, "cash_flow": -3}},
+      "rnd_diminishing":        {"condition": "rnd > 70", "self_effects": {"rnd": 3}},
+      "rnd_capped":             {"condition": "rnd > 85", "self_effects": {"rnd": 1}},
+      "partner_synergy":        {"condition": "cash_flow < 25", "self_effects": {"cash_flow": 3, "morale": 2}},
+      "distress_protection":    {"condition": "cash_flow < 12 and market_share > 25", "self_effects": {"cash_flow": 3, "morale": -4}},
+      "bankruptcy_protection":  {"condition": "cash_flow < 8 and brand > 60", "self_effects": {"cash_flow": 2, "brand": -2}}
     },
     "delay_effects": {
-      "invest_rnd": {
-        "delay": 2,
-        "effects": {"rnd": 8, "market_share": 4, "brand": 3}
-      },
-      "ipo": {
-        "delay": 1,
-        "effects": {"morale": -5}
-      }
+      "invest_rnd": {"delay": 2, "effects": {"rnd": 8, "market_share": 4, "brand": 3}},
+      "ipo":        {"delay": 1, "effects": {"morale": -3}},
+      "expand":     {"delay": 1, "effects": {"market_share": 3, "cash_flow": -2}}
     },
     "auto_effects": {
-      "brand_erosion": {
-        "condition": "brand < 30",
-        "effects": {"brand": -1, "market_share": -2}
-      },
-      "cash_burn": {
-        "condition": "cash_flow > 80",
-        "effects": {"cash_flow": -5}
-      },
-      "rnd_depreciation": {
-        "condition": "rnd > 70",
-        "effects": {"rnd": -1}
-      }
+      "brand_erosion":         {"condition": "brand < 30", "effects": {"brand": -1, "market_share": -2}},
+      "cash_burn":             {"condition": "cash_flow > 80", "effects": {"cash_flow": -5}},
+      "rnd_depreciation":      {"condition": "rnd > 70", "effects": {"rnd": -1}},
+      "market_share_buffer":   {"condition": "market_share > 30 and cash_flow < 20", "effects": {"cash_flow": 2}},
+      "brand_buffer":          {"condition": "brand > 70 and cash_flow < 15", "effects": {"cash_flow": 1}},
+      "supply_chain_risk":     {"condition": "supply_chain < 30", "effects": {"cash_flow": -4, "market_share": -2}},
+      "supply_chain_collapse": {"condition": "supply_chain < 15", "effects": {"cash_flow": -8, "market_share": -3, "morale": -5}}
     }
   },
 
