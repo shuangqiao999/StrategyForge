@@ -38,10 +38,27 @@ class DeductionEngine:
         self._stream_events: dict[str, asyncio.Event] = {}
         self._round_data: dict[str, dict[str, int]] = {}
 
+    _RUNNING_GRAPH_STATUSES = frozenset({
+        "ontology_running", "graph_running", "agents_running",
+        "simulating", "reporting", "optimizing",
+    })
+
     def get_graph(self, session_id: str) -> DeductionGraphStore:
         with self._graph_lock:
             if self.graph is not None and self._graph_sid == session_id:
                 return self.graph
+            # 若当前持有的图连接所属 session 仍在推演中，禁止关闭它
+            if self.graph is not None and self._graph_sid is not None:
+                existing = self.session_store.get(self._graph_sid)
+                if existing and existing.get("status") in self._RUNNING_GRAPH_STATUSES:
+                    logger.warning(
+                        "[Engine] 拒绝关闭推演中的图连接 (%s status=%s)，"
+                        "为请求方 %s 新建独立连接",
+                        self._graph_sid, existing.get("status"), session_id)
+                    # 不关旧连接，直接建新连接（旧连接会在推演完成后被 close_graph 回收）
+                    path = self._data_dir / "graphs" / session_id / "kuzu"
+                    new_graph = DeductionGraphStore(path)
+                    return new_graph
             self._close_graph_locked()
             path = self._data_dir / "graphs" / session_id / "kuzu"
             self.graph = DeductionGraphStore(path)

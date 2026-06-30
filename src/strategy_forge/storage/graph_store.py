@@ -371,7 +371,8 @@ class DeductionGraphStore:
         return {"nodes": nodes, "links": links}
 
     def close(self) -> None:
-        self._closed = True
-        self._conn = None
-        self._db = None
+        with self._lock:
+            self._closed = True
+            self._conn = None
+            self._db = None
         logger.info("[DeductionGraph] Kuzu database closed")
