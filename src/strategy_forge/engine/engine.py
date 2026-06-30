@@ -55,9 +55,11 @@ class DeductionEngine:
                         "[Engine] 拒绝关闭推演中的图连接 (%s status=%s)，"
                         "为请求方 %s 新建独立连接",
                         self._graph_sid, existing.get("status"), session_id)
-                    # 不关旧连接，直接建新连接（旧连接会在推演完成后被 close_graph 回收）
                     path = self._data_dir / "graphs" / session_id / "kuzu"
                     new_graph = DeductionGraphStore(path)
+                    # 暂存到 self.graph 以便后续请求复用（旧连接由推演线程持有）
+                    self.graph = new_graph
+                    self._graph_sid = session_id
                     return new_graph
             self._close_graph_locked()
             path = self._data_dir / "graphs" / session_id / "kuzu"

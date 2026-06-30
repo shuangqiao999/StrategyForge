@@ -1,6 +1,8 @@
 """验证 graph 连接竞态修复：推演中连接不可被其他 session 请求关闭。"""
+import os
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 
@@ -8,7 +10,8 @@ class TestGraphRaceFix(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="forge_test_")
-        self.ws = Path(self.tmp)
+        # 强制使用隔离的 data 目录
+        os.environ["FORGE_DATA_DIR"] = str(Path(self.tmp) / ".data")
 
     def tearDown(self):
         import shutil
@@ -18,30 +21,26 @@ class TestGraphRaceFix(unittest.TestCase):
         """推演中的图连接不被其他 session 的 get_graph 关闭。"""
         from strategy_forge.engine.engine import DeductionEngine
 
-        engine = DeductionEngine(str(self.ws))
+        engine = DeductionEngine(str(self.tmp))
+        rid1 = uuid.uuid4().hex[:8]
+        rid2 = uuid.uuid4().hex[:8]
 
-        # 通过 engine 创建两个 session
-        s1 = engine.session_store.create("run001", "running", "test")
-        s2 = engine.session_store.create("oth001", "other", "test")
-        engine.session_store.update("run001", status="simulating")
-
-        # running session 获取图连接
-        g1 = engine.get_graph("run001")
+        engine.session_store.create(rid1, "running", "test")
+        engine.session_store.update(rid1, status="simulating")
+        g1 = engine.get_graph(rid1)
         g1.upsert_entity("e1", "TestEntity", "Concept")
         self.assertFalse(g1._closed, "图连接在创建后不应被关闭")
-        self.assertEqual(g1.count_entities(), 1)
 
-        # 请求另一个 session 的图 — 不应关闭 g1
-        g2 = engine.get_graph("oth001")
+        engine.session_store.create(rid2, "other", "test")
+        g2 = engine.get_graph(rid2)
         self.assertFalse(g1._closed, "推演中的图连接被其他请求意外关闭")
+        self.assertFalse(g2._closed)
 
         # g1 仍然可用
         g1.upsert_entity("e2", "Entity2", "Concept")
         self.assertEqual(g1.count_entities(), 2)
 
-        # g2 独立可用
-        self.assertFalse(g2._closed)
-        g2.upsert_entity("x1", "OtherEntity", "Concept")
+        g2.upsert_entity("x1", "Other", "Concept")
         self.assertEqual(g2.count_entities(), 1)
 
         g1.close()
@@ -52,17 +51,17 @@ class TestGraphRaceFix(unittest.TestCase):
         """已完成的 session 的图连接应可被新请求关闭。"""
         from strategy_forge.engine.engine import DeductionEngine
 
-        engine = DeductionEngine(str(self.ws))
-        engine.session_store.create("done001", "done", "test")
-        engine.session_store.update("done001", status="complete")
+        engine = DeductionEngine(str(self.tmp))
+        rid1 = uuid.uuid4().hex[:8]
+        rid2 = uuid.uuid4().hex[:8]
 
-        g1 = engine.get_graph("done001")
+        engine.session_store.create(rid1, "done", "test")
+        engine.session_store.update(rid1, status="complete")
+        g1 = engine.get_graph(rid1)
         g1.upsert_entity("e1", "E1", "Concept")
 
-        engine.session_store.create("new001", "new", "test")
-        g2 = engine.get_graph("new001")
-
-        # g1 应已被关闭（旧行为，因 session 非 running）
+        engine.session_store.create(rid2, "new", "test")
+        g2 = engine.get_graph(rid2)
         self.assertTrue(g1._closed)
 
         g2.close()
