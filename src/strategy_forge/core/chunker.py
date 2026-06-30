@@ -13,6 +13,9 @@ class ChunkResult:
     index: int
     content: str
     token_estimate: int
+    source_title: str = ""
+    source_pos: int = 0
+    overlap_from: int | None = None  # 元数据 overlap：指向前一个 chunk 的 index
 
 
 class TextChunker:
@@ -46,6 +49,14 @@ class TextChunker:
     _MD_TABLE_SEP = re.compile(r"^\s*\|[-: ]+\|$")
     _MD_HEADING = re.compile(r"^(#{1,6})\s+")
 
+    # 纯文本的章节/段首标记
+    _CN_CHAPTER = re.compile(
+        r'(第[零一二三四五六七八九十百千万\d]+[章节回])'
+        r'|(Chapter\s+\d+)'
+        r'|(PART\s+\d+)',
+        re.IGNORECASE,
+    )
+
     def __init__(
         self,
         strategy: str = "paragraph",
@@ -67,11 +78,17 @@ class TextChunker:
         if file_type in (".md", ".markdown"):
             chunks = self._chunk_markdown(text)
         else:
-            chunks = self._chunk_recursive(text)
+            # 纯文本也尝试按章节/段首标记分段，复用 Markdown 的结构感知
+            sections = self._split_by_sections(text)
+            if len(sections) > 1:
+                chunks = self._chunk_sections(sections)
+            else:
+                chunks = self._chunk_recursive(text)
 
         chunks = self._merge_small_chunks(chunks)
         if self.overlap > 0:
-            chunks = self._add_overlap(chunks)
+            # 元数据 overlap：只记录前后关联，不复制内容到当前块
+            chunks = self._add_metadata_overlap(chunks)
         return chunks
 
     # ------------------------------------------------------------------
@@ -277,7 +294,89 @@ class TextChunker:
         return self._split_recursive(text, self._CN_SEPARATORS)
 
     # ------------------------------------------------------------------
-    # merge & overlap
+    # plain-text section-aware
+    # ------------------------------------------------------------------
+
+    def _split_by_sections(self, text: str) -> list[tuple[str, str]]:
+        """按章节/段首标记分割纯文本，返回 [(section_title, section_body), ...]。
+        若未找到章节标记，返回 [("", text)]。
+        """
+        lines = text.split("\n")
+        sections: list[tuple[str, str]] = []
+        current_title = ""
+        current_lines: list[str] = []
+        found_any = False
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                current_lines.append(line)
+                continue
+
+            is_chapter = bool(self._CN_CHAPTER.search(stripped))
+            # 章节标记或短行非句末 → 可能是节标题
+            is_short_title = (
+                not is_chapter
+                and len(stripped) <= 40
+                and not stripped.endswith("。")
+                and not stripped.endswith(".")
+                and not stripped.endswith("！")
+                and not stripped.endswith("，")
+            )
+
+            if is_chapter or (is_short_title and not found_any):
+                if found_any or current_title:
+                    if current_lines:
+                        sections.append((current_title, "\n".join(current_lines)))
+                    current_title = stripped
+                    current_lines = []
+                    found_any = True
+                    continue
+                else:
+                    if current_title:
+                        current_lines.append(line)
+                    else:
+                        current_title = stripped
+                    continue
+            current_lines.append(line)
+
+        if current_lines:
+            sections.append((current_title, "\n".join(current_lines)))
+        elif current_title and not found_any:
+            sections.append(("", text))
+
+        return sections if len(sections) > 1 else [("", text)]
+
+    def _chunk_sections(self, sections: list[tuple[str, str]]) -> list[ChunkResult]:
+        """对章节分段的纯文本，每节走递归分割，并携带标题元数据。"""
+        chunks: list[ChunkResult] = []
+        i = 0
+        for title, body in sections:
+            sub = self._chunk_recursive(body)
+            for c in sub:
+                c.index = i
+                if title:
+                    c.source_title = title
+                i += 1
+            chunks.extend(sub)
+        return chunks
+
+    # ------------------------------------------------------------------
+    # metadata overlap (no content duplication)
+    # ------------------------------------------------------------------
+
+    def _add_metadata_overlap(self, chunks: list[ChunkResult]) -> list[ChunkResult]:
+        """给每个 chunk 标记前一个 chunk 的 index，语义检索时可按需回溯上下文。
+        不复制内容，避免索引膨胀。
+        """
+        if len(chunks) <= 1 or self.overlap <= 0:
+            return chunks
+        for i in range(1, len(chunks)):
+            chunks[i].overlap_from = chunks[i - 1].index
+        return chunks
+
+    # ------------------------------------------------------------------
+    # merge & overlap (kept for backward compat)
     # ------------------------------------------------------------------
 
     def _merge_small_chunks(self, chunks: list[ChunkResult]) -> list[ChunkResult]:
@@ -294,6 +393,9 @@ class TextChunker:
                         index=prev.index,
                         content=new_content,
                         token_estimate=_estimate_tokens(new_content),
+                        source_title=prev.source_title or c.source_title,
+                        source_pos=prev.source_pos,
+                        overlap_from=prev.overlap_from,
                     )
                     continue
             merged.append(c)
