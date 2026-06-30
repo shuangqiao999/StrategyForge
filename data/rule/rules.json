@@ -143,7 +143,7 @@
       "attack_opponent": {"support_rate": 4, "unity": -6, "legislative_power": -3},
       "propaganda":      {"support_rate": 6, "unity": -4, "intl_relations": -2},
       "fact_check":      {"support_rate": 2, "unity": 1},
-      "observe":         {"unity": 1}
+      "observe":         {"unity": 1, "legislative_power": 0.5}
     },
     "target_effects": {
       "attack_opponent": {"support_rate": -10, "unity": -6, "legislative_power": -2},
@@ -164,6 +164,18 @@
       "reform_unity_crisis": {
         "condition": "unity < 40",
         "self_effects": {"unity": -5, "support_rate": -5}
+      },
+      "attack_justified": {
+        "condition": "intl_relations < 30 or support_rate > 70",
+        "self_effects": {"support_rate": 6}
+      },
+      "attack_unjustified": {
+        "condition": "intl_relations > 70 and support_rate < 40",
+        "self_effects": {"support_rate": -4}
+      },
+      "diplomacy_overreach": {
+        "condition": "intl_relations > 80",
+        "self_effects": {"support_rate": -3, "unity": -2}
       }
     },
     "delay_effects": {
@@ -181,6 +193,14 @@
         "condition": "unity < 30",
         "effects": {"unity": -2}
       },
+      "internal_crisis": {
+        "condition": "unity < 30",
+        "effects": {"support_rate": -2, "legislative_power": -1}
+      },
+      "total_fragmentation": {
+        "condition": "unity < 15",
+        "effects": {"support_rate": -4, "economy": -3}
+      },
       "support_erosion": {
         "condition": "support_rate < 25",
         "effects": {"support_rate": -2}
@@ -188,6 +208,18 @@
       "economic_hope": {
         "condition": "economy > 60",
         "effects": {"support_rate": 1}
+      },
+      "economic_contagion": {
+        "condition": "economy < 25",
+        "effects": {"support_rate": -3, "unity": -2, "legislative_power": -1}
+      },
+      "prosperity_complacency": {
+        "condition": "economy > 75",
+        "effects": {"support_rate": -1, "unity": -1}
+      },
+      "implementation_friction": {
+        "condition": "legislative_power > 70",
+        "effects": {"economy": -1}
       }
     }
   },
