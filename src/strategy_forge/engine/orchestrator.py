@@ -369,6 +369,15 @@ class DeductionOrchestrator:
             self._log("simulation", f"阶段4: 并行模拟开始 ({total_rounds} 轮)")
 
         from .simulator import SimulationEngine
+
+        # 构建算法模块链（ODE + Physics）
+        algorithm_modules = []
+        if re_engine is not None:
+            from strategy_forge.algorithms.module_utils import build_module_chain
+            algorithm_modules = build_module_chain(re_engine)
+            self._log("simulation",
+                      f"算法模块加载: {', '.join(m.name for m in algorithm_modules)}")
+
         engine = SimulationEngine(
             agents=self._agents,
             graph=self.graph,
@@ -383,6 +392,7 @@ class DeductionOrchestrator:
             max_actions=self._max_actions,
             env={"weather": self._weather, "terrain": self._terrain} if (self._weather or self._terrain) else None,
             cancel_event=self._cancel,
+            algorithm_modules=algorithm_modules,
         )
 
         rounds: list[SimulationRound] = []

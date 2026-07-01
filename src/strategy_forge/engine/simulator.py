@@ -99,6 +99,7 @@ class SimulationEngine:
         enable_multi_action: bool = False,
         max_actions: int = 3,
         cancel_event: Any = None,
+        algorithm_modules: list | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -121,6 +122,7 @@ class SimulationEngine:
         self._env = env
         self._enable_multi_action = enable_multi_action
         self._max_actions = max(1, int(max_actions))
+        self._algorithm_modules: list = algorithm_modules or []
         from strategy_forge.core.config import config
 
         self._max_concurrent = (
@@ -472,6 +474,21 @@ class SimulationEngine:
                     dr = int(delay_cfg.get("delay", 1))
                     eff = {k: v * sub_intensity for k, v in delay_cfg.get("effects", {}).items()}
                     states[actor].schedule_delays(round_number, dr, eff)
+
+        # ── Algorithm module chain (ODE + Physics) ──
+        if self._algorithm_modules and self._rule_engine is not None:
+            from strategy_forge.algorithms.module_utils import (
+                apply_context_results,
+                build_context,
+            )
+            entity_ids = [a.entity_id for a in self.agents if a.entity_id in states]
+            ctx = build_context(states, self._rule_engine, entity_ids, round_number)
+            for mod in self._algorithm_modules:
+                try:
+                    ctx = mod.execute(ctx)
+                except Exception as e:
+                    self._log("simulation", f"模块 {mod.name} 执行异常: {e}")
+            apply_context_results(ctx, states, entity_ids, self._rule_engine)
 
         # 构造行动 + 内存事件历史
         for dec in decisions:
