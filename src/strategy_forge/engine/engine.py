@@ -105,7 +105,11 @@ class DeductionEngine:
             if not force:
                 raise ValueError("推演/优化进行中，无法删除该会话（可传 force=true 强制删除）")
             logger.warning("[Engine] 强制删除进行中的会话: %s (status=%s)", session_id, existing.get("status"))
-        self.close_graph()
+        # Only close graph if it belongs to the session being deleted
+        if self.graph is not None and self._graph_sid == session_id:
+            self.close_graph()
+        # Always remove from per-session cache
+        self._graph_cache.pop(session_id, None)
         self.session_store.delete(session_id)
         # 清理 LanceDB 向量表 (物理回收磁盘空间)
         try:
