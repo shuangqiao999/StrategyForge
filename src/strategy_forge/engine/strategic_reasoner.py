@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from collections import defaultdict
+from string import Template
 from typing import Any
 
 from ._utils import extract_text
@@ -23,38 +24,38 @@ _POSITIVE_KW = frozenset({"support", "help", "cooperate", "praise", "agree"})
 _NEGATIVE_KW = frozenset({"oppose", "attack", "betray", "insult", "threaten", "block"})
 
 
-_CANDIDATE_PROMPT = """You are a strategic advisor. Generate {candidate_count} distinct action strategies for {agent_name}.
+_CANDIDATE_PROMPT = """You are a strategic advisor. Generate $candidate_count distinct action strategies for $agent_name.
 
 ## Immutable Goals (highest priority — persist throughout entire simulation)
-{immutable_goals}
+$immutable_goals
 
 ## Override Directive (highest priority — must influence every candidate)
-{user_intervention}
+$user_intervention
 
 ## Agent Profile
-Persona: {persona}
-Background: {background}
-Goals: {goals}
+Persona: $persona
+Background: $background
+Goals: $goals
 
 ## Current World State
-Round: {round_number}
-Recent events: {recent_events}
+Round: $round_number
+Recent events: $recent_events
 
 ## Trust Relationship Summary
-{trust_summary}
+$trust_summary
 
 ## 关系网络（来自知识图谱：盟友 / 对手）
-{relationship_context}
+$relationship_context
 
 ## Output — pure JSON array
 [
-  {{
+  {
     "action": "post|reply|interact|observe",
     "target": "target entity name or empty",
     "content": "action description (30-100 chars)",
     "rationale": "why this action (20-60 chars)",
     "risk_level": "low|medium|high"
-  }}
+  }
 ]
 
 Output ONLY the JSON array. No markdown, no explanations."""
@@ -174,7 +175,7 @@ class StrategicReasoner:
         recent = world_state.get("recent_events", "None")
         system = "You are a JSON-only strategic advisor. Output ONLY a valid JSON array."
         llm = client if client is not None else LLMClient()
-        messages = [Message(role="user", content=_CANDIDATE_PROMPT.format(
+        messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,
             agent_name=agent.name,
             immutable_goals="\n".join(f"- {g}" for g in self._immutable_goals) if self._immutable_goals else "No immutable goals — act freely based on your profile.",

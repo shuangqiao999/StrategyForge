@@ -20,6 +20,7 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
+from string import Template
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -343,7 +344,7 @@ class StrategyOptimizer:
             for a in actions[-30:]
         ) or "（本次推演未产生有效动作）"
 
-        prompt = _EVAL_PROMPT.format(
+        prompt = Template(_EVAL_PROMPT).substitute(
             win_condition=win_condition or "（未指定，默认评估对主要角色是否有利）",
             directive=directive or "（无特定策略指令，自主行动）",
             events=events,

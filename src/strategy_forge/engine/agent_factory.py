@@ -7,6 +7,7 @@ import logging
 import re
 import uuid
 from collections.abc import Callable
+from string import Template
 from typing import Any
 
 from strategy_forge.storage.graph_store import DeductionGraphStore
@@ -21,47 +22,47 @@ logger = logging.getLogger(__name__)
 _PERSONA_PROMPT = """基于以下实体信息和原文背景，为该人物生成一个独立人格档案。返回 JSON。
 
 ## 来自用户的特殊期望（必须严肃考虑）
-{user_expectations}
+$user_expectations
 
 ## 实体信息
-- 名称: {name}
-- 类型: {type}
-- 描述: {description}
+- 名称: $name
+- 类型: $type
+- 描述: $description
 
 ## 全书关键片段（LanceDB 语义检索）
-{context}
+$context
 
 ## 高频共现关键词标签
-{keywords}
+$keywords
 
 ## 输出 JSON — 必须是纯 JSON 对象
-{{
+{
   "persona": "详细的人格描述 (80-150字), 包括性格特征、价值观、行为模式、人物弧光演变",
   "background": "背景故事 (80-150字), 包括关键经历、社会关系、动机、性格变迁",
   "goals": ["目标1", "目标2", "目标3"]
-}}
+}
 
 【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
 
 _PERSONA_PROMPT_FALLBACK = """基于以下实体信息和原文背景，为该人物生成一个独立人格档案。返回 JSON。
 
 ## 来自用户的特殊期望（必须严肃考虑）
-{user_expectations}
+$user_expectations
 
 ## 实体信息
-- 名称: {name}
-- 类型: {type}
-- 描述: {description}
+- 名称: $name
+- 类型: $type
+- 描述: $description
 
 ## 原文背景
-{context}
+$context
 
 ## 输出 JSON — 必须是纯 JSON 对象
-{{
+{
   "persona": "详细的人格描述 (50-100字), 包括性格特征、价值观、行为模式",
   "background": "背景故事 (50-100字), 包括关键经历、社会关系、动机",
   "goals": ["目标1", "目标2"]
-}}
+}
 
 【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
 
@@ -111,7 +112,7 @@ async def create_agents_from_graph(
                 from strategy_forge.core.tokenizer import compress_to_keywords
                 full_context = "\n---\n".join(fragments)
                 keywords = compress_to_keywords(full_context, top_k=10)
-                prompt = _PERSONA_PROMPT.format(
+                prompt = Template(_PERSONA_PROMPT).substitute(
                     name=person_name,
                     type=person.get("type", "Person"),
                     description=person.get("description", ""),
@@ -120,13 +121,13 @@ async def create_agents_from_graph(
                     user_expectations=ue,
                 )
             else:
-                prompt = _PERSONA_PROMPT_FALLBACK.format(
+                prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
                     name=person_name, type=person.get("type", "Person"),
                     description=person.get("description", ""),
                     context=source_material[:2000], user_expectations=ue,
                 )
         else:
-            prompt = _PERSONA_PROMPT_FALLBACK.format(
+            prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
                 name=person_name, type=person.get("type", "Person"),
                 description=person.get("description", ""),
                 context=source_material[:2000], user_expectations=ue,

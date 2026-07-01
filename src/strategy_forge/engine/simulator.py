@@ -13,6 +13,7 @@ import random
 import re
 import uuid
 from collections.abc import Callable
+from string import Template
 from typing import Any
 
 import numpy as np
@@ -29,33 +30,33 @@ logger = logging.getLogger(__name__)
 _ACTION_PROMPT = """你是一个推演模拟中的智能体。根据你的角色设定和当前世界状态，决定你的下一步行动。
 
 ## 你的固定人格（基于原文）
-{persona}
+$persona
 
 ## 你的背景
-{background}
+$background
 
 ## 你的目标
-{goals}
+$goals
 
 ## 当前轮次
-第 {round_number} 轮
+第 $round_number 轮
 
 ## 近期模拟动态事件（重要！以下是其他角色刚刚做过的事）
-{dynamic_memory}
+$dynamic_memory
 
 ## 你的原著背景参考（仅供参考）
-{static_knowledge}
+$static_knowledge
 
 ## 近期世界缓存
-{recent_events}
+$recent_events
 
 ## 输出 JSON — 选择一种行动
 ```json
-{{
+{
   "action": "post|reply|interact|observe",
   "target": "目标实体名或留空",
   "content": "行动内容 (30-100字)"
-}}
+}
 ```
 
 只返回 JSON，不要解释。"""
@@ -333,7 +334,7 @@ class SimulationEngine:
             # ── Fallback: inline prompt ──
             from strategy_forge.core.llm_client import Message
             system = "你是推演模拟中的角色，根据角色设定和历史事件做出合理的下一步行动。只输出 JSON。"
-            messages = [Message(role="user", content=_ACTION_PROMPT.format(
+            messages = [Message(role="user", content=Template(_ACTION_PROMPT).substitute(
                 persona=agent.persona, background=agent.background,
                 goals=", ".join(agent.goals) if agent.goals else "参与互动",
                 round_number=round_number, recent_events=recent_text,
