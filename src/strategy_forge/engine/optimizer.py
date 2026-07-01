@@ -184,7 +184,7 @@ class StrategyOptimizer:
                         agents=agents, graph=graph, total_rounds=total_rounds,
                         log_fn=lambda _p, _m: None, preprocessor=preprocessor,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
-                        seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
+                        seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
                         env=opt_env,
@@ -200,7 +200,7 @@ class StrategyOptimizer:
                         agents=agents, graph=graph, total_rounds=total_rounds,
                         log_fn=lambda _p, _m: None, preprocessor=preprocessor,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
-                        seed=seed, temperature=temp, persist_events=False, max_concurrent=1,
+                        seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                     )
                     actions = []
                     for rnd in range(1, total_rounds + 1):
@@ -266,7 +266,7 @@ class StrategyOptimizer:
                         agents=agents, graph=graph, total_rounds=total_rounds,
                         log_fn=lambda _p, _m: None, preprocessor=preprocessor,
                         pre_goals=[rec_sc["directive"]] if rec_sc.get("directive") else [],
-                        seed=20240101, temperature=0.6, persist_events=True, max_concurrent=1,
+                        seed=20240101, temperature=0.6, persist_events=True, max_concurrent=None,
                         rule_engine=rule_engine, states=rep_states, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
                         env=opt_env,
