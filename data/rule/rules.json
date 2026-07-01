@@ -51,6 +51,17 @@
       "mountain": {"fatigue": 10, "strength": -8, "morale": -3},
       "plain":    {"morale": 2},
       "forest":   {"supply": -5, "strength": -5, "morale": -2}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "fatigue": "fatigue_recovery",
+          "supply": "supply_consumption"
+        }
+      },
+      "physics_engine": {
+        "collision_elasticity": 0.3
+      }
     }
   },
 
@@ -104,6 +115,19 @@
       "brand_buffer":          {"condition": "brand > 70 and cash_flow < 15", "effects": {"cash_flow": 1}},
       "supply_chain_risk":     {"condition": "supply_chain < 30", "effects": {"cash_flow": -4, "market_share": -2}},
       "supply_chain_collapse": {"condition": "supply_chain < 15", "effects": {"cash_flow": -8, "market_share": -3, "morale": -5}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "market_share": "logistic",
+          "cash_flow": "decay",
+          "brand": "logistic",
+          "supply_chain": "supply_consumption"
+        }
+      },
+      "physics_engine": {
+        "diffusion_rate": 0.03
+      }
     }
   },
 
@@ -153,6 +177,15 @@
       "economic_contagion": {"condition": "economy < 25", "effects": {"support_rate": -3, "unity": -2, "legislative_power": -1}},
       "prosperity_complacency": {"condition": "economy > 75", "effects": {"support_rate": -1, "unity": -1}},
       "implementation_friction": {"condition": "legislative_power > 70", "effects": {"economy": -1}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "support_rate": "logistic",
+          "economy": "logistic",
+          "unity": "decay"
+        }
+      }
     }
   },
 
@@ -190,6 +223,19 @@
       "resource_depletion": {"condition": "resources < 20", "effects": {"resources": -5, "pollution": 3, "stability": -3}},
       "ecosystem_collapse": {"condition": "biodiversity < 15", "effects": {"stability": -10, "population": -5}},
       "tipping_point": {"condition": "stability < 20", "effects": {"population": -4, "biodiversity": -4}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "population": "logistic",
+          "resources": "resource_depletion",
+          "pollution": "pollution_spread",
+          "biodiversity": "logistic"
+        }
+      },
+      "physics_engine": {
+        "diffusion_rate": 0.08
+      }
     }
   },
 
@@ -229,6 +275,18 @@
       "brain_drain": {"condition": "satisfaction < 25 and employment < 40", "effects": {"population": -3, "employment": -2}},
       "over_regulation": {"condition": "satisfaction < 40 and employment > 60", "effects": {"employment": -1}},
       "gentrification": {"condition": "finance > 80 and satisfaction > 70", "effects": {"population": -2, "satisfaction": -3}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "population": "logistic",
+          "finance": "logistic"
+        }
+      },
+      "physics_engine": {
+        "diffusion_rate": 0.1,
+        "gravity": 0.0
+      }
     }
   },
 
@@ -266,6 +324,14 @@
       "innovation_stagnation": {"condition": "tech_lead > 80", "effects": {"tech_lead": -2}},
       "talent_burnout": {"condition": "talent_pool > 80", "effects": {"talent_pool": -1}},
       "research_diminishing_returns": {"condition": "tech_lead > 70", "effects": {"tech_lead": -1}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "tech_lead": "logistic",
+          "talent_pool": "logistic"
+        }
+      }
     }
   },
 
@@ -303,6 +369,14 @@
       "trust_decay": {"condition": "public_trust < 25", "effects": {"public_trust": -2}},
       "audience_fatigue": {"condition": "media_reach > 70", "effects": {"public_trust": -1, "polarization": 1}},
       "truth_decay": {"condition": "public_trust < 20 and polarization > 60", "effects": {"narrative_dominance": -3, "public_trust": -3}}
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "public_trust": "logistic",
+          "polarization": "logistic"
+        }
+      }
     }
   },
 
@@ -465,6 +539,21 @@
       "collapse_spiral": {
         "condition": "unity < 20 and support_rate < 25",
         "effects": {"cash_flow": -8, "strength": -8, "intl_relations": -5, "public_trust": -5}
+      }
+    },
+    "modules": {
+      "ode_engine": {
+        "equations": {
+          "fatigue": "fatigue_recovery",
+          "supply": "supply_consumption",
+          "cash_flow": "decay",
+          "supply_chain": "supply_consumption",
+          "tech_lead": "logistic"
+        }
+      },
+      "physics_engine": {
+        "collision_elasticity": 0.3,
+        "diffusion_rate": 0.04
       }
     }
   }
