@@ -79,6 +79,10 @@ def build_context(
     ctx = ModuleContext(round_number=round_number)
     ctx.arrays = states_to_arrays(states, metric_names, entity_ids)
 
+    # Diffusion fields (which metrics are spatial and should be blurred)
+    phys_cfg = pack.get("modules", {}).get("physics_engine", {})
+    ctx.diffusion_fields = list(phys_cfg.get("diffusion_fields", []))
+
     # Spatial initialization
     init_pos = pack.get("initial_positions")
     init_vel = pack.get("initial_velocities")

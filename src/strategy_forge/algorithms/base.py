@@ -83,6 +83,7 @@ class ModuleContext:
     spatial: SpatialState = field(default_factory=SpatialState)
     dt: float = 1.0
     round_number: int = 1
+    diffusion_fields: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # ── batch access helpers ──

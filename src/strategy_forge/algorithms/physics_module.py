@@ -125,14 +125,15 @@ class PhysicsModule(AlgorithmModule):
             return
         rate = self._params["diffusion_rate"]
         p = sp.positions
-
-        # Build adjacency once per step
-        for key in list(ctx.arrays.keys()):
+        # Only diffuse metrics explicitly declared as spatial diffusion fields
+        target_keys = ctx.diffusion_fields if ctx.diffusion_fields else []
+        for key in target_keys:
+            if key not in ctx.arrays:
+                continue
             arr = ctx.arrays[key]
             valid = ~np.isnan(arr)
             if valid.sum() < 2:
                 continue
-            # Pairwise diffusion: Δa_i = rate * Σ_j (a_j - a_i) * w_ij
             new_arr = arr.copy()
             for i in range(n):
                 if not valid[i]:
@@ -148,16 +149,16 @@ class PhysicsModule(AlgorithmModule):
             ctx.arrays[key] = new_arr
 
     def _apply_explosions(self, sp: Any, ctx: ModuleContext) -> None:
-        """Apply radial explosion forces and metric damage from configured sources."""
+        """Apply radial explosion forces and record damage events (no direct metric mutation)."""
         sources = self._params.get("explosion_sources", [])
         if not sources:
             return
         p = sp.positions
+        events: list[dict] = ctx.metadata.setdefault("explosion_events", [])
         for src in sources:
             center = np.array(src.get("center", [0, 0, 0]), dtype=np.float64)
             power = float(src.get("power", 100.0))
             radius = float(src.get("radius", 50.0))
-            damage_metric = src.get("damage_metric", "strength")
 
             dvec = p - center
             dists = np.linalg.norm(dvec, axis=1)
@@ -165,13 +166,14 @@ class PhysicsModule(AlgorithmModule):
             if not mask.any():
                 continue
 
-            # Radial force: F = power * (1 - dist/radius) * direction
             frac = 1.0 - dists[mask] / (radius + 1e-6)
             directions = dvec[mask] / (dists[mask, np.newaxis] + 1e-6)
             sp.forces[mask] += directions * (power * frac[:, np.newaxis])
 
-            # Metric damage (strength reduction)
-            if damage_metric in ctx.arrays:
-                arr = ctx.arrays[damage_metric]
-                arr[mask] -= power * 0.3 * frac
-                arr[mask] = np.maximum(arr[mask], 0.0)
+            events.append({
+                "center": center.tolist(),
+                "power": power,
+                "radius": radius,
+                "affected_count": int(mask.sum()),
+                "max_damage_ratio": float(frac.max()),
+            })

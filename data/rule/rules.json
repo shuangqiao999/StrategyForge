@@ -53,6 +53,11 @@
       "forest":   {"supply": -5, "strength": -5, "morale": -2}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODEs handle for continuous evolution; other metrics belong to rule_engine actions/auto_effects",
+        "fatigue": "ode",
+        "supply": "ode"
+      },
       "ode_engine": {
         "equations": {
           "fatigue": "fatigue_recovery",
@@ -117,6 +122,13 @@
       "supply_chain_collapse": {"condition": "supply_chain < 15", "effects": {"cash_flow": -8, "market_share": -3, "morale": -5}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles continuous market dynamics; rule_engine handles discrete competitive actions",
+        "market_share": "ode",
+        "cash_flow": "ode",
+        "brand": "ode",
+        "supply_chain": "ode"
+      },
       "ode_engine": {
         "equations": {
           "market_share": "logistic",
@@ -179,6 +191,12 @@
       "implementation_friction": {"condition": "legislative_power > 70", "effects": {"economy": -1}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles gradual political/econ drift; rule_engine handles discrete campaign/legislate/reform actions",
+        "support_rate": "ode",
+        "economy": "ode",
+        "unity": "ode"
+      },
       "ode_engine": {
         "equations": {
           "support_rate": "logistic",
@@ -225,6 +243,13 @@
       "tipping_point": {"condition": "stability < 20", "effects": {"population": -4, "biodiversity": -4}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles population/resources/pollution/biodiversity continuous evolution; rule_engine handles discrete actions",
+        "population": "ode",
+        "resources": "ode",
+        "pollution": "ode",
+        "biodiversity": "ode"
+      },
       "ode_engine": {
         "equations": {
           "population": "logistic",
@@ -234,6 +259,7 @@
         }
       },
       "physics_engine": {
+        "diffusion_fields": ["pollution"],
         "diffusion_rate": 0.08
       }
     }
@@ -277,6 +303,11 @@
       "gentrification": {"condition": "finance > 80 and satisfaction > 70", "effects": {"population": -2, "satisfaction": -3}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles population/finance gradual trends; rule_engine handles discrete build/industry/welfare actions",
+        "population": "ode",
+        "finance": "ode"
+      },
       "ode_engine": {
         "equations": {
           "population": "logistic",
@@ -326,6 +357,11 @@
       "research_diminishing_returns": {"condition": "tech_lead > 70", "effects": {"tech_lead": -1}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles tech_lead/talent_pool gradual trends; rule_engine handles discrete R&D/talent/standard actions",
+        "tech_lead": "ode",
+        "talent_pool": "ode"
+      },
       "ode_engine": {
         "equations": {
           "tech_lead": "logistic",
@@ -371,6 +407,11 @@
       "truth_decay": {"condition": "public_trust < 20 and polarization > 60", "effects": {"narrative_dominance": -3, "public_trust": -3}}
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles trust/polarization gradual drift; rule_engine handles discrete propaganda/leak/framing actions",
+        "public_trust": "ode",
+        "polarization": "ode"
+      },
       "ode_engine": {
         "equations": {
           "public_trust": "logistic",
@@ -542,6 +583,14 @@
       }
     },
     "modules": {
+      "metric_ownership": {
+        "_doc": "ODE handles cross-domain gradual metrics; rule_engine handles discrete military/economic/diplomatic/tech/propaganda actions",
+        "fatigue": "ode",
+        "supply": "ode",
+        "cash_flow": "ode",
+        "supply_chain": "ode",
+        "tech_lead": "ode"
+      },
       "ode_engine": {
         "equations": {
           "fatigue": "fatigue_recovery",

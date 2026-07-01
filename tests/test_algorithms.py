@@ -31,12 +31,15 @@ ctx2.arrays = {"strength": np.array([100.0, 80.0, 50.0], dtype=np.float64)}
 phys2 = PhysicsModule()
 phys2.configure({
     "subsystems": ["explosion"],
-    "explosion_sources": [{"center": [0, 0, 0], "power": 200, "radius": 100, "damage_metric": "strength"}],
+    "explosion_sources": [{"center": [0, 0, 0], "power": 200, "radius": 100}],
 })
 ctx2 = phys2.execute(ctx2)
-s = ctx2.arrays["strength"]
-print(f"Explosion strength: {s}, e1 damaged={s[0] < 90}")
-assert s[0] < 90, "e1 should take explosion damage"
+# Explosion applies forces to spatial state (not direct metric damage)
+f = ctx2.spatial.forces
+events = ctx2.metadata.get("explosion_events", [])
+print(f"Explosion forces (e1): {f[0]}, affected={events[0]['affected_count'] if events else 0}")
+assert np.linalg.norm(f[0]) > 10, "Explosion should apply significant force to nearby entity"
+assert len(events) > 0, "Explosion should record events"
 
 # ── Test ODE ──
 ctx3 = ModuleContext(round_number=3)
