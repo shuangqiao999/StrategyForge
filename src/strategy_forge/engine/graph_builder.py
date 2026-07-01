@@ -107,9 +107,10 @@ async def build_graph(
             log_fn("graph", f"实体驱动模式: {len(high_freq)} 个高频实体定向抽取")
             system = "You are a JSON-only knowledge graph builder. Output ONLY a valid JSON array. NO markdown code blocks, NO explanations."
 
-            # Pre-format constant parts of _EXTRACT_PROMPT (all but {text})
+            # Pre-format constant parts of _EXTRACT_PROMPT; use placeholder to avoid
+            # alias_map JSON { } colliding with str.format syntax.
             _extract_base = _EXTRACT_PROMPT.format(
-                text="{text}",
+                text="__TEXT__",
                 entity_types=", ".join(entity_type_names),
                 relation_types=", ".join(relation_type_names),
                 candidate_entities=", ".join(candidate_names[:80]),
@@ -132,7 +133,7 @@ async def build_graph(
                 keywords = compress_to_keywords(fused, top_k=10)
                 keyword_tag = f"\n\n## 关键词标签\n{', '.join(keywords)}" if keywords else ""
 
-                messages = [Message(role="user", content=_extract_base.format(text=fused[:6000] + keyword_tag))]
+                messages = [Message(role="user", content=_extract_base.replace("__TEXT__", fused[:6000] + keyword_tag))]
 
                 try:
                     response = await client.chat(messages, system=system, temperature=0.1)
@@ -194,7 +195,7 @@ async def _extract_from_chunks(
     system = "你是知识图谱构建专家，从文本中精确抽取实体和关系三元组。只输出 JSON。"
 
     _chunk_base = _EXTRACT_PROMPT.format(
-        text="{text}",
+        text="__TEXT__",
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
         candidate_entities="(无限制)",
@@ -203,7 +204,7 @@ async def _extract_from_chunks(
 
     for i, chunk in enumerate(chunks):
         text = chunk if isinstance(chunk, str) else chunk.content
-        messages = [Message(role="user", content=_chunk_base.format(text=text[:5000]))]
+        messages = [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))]
 
         try:
             response = await client.chat(messages, system=system, temperature=0.1)
