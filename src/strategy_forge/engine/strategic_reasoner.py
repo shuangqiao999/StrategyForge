@@ -222,6 +222,8 @@ class StrategicReasoner:
         recent_events: str = "", other_context: str = "", round_number: int = 0,
         client: Any = None, static_knowledge: str = "", dynamic_memory: str = "",
         relationship_context: str = "",
+        spatial_context: str = "",
+        env_context: str = "",
     ) -> dict[str, Any]:
         """量化模式决策。
 
@@ -261,8 +263,10 @@ class StrategicReasoner:
             + (f"## 关系网络（盟友/对手）\n{relationship_context}\n" if relationship_context else "")
             + (f"## 原著背景（语义召回）\n{static_knowledge}\n" if static_knowledge else "")
             + (f"## 历史记忆（语义召回）\n{dynamic_memory}\n" if dynamic_memory else "")
-            + f"## 近期局势\n{recent_events or '（无）'}\n\n"
-            f"## 可选行动\n{rule_engine.action_catalog()}\n\n"
+            + f"## 近期局势\n{recent_events or '（无）'}\n"
+            + (f"## 空间环境\n{spatial_context}\n" if spatial_context else "")
+            + (f"## 地形与天气\n{env_context}\n" if env_context else "")
+            + f"\n## 可选行动\n{rule_engine.action_catalog()}\n\n"
         )
         if self._enable_multi_action:
             output_spec = (

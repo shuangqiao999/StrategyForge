@@ -15,6 +15,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from ._utils import extract_text
@@ -123,6 +125,7 @@ class SimulationEngine:
         self._enable_multi_action = enable_multi_action
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
+        self._spatial_state = None   # cached SpatialState, updated after each module run
         from strategy_forge.core.config import config
 
         self._max_concurrent = (
@@ -369,6 +372,7 @@ class SimulationEngine:
 
         alive_agents = [a for a in self.agents
                         if a.entity_id in states and re_engine.is_alive(states[a.entity_id])]
+        alive_ids = [a.entity_id for a in alive_agents]
         if not alive_agents:
             return sim_round
 
@@ -381,10 +385,75 @@ class SimulationEngine:
         ) or "（无近期事件）"
 
         def others_ctx(self_id: str) -> str:
-            return "\n".join(
-                states[a.entity_id].to_prompt_context()
-                for a in alive_agents if a.entity_id != self_id
-            ) or "（无其他参与方）"
+            lines = []
+            for a in alive_agents:
+                if a.entity_id == self_id:
+                    continue
+                line = states[a.entity_id].to_prompt_context()
+                # Append spatial distance if physics module is active
+                if self._spatial_state is not None:
+                    sp = self._spatial_state
+                    try:
+                        idx_self = alive_ids.index(self_id)
+                        idx_other = alive_ids.index(a.entity_id)
+                        if idx_self < len(sp.positions) and idx_other < len(sp.positions):
+                            dist = float(np.linalg.norm(sp.positions[idx_self] - sp.positions[idx_other]))
+                            line += f"  距离: {dist:.0f}m"
+                    except (ValueError, IndexError):
+                        pass
+                lines.append(line)
+            return "\n".join(lines) or "（无其他参与方）"
+
+        def env_context() -> str:
+            """Build terrain/weather description for the LLM prompt."""
+            parts = []
+            if self._env:
+                weather = self._env.get("weather", "").strip()
+                terrain = self._env.get("terrain", "").strip()
+                if weather:
+                    parts.append(f"天气: {weather}")
+                if terrain:
+                    parts.append(f"地形: {terrain}")
+            if parts:
+                return "； ".join(parts)
+            return ""
+
+        def spatial_self_ctx(self_id: str) -> str:
+            """Build spatial self-context for the LLM prompt."""
+            if self._spatial_state is None:
+                return ""
+            sp = self._spatial_state
+            try:
+                idx = alive_ids.index(self_id)
+            except (ValueError, IndexError):
+                return ""
+            if idx >= len(sp.positions):
+                return ""
+            pos = sp.positions[idx]
+            # Nearest neighbors
+            dists = []
+            for i, a in enumerate(alive_agents):
+                if a.entity_id == self_id or i >= len(sp.positions):
+                    continue
+                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[i]))
+                if d < 200:  # only report nearby entities
+                    dists.append((a.name, d))
+            dists.sort(key=lambda x: x[1])
+            lines = [f"位置: ({pos[0]:.0f}, {pos[1]:.0f}, {pos[2]:.0f})"]
+            if dists:
+                lines.append("邻近实体: " + "; ".join(f"{n}({d:.0f}m)" for n, d in dists[:5]))
+            # Collision contact
+            in_contact = []
+            for i, a in enumerate(alive_agents):
+                if a.entity_id == self_id or i >= len(sp.positions):
+                    continue
+                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[i]))
+                min_d = sp.radii[idx] + sp.radii[i] if i < len(sp.radii) else 10
+                if d < min_d:
+                    in_contact.append(a.name)
+            if in_contact:
+                lines.append("接触/碰撞中: " + "、".join(in_contact))
+            return "\n".join(lines)
 
         from strategy_forge.core.config import config as _cfg
         sem = asyncio.Semaphore(self._max_concurrent)
@@ -433,6 +502,8 @@ class SimulationEngine:
                     round_number=round_number, client=client,
                     static_knowledge=static_text, dynamic_memory=dynamic_text,
                     relationship_context=self._rel_context.get(agent.entity_id, {}).get("summary", ""),
+                    spatial_context=spatial_self_ctx(agent.entity_id),
+                    env_context=env_context(),
                 )
                 d["actor_id"] = agent.entity_id
                 return d
@@ -489,6 +560,9 @@ class SimulationEngine:
                 except Exception as e:
                     self._log("simulation", f"模块 {mod.name} 执行异常: {e}")
             apply_context_results(ctx, states, entity_ids, self._rule_engine)
+            # Cache spatial state for next round's decision prompts
+            if hasattr(ctx, "spatial"):
+                self._spatial_state = ctx.spatial
 
         # 构造行动 + 内存事件历史
         for dec in decisions:
