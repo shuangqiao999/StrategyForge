@@ -11,39 +11,53 @@ from .physics_module import PhysicsModule
 def build_module_chain(rule_engine: Any) -> list[AlgorithmModule]:
     """Create the default algorithm module chain from a RuleEngine instance.
 
-    All modules are enabled by default. Configuration is derived from the
-    rule pack's existing fields — no new fields are required.
+    Configuration priority: rules.json ``modules`` section > built-in presets.
+    If a rule pack has no ``modules`` key, behaviour is identical to before.
     """
     modules: list[AlgorithmModule] = []
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
+    pack_modules: dict[str, Any] = pack.get("modules", {})
 
     # ── ODE module ──
-    ode_cfg: dict[str, Any] = {"sub_steps": 4, "equations": {}}
-    # Map metric names to built-in ODE presets by naming convention
-    ode_map = {
+    ode_user_eqs: dict[str, str] = pack_modules.get("ode_engine", {}).get("equations", {})
+    # Built-in name→preset mapping (fallback when no user definition exists)
+    ode_preset_map = {
         "fatigue": "fatigue_recovery",
         "supply": "supply_consumption",
         "pollution": "pollution_spread",
         "resources": "resource_depletion",
         "population": "logistic",
         "economy": "logistic",
+        "market_share": "logistic",
+        "cash_flow": "decay",
+        "brand": "logistic",
     }
+    final_eqs: dict[str, str] = {}
     for metric in pack.get("metrics", []):
-        for pattern, preset in ode_map.items():
-            if pattern in metric:
-                ode_cfg["equations"][metric] = preset
-                break
+        if metric in ode_user_eqs:
+            final_eqs[metric] = ode_user_eqs[metric]       # user override
+        else:
+            for pattern, preset in ode_preset_map.items():   # fallback preset
+                if pattern in metric:
+                    final_eqs[metric] = preset
+                    break
+    ode_cfg: dict[str, Any] = {
+        "sub_steps": int(pack_modules.get("ode_engine", {}).get("sub_steps", 4)),
+        "equations": final_eqs,
+    }
     ode = ODEModule()
     ode.configure(ode_cfg)
     modules.append(ode)
 
     # ── Physics module ──
+    phys_user: dict[str, Any] = pack_modules.get("physics_engine", {})
     phys_cfg: dict[str, Any] = {
-        "subsystems": ["dynamics", "collision", "diffusion", "explosion"],
-        "gravity": 9.8,
-        "damping": 0.98,
-        "collision_elasticity": 0.5,
-        "diffusion_rate": 0.05,
+        "subsystems": phys_user.get("subsystems", ["dynamics", "collision", "diffusion", "explosion"]),
+        "gravity": float(phys_user.get("gravity", 9.8)),
+        "damping": float(phys_user.get("damping", 0.98)),
+        "collision_elasticity": float(phys_user.get("collision_elasticity", 0.5)),
+        "diffusion_rate": float(phys_user.get("diffusion_rate", 0.05)),
+        "explosion_sources": phys_user.get("explosion_sources", []),
     }
     phys = PhysicsModule()
     phys.configure(phys_cfg)
