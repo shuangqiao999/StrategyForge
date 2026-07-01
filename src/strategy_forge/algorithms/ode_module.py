@@ -2,9 +2,13 @@
 
 Uses scipy.integrate.solve_ivp (RK45 adaptive) when available.
 Falls back to numpy Euler method if scipy is not installed.
+
+All preset functions are pure: receive (values: np.ndarray, ctx_arrays: dict) →
+return dy/dt as np.ndarray. No side effects, safe for vectorized integration.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -17,9 +21,67 @@ except ImportError:
 
 from .base import AlgorithmModule, ModuleContext
 
+logger = logging.getLogger(__name__)
+
+# ── Built-in ODE presets (pure functions: values, ctx_arrays → dy/dt) ──
+
+
+def _decay(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Exponential decay: dy/dt = -0.02 * y"""
+    return -0.02 * values
+
+
+def _logistic(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Logistic growth w/ carrying capacity 100: dy/dt = r*y*(1-y/K)"""
+    return 0.03 * values * (1.0 - values / 100.0)
+
+
+def _fatigue_recovery(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Fast recovery when high, slow when low: dy/dt = -0.05 * sqrt(y)"""
+    dy = np.zeros_like(values)
+    mask = values > 0
+    dy[mask] = -0.05 * np.sqrt(values[mask])
+    return dy
+
+
+def _supply_consumption(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Constant rate drain with strength-scaled consumption"""
+    strength = ctx.get("strength", np.zeros_like(values))
+    return -0.3 - 0.01 * np.abs(strength) / 100.0
+
+
+def _pollution_spread(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Pollution: generation from factories, dissipation over time"""
+    factories = ctx.get("factory_output", np.zeros_like(values))
+    greens = ctx.get("green_coverage", np.zeros_like(values))
+    return 0.001 * factories - 0.05 * greens - 0.01 * values
+
+
+def _resource_depletion(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Resource consumption proportional to population"""
+    population = ctx.get("population", np.ones_like(values))
+    return -0.005 * np.abs(population)
+
+
+ODE_PRESETS: dict[str, Any] = {
+    "decay": _decay,
+    "logistic": _logistic,
+    "fatigue_recovery": _fatigue_recovery,
+    "supply_consumption": _supply_consumption,
+    "pollution_spread": _pollution_spread,
+    "resource_depletion": _resource_depletion,
+}
+
+# Cross-metric dependencies for logging warnings
+_ODE_DEPS: dict[str, list[str]] = {
+    "supply_consumption": ["strength"],
+    "pollution_spread": ["factory_output", "green_coverage"],
+    "resource_depletion": ["population"],
+}
+
 
 class ODEModule(AlgorithmModule):
-    """Continuous-time metric evolution solver (adaptive RK45 or fallback Euler)."""
+    """Continuous-time metric evolution (vectorized RK45 or fallback Euler)."""
 
     @property
     def name(self) -> str:
@@ -35,128 +97,86 @@ class ODEModule(AlgorithmModule):
         self._sub_steps: int = int(params.get("sub_steps", 4))
 
     def execute(self, ctx: ModuleContext) -> ModuleContext:
+        if not ctx.arrays:
+            return ctx
         if _HAS_SCIPY:
             return self._execute_scipy(ctx)
         return self._execute_euler(ctx)
 
     def _execute_scipy(self, ctx: ModuleContext) -> ModuleContext:
-        """Adaptive RK45 integration via scipy (higher precision)."""
-        t_span = (0.0, ctx.dt)
-        for key, arr in ctx.arrays.items():
-            eq_name = self._ode_defs.get(key, "")
-            eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
+        """Vectorized RK45: one solve_ivp call for all entities × all metrics.
 
-            for i in range(len(arr)):
-                if np.isnan(arr[i]):
-                    continue
-                y0 = arr[i]
+        All state is flattened into a single vector [metric0_e0, metric0_e1, ...,
+        metric1_e0, metric1_e1, ...].  The ODE function slices it back for
+        per-metric preset evaluation, then flattens the result.
+        """
+        keys = list(ctx.arrays.keys())
+        n = len(ctx.arrays[keys[0]])
+        y0 = np.concatenate([ctx.arrays[k] for k in keys])
+
+        # Warn about missing dependency metrics (once per round)
+        self._check_deps(ctx, keys)
+
+        def ode_system(_t: float, y: np.ndarray) -> np.ndarray:
+            # Rebuild per-metric views into ctx.arrays
+            start = 0
+            for k in keys:
+                ctx.arrays[k] = y[start:start + n]
+                start += n
+            deriv_parts: list[np.ndarray] = []
+            for k in keys:
+                eq_name = self._ode_defs.get(k, "")
+                eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
                 if eq_fn is not None:
-                    def ode_func(t: float, y: list[float], _i: int = i) -> list[float]:
-                        backup = ctx.arrays[key][_i]
-                        ctx.arrays[key][_i] = float(y[0])
-                        dydt = eq_fn(ctx, key)
-                        ctx.arrays[key][_i] = backup
-                        return [float(dydt[_i])]
+                    deriv_parts.append(eq_fn(ctx.arrays[k], ctx.arrays))
                 else:
-                    def ode_func(t: float, y: list[float]) -> list[float]:
-                        return [-0.002 * float(y[0])]
-                try:
-                    sol = _scipy_solve_ivp(ode_func, t_span, [float(y0)],
-                                           method='RK45', rtol=1e-4, atol=1e-6)
-                    arr[i] = float(sol.y[0, -1])
-                except Exception:
-                    arr[i] = y0
+                    deriv_parts.append(np.zeros(n, dtype=np.float64))
+            return np.concatenate(deriv_parts)
+
+        try:
+            sol = _scipy_solve_ivp(
+                ode_system, (0.0, ctx.dt), y0,
+                method="RK45", rtol=1e-3, atol=1e-4,
+                max_step=ctx.dt / 4,
+            )
+            if sol.success:
+                final = sol.y[:, -1]
+                start = 0
+                for k in keys:
+                    ctx.arrays[k] = final[start:start + n]
+                    start += n
+            else:
+                logger.warning("[ODE] RK45 integration failed: %s", sol.message)
+        except Exception as e:
+            logger.warning("[ODE] scipy solve_ivp failed: %s", e)
         return ctx
 
     def _execute_euler(self, ctx: ModuleContext) -> ModuleContext:
-        """Simple Euler integration (no scipy dependency)."""
+        """Simple Euler integration — no scipy dependency."""
         sub_dt = ctx.dt / max(self._sub_steps, 1)
         for _ in range(self._sub_steps):
-            derivatives = self._compute_derivatives(ctx)
-            for key, dy in derivatives.items():
-                if key in ctx.arrays:
-                    ctx.arrays[key] = ctx.arrays[key] + dy * sub_dt
+            for key in list(ctx.arrays.keys()):
+                eq_name = self._ode_defs.get(key, "")
+                eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
+                if eq_fn is not None:
+                    dy = eq_fn(ctx.arrays[key], ctx.arrays)
+                else:
+                    dy = np.zeros_like(ctx.arrays[key])
+                ctx.arrays[key] = ctx.arrays[key] + dy * sub_dt
         return ctx
 
-    def _compute_derivatives(self, ctx: ModuleContext) -> dict[str, np.ndarray]:
-        result: dict[str, np.ndarray] = {}
-        for key, arr in ctx.arrays.items():
-            n = len(arr)
-            dy = np.zeros(n, dtype=np.float64)
-            eq = self._ode_defs.get(key, "")
-            if eq and eq in ODE_PRESETS:
-                dy = ODE_PRESETS[eq](ctx, key)
-            else:
-                mask = ~np.isnan(arr)
-                if mask.any():
-                    dy[mask] = -0.002 * arr[mask]
-            result[key] = dy
-        return result
+    def _check_deps(self, ctx: ModuleContext, keys: list[str]) -> None:
+        """Log warnings when a preset's required metric is missing from ctx.arrays."""
+        warned: set[str] = set()
+        for key, eq_name in self._ode_defs.items():
+            if eq_name in warned:
+                continue
+            needed = _ODE_DEPS.get(eq_name, [])
+            missing = [n for n in needed if n not in keys]
+            if missing:
+                logger.warning(
+                    "[ODE] preset '%s' (used by metric '%s') needs %s, not in ctx",
+                    eq_name, key, missing,
+                )
+                warned.add(eq_name)
 
-
-# ── Built-in ODE presets (equations referenceable by name in rule pack) ──
-
-
-def _decay(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Exponential decay: dy/dt = -rate * y"""
-    arr = ctx.arrays.get(key, np.array([]))
-    if len(arr) == 0:
-        return np.array([])
-    return -0.02 * arr
-
-
-def _logistic(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Logistic growth w/ carrying capacity 100: dy/dt = r*y*(1-y/K)"""
-    arr = ctx.arrays.get(key, np.array([]))
-    if len(arr) == 0:
-        return np.array([])
-    return 0.03 * arr * (1.0 - arr / 100.0)
-
-
-def _fatigue_recovery(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Fast recovery when high, slow when low: dy/dt = -0.05 * sqrt(y)"""
-    arr = ctx.arrays.get(key, np.array([]))
-    if len(arr) == 0:
-        return np.array([])
-    dy = np.zeros(len(arr), dtype=np.float64)
-    mask = arr > 0
-    dy[mask] = -0.05 * np.sqrt(arr[mask])
-    return dy
-
-
-def _supply_consumption(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Constant rate drain with strength-scaled consumption"""
-    arr = ctx.arrays.get(key, np.array([]))
-    strength = ctx.arrays.get("strength", np.zeros(len(arr)))
-    if len(arr) == 0:
-        return np.array([])
-    return -0.3 - 0.01 * np.abs(strength) / 100.0
-
-
-def _pollution_spread(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Pollution: generation from factories, dissipation over time"""
-    arr = ctx.arrays.get(key, np.array([]))
-    factories = ctx.arrays.get("factory_output", np.zeros(len(arr)))
-    greens = ctx.arrays.get("green_coverage", np.zeros(len(arr)))
-    if len(arr) == 0:
-        return np.array([])
-    return 0.001 * factories - 0.05 * greens - 0.01 * arr
-
-
-def _resource_depletion(ctx: ModuleContext, key: str) -> np.ndarray:
-    """Resource consumption proportional to population"""
-    arr = ctx.arrays.get(key, np.array([]))
-    population = ctx.arrays.get("population", np.ones(len(arr)))
-    if len(arr) == 0:
-        return np.array([])
-    return -0.005 * np.abs(population)
-
-
-ODE_PRESETS: dict[str, Any] = {
-    "decay": _decay,
-    "logistic": _logistic,
-    "fatigue_recovery": _fatigue_recovery,
-    "supply_consumption": _supply_consumption,
-    "pollution_spread": _pollution_spread,
-    "resource_depletion": _resource_depletion,
-}
