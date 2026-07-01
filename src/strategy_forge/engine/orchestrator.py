@@ -435,7 +435,6 @@ class DeductionOrchestrator:
         )
         self.session.report = report
 
-        import json
         report_payload = {
             "summary": report.summary,
             "key_events": report.key_events,

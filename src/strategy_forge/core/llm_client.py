@@ -99,6 +99,7 @@ class DeductionLLMClient:
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        payload.update({k: v for k, v in kwargs.items() if v is not None})
 
         t0 = time.monotonic()
         try:

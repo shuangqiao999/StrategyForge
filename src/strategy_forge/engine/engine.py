@@ -35,6 +35,7 @@ class DeductionEngine:
         self.graph: DeductionGraphStore | None = None
         self._graph_sid: str | None = None
         self._graph_lock = threading.Lock()
+        self._graph_cache: dict[str, DeductionGraphStore] = {}
         self._stream_events: dict[str, asyncio.Event] = {}
         self._round_data: dict[str, dict[str, int]] = {}
 
@@ -47,24 +48,23 @@ class DeductionEngine:
         with self._graph_lock:
             if self.graph is not None and self._graph_sid == session_id:
                 return self.graph
-            # 若当前持有的图连接所属 session 仍在推演中，禁止关闭它
+            # Check per-session cache
+            cached = self._graph_cache.get(session_id)
+            if cached is not None:
+                self.graph = cached
+                self._graph_sid = session_id
+                return cached
+            # Close current graph only if its session is no longer running
             if self.graph is not None and self._graph_sid is not None:
                 existing = self.session_store.get(self._graph_sid)
-                if existing and existing.get("status") in self._RUNNING_GRAPH_STATUSES:
-                    logger.warning(
-                        "[Engine] 拒绝关闭推演中的图连接 (%s status=%s)，"
-                        "为请求方 %s 新建独立连接",
-                        self._graph_sid, existing.get("status"), session_id)
-                    path = self._data_dir / "graphs" / session_id / "kuzu"
-                    new_graph = DeductionGraphStore(path)
-                    # 暂存到 self.graph 以便后续请求复用（旧连接由推演线程持有）
-                    self.graph = new_graph
-                    self._graph_sid = session_id
-                    return new_graph
-            self._close_graph_locked()
+                if existing and existing.get("status") not in self._RUNNING_GRAPH_STATUSES:
+                    self._close_graph_locked()
+            else:
+                self._close_graph_locked()
             path = self._data_dir / "graphs" / session_id / "kuzu"
             self.graph = DeductionGraphStore(path)
             self._graph_sid = session_id
+            self._graph_cache[session_id] = self.graph
             return self.graph
 
     def close_graph(self) -> None:
@@ -73,6 +73,9 @@ class DeductionEngine:
 
     def _close_graph_locked(self) -> None:
         if self.graph is not None:
+            sid = self._graph_sid
+            if sid:
+                self._graph_cache.pop(sid, None)
             self.graph.close()
             self.graph = None
         self._graph_sid = None

@@ -294,21 +294,6 @@ class RuleEngine:
             for act, w, tgt in parsed:
                 yield (act, budget * (w / total), tgt)
 
-    @staticmethod
-    def _resolve_target(tname: str, name_to_id: dict[str, str], exclude: str | None = None) -> str | None:
-        tname = (tname or "").strip()
-        if not tname:
-            return None
-        if tname in name_to_id and name_to_id[tname] != exclude:
-            return name_to_id[tname]
-        low = tname.lower()
-        for name, eid in name_to_id.items():
-            if eid == exclude:
-                continue
-            nl = name.lower().strip()
-            if nl == low or (len(low) >= 2 and (low in nl or nl in low)):
-                return eid
-        return None
 
     # ── 存亡 ──
     def is_alive(self, state: EntityState) -> bool:

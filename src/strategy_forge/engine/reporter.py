@@ -163,7 +163,7 @@ async def generate_report(
         try:
             query = (session.title or session.source_material[:200] or "关键转折与冲突").strip()
             recalled = preprocessor.retrieve_dynamic_events(query, max(config.deduction_retrieve_top_k, 10),
-                min_similarity=0.2)
+                min_similarity=config.deduction_similarity_threshold)
             for c in recalled:
                 line = f"[语义召回] {c[:100]}"
                 if line not in key_events:

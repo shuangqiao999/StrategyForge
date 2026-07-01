@@ -106,9 +106,19 @@ class SessionStore:
             conn.commit()
         return self.get(session_id)
 
+    _ALLOWED_COLUMNS = frozenset({
+        "title", "source_material", "status", "phase", "config_json",
+        "entity_count", "relation_count", "agent_count",
+        "current_round", "total_rounds", "error",
+        "report_json", "optimization_report_json", "token_json",
+    })
+
     def update(self, session_id: str, **kwargs: Any) -> dict[str, Any] | None:
         if not kwargs:
             return self.get(session_id)
+        invalid = set(kwargs) - self._ALLOWED_COLUMNS
+        if invalid:
+            raise ValueError(f"不允许的列: {', '.join(sorted(invalid))}。允许的列: {', '.join(sorted(self._ALLOWED_COLUMNS))}")
         now = datetime.now().isoformat()
         set_parts = [f"{k} = ?" for k in kwargs]
         set_parts.append("updated_at = ?")

@@ -229,15 +229,6 @@ async def _extract_from_chunks(
         log_fn("graph", f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系")
 
 
-def _normalize_name(name: str, alias_map: dict[str, set[str]]) -> str:
-    if not name or not alias_map:
-        return name
-    for std_name, aliases in alias_map.items():
-        if name == std_name or name in aliases:
-            return std_name
-    return name
-
-
 def _build_reverse_alias(alias_map: dict[str, set[str]]) -> dict[str, str]:
     """Build O(1) reverse lookup: alias → standardized name."""
     rev: dict[str, str] = {}
