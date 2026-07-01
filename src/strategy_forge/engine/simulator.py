@@ -492,17 +492,22 @@ class SimulationEngine:
                     dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
             return static_text, dynamic_text
 
+        # Pre-compute per-agent contexts once before concurrent execution
+        _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
+        _spatial_ctxs = {a.entity_id: spatial_self_ctx(a.entity_id) for a in alive_agents}
+        _env_ctx = env_context()
+
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any]:
             async with sem:
                 static_text, dynamic_text = await _recall(agent)
                 d = await self.reasoner.reason_quantified(
                     agent, states[agent.entity_id], re_engine,
-                    recent_events=recent, other_context=others_ctx(agent.entity_id),
+                    recent_events=recent, other_context=_other_ctxs.get(agent.entity_id, ""),
                     round_number=round_number, client=client,
                     static_knowledge=static_text, dynamic_memory=dynamic_text,
                     relationship_context=self._rel_context.get(agent.entity_id, {}).get("summary", ""),
-                    spatial_context=spatial_self_ctx(agent.entity_id),
-                    env_context=env_context(),
+                    spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
+                    env_context=_env_ctx,
                 )
                 d["actor_id"] = agent.entity_id
                 return d
