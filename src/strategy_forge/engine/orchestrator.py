@@ -392,6 +392,7 @@ class DeductionOrchestrator:
             max_actions=self._max_actions,
             env={"weather": self._weather, "terrain": self._terrain} if (self._weather or self._terrain) else None,
             cancel_event=self._cancel,
+            max_concurrent=getattr(self, "_max_concurrent", None),
             algorithm_modules=algorithm_modules,
         )
 
