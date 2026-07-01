@@ -145,6 +145,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const graphRef = useRef<any>(null);
   const causalGraphRef = useRef<any>(null);
+  const sseSidRef = useRef<string | null>(null);
 
   const zoomGraph = (rf: React.RefObject<any>, factor: number) => {
     const fg = rf.current; if (!fg) return;
@@ -526,10 +527,12 @@ export default function App() {
     const selected = sessions.find(s => s.id === selectedId);
     if (!selected) return;
     const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
-    if (!runningSet.has(selected.status)) return;
+    if (!runningSet.has(selected.status)) { sseSidRef.current = null; return; }
+    if (sseSidRef.current === selectedId) return; // already connected
+    sseSidRef.current = selectedId;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
     es.onmessage = (ev: MessageEvent) => {
-      if (ev.data === "[DONE]") { es.close(); fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); fetchTokens(selectedId); return; }
+      if (ev.data === "[DONE]") { es.close(); sseSidRef.current = null; fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); fetchTokens(selectedId); return; }
       try {
         const d = JSON.parse(ev.data);
         if (d.type === "round") {
@@ -546,9 +549,9 @@ export default function App() {
         }
       } catch { /* ignore */ }
     };
-    es.onerror = () => { es.close(); };
-    return () => es.close();
-  }, [selectedId, sessions, fetchSessions, fetchGraph, fetchTimeline, fetchCausal]);
+    es.onerror = () => { es.close(); sseSidRef.current = null; };
+    return () => { es.close(); sseSidRef.current = null; };
+  }, [selectedId, sessions]);
 
   // Token 统计：前 3 次每 10 秒拉取，之后每 2 分钟
   useEffect(() => {
