@@ -280,7 +280,7 @@ class SimulationEngine:
             try:
                 static_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_for_entity,
-                    agent.name, top_k=2,
+                    agent.name, config.deduction_retrieve_top_k,
                     must_contain={agent.name} if agent.name else None,
                 )
                 if static_frags:
@@ -301,7 +301,7 @@ class SimulationEngine:
                 query = agent.name + " " + " ".join(aliases - {agent.name})
                 dynamic_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_dynamic_events,
-                    query, top_k=3, min_similarity=config.deduction_similarity_threshold,
+                    query, config.deduction_retrieve_top_k, min_similarity=config.deduction_similarity_threshold,
                 )
                 if dynamic_frags:
                     dynamic_text = "\n---\n".join(dynamic_frags)
@@ -464,7 +464,7 @@ class SimulationEngine:
             if pp is not None and getattr(pp, "result", None):
                 try:
                     frags = await asyncio.to_thread(
-                        pp.retrieve_for_entity, agent.name, 2,
+                        pp.retrieve_for_entity, agent.name, _cfg.deduction_retrieve_top_k,
                         {agent.name} if agent.name else None)
                     if frags:
                         static_text = "\n---\n".join(f[:300] for f in frags)
@@ -478,7 +478,7 @@ class SimulationEngine:
                         aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
                     query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
                     frags = await asyncio.to_thread(
-                        pp.retrieve_dynamic_events, query, 3,
+                        pp.retrieve_dynamic_events, query, _cfg.deduction_retrieve_top_k,
                         _cfg.deduction_similarity_threshold)
                     if frags:
                         dynamic_text = "\n---\n".join(frags)

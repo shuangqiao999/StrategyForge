@@ -76,6 +76,7 @@ async def build_graph(
 ) -> None:
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
+    from strategy_forge.core.config import config
 
     client = LLMClient()
 
@@ -109,7 +110,7 @@ async def build_graph(
             for i, (std_name, aliases) in enumerate(high_freq.items()):
                 # 混合检索: 向量召回 + 关键词二次过滤
                 fragments = preprocessor.retrieve_for_entity(
-                    std_name, top_k=5,
+                    std_name, config.deduction_retrieve_top_k,
                     must_contain=aliases,
                 )
                 if not fragments:

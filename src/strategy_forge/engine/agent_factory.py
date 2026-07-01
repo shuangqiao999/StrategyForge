@@ -104,7 +104,7 @@ async def create_agents_from_graph(
 
         if preprocessor and preprocessor.result:
             fragments = preprocessor.retrieve_for_entity(
-                person_name, top_k=10,
+                person_name, config.deduction_retrieve_top_k,
                 must_contain={person_name},
             )
             if fragments:

@@ -195,7 +195,8 @@ class ProviderRegistry:
 
     @property
     def llm_temperature(self) -> float:
-        return float(self._data.get("llm_temperature", "") or os.getenv("FORGE_LLM_TEMPERATURE", "0.3"))
+        from .config import config
+        return float(self._data.get("llm_temperature", "") or config.deduction_llm_temperature)
     @llm_temperature.setter
     def llm_temperature(self, v: float) -> None: self._data["llm_temperature"] = v
 
