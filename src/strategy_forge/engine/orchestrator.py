@@ -455,7 +455,7 @@ class DeductionOrchestrator:
                 for eid, st in self._states.items()
             }
         self.store.update(self.session.id,
-                          report_json=json.dumps(report_payload, ensure_ascii=False))
+                          report_json=_json.dumps(report_payload, ensure_ascii=False))
         self._log("report", f"报告生成完成: {report.summary[:100]}...")
 
     def get_realtime_round(self) -> SimulationRound | None:
