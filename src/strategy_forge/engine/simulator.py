@@ -105,6 +105,7 @@ class SimulationEngine:
     ) -> None:
         self.agents = agents
         self.graph = graph
+        self._name_to_id: dict[str, str] = {a.name: a.entity_id for a in agents}
         self.total_rounds = total_rounds
         self._log = log_fn or (lambda p, m: None)
         self._event_history: list[dict[str, Any]] = []
@@ -384,23 +385,22 @@ class SimulationEngine:
             for e in self._event_history[-5:]
         ) or "（无近期事件）"
 
+        # Pre-build O(1) entity-id→index map for spatial lookups
+        alive_id_to_idx = {eid: i for i, eid in enumerate(alive_ids)} if alive_ids else {}
+
         def others_ctx(self_id: str) -> str:
             lines = []
+            idx_self = alive_id_to_idx.get(self_id)
             for a in alive_agents:
                 if a.entity_id == self_id:
                     continue
                 line = states[a.entity_id].to_prompt_context()
-                # Append spatial distance if physics module is active
-                if self._spatial_state is not None:
+                if self._spatial_state is not None and idx_self is not None:
                     sp = self._spatial_state
-                    try:
-                        idx_self = alive_ids.index(self_id)
-                        idx_other = alive_ids.index(a.entity_id)
-                        if idx_self < len(sp.positions) and idx_other < len(sp.positions):
-                            dist = float(np.linalg.norm(sp.positions[idx_self] - sp.positions[idx_other]))
-                            line += f"  距离: {dist:.0f}m"
-                    except (ValueError, IndexError):
-                        pass
+                    idx_other = alive_id_to_idx.get(a.entity_id)
+                    if idx_other is not None and idx_self < len(sp.positions) and idx_other < len(sp.positions):
+                        dist = float(np.linalg.norm(sp.positions[idx_self] - sp.positions[idx_other]))
+                        line += f"  距离: {dist:.0f}m"
                 lines.append(line)
             return "\n".join(lines) or "（无其他参与方）"
 
@@ -419,24 +419,19 @@ class SimulationEngine:
             return ""
 
         def spatial_self_ctx(self_id: str) -> str:
-            """Build spatial self-context for the LLM prompt."""
             if self._spatial_state is None:
                 return ""
             sp = self._spatial_state
-            try:
-                idx = alive_ids.index(self_id)
-            except (ValueError, IndexError):
-                return ""
-            if idx >= len(sp.positions):
+            idx = alive_id_to_idx.get(self_id)
+            if idx is None or idx >= len(sp.positions):
                 return ""
             pos = sp.positions[idx]
-            # Nearest neighbors
-            dists = []
+            dists: list[tuple[str, float]] = []
             for i, a in enumerate(alive_agents):
                 if a.entity_id == self_id or i >= len(sp.positions):
                     continue
                 d = float(np.linalg.norm(sp.positions[idx] - sp.positions[i]))
-                if d < 200:  # only report nearby entities
+                if d < 200:
                     dists.append((a.name, d))
             dists.sort(key=lambda x: x[1])
             lines = [f"位置: ({pos[0]:.0f}, {pos[1]:.0f}, {pos[2]:.0f})"]
@@ -457,6 +452,10 @@ class SimulationEngine:
 
         from strategy_forge.core.config import config as _cfg
         sem = asyncio.Semaphore(self._max_concurrent)
+
+        # Clear round-level caches at start of round
+        if self._preprocessor is not None and hasattr(self._preprocessor, "clear_round_cache"):
+            self._preprocessor.clear_round_cache()
 
         async def _recall(agent: DeductionAgentProfile) -> tuple[str, str]:
             """量化轮的 LanceDB 语义召回：Path A 原著静态(只读，优化器也启用) + Path B 动态事件。"""
@@ -524,12 +523,15 @@ class SimulationEngine:
                 st.apply_deltas(delay_d, round_number, ranges)
 
         # 轮初快照(批量应用语义) + 交互解算（收集逐交互归因，供因果链硬档写入）
-        name_to_id = {a.name: a.entity_id for a in self.agents}
         deltas, interactions = re_engine.resolve_round(
-            states, decisions, name_to_id, self._env, collect_interactions=True)
+            states, decisions, self._name_to_id, self._env, collect_interactions=True)
         inter_by_actor: dict[str, list[dict[str, Any]]] = {}
         for _it in interactions:
-            inter_by_actor.setdefault(_it["actor"], []).append(_it)
+            bucket = inter_by_actor.get(_it["actor"])
+            if bucket is None:
+                inter_by_actor[_it["actor"]] = [_it]
+            else:
+                bucket.append(_it)
         for eid, d in deltas.items():
             if eid in states:
                 states[eid].apply_deltas(d, round_number, ranges)

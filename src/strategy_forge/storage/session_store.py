@@ -16,18 +16,25 @@ class SessionStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: sqlite3.Connection | None = None
         self._init()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA temp_store=MEMORY")
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA temp_store=MEMORY")
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+
+    def close(self) -> None:
+        if self._conn:
+            self._conn.close()
+            self._conn = None
 
     def _init(self) -> None:
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS deduction_sessions (
                     id TEXT PRIMARY KEY,
@@ -89,7 +96,7 @@ class SessionStore:
     def create(self, session_id: str, title: str, source_material: str,
                config: dict[str, Any] | None = None) -> dict[str, Any]:
         now = datetime.now().isoformat()
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
                 "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -106,7 +113,7 @@ class SessionStore:
         set_parts = [f"{k} = ?" for k in kwargs]
         set_parts.append("updated_at = ?")
         values = list(kwargs.values()) + [now, session_id]
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 f"UPDATE deduction_sessions SET {', '.join(set_parts)} WHERE id = ?",
                 values,
@@ -115,7 +122,7 @@ class SessionStore:
         return self.get(session_id)
 
     def get(self, session_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM deduction_sessions WHERE id = ?", (session_id,)
             ).fetchone()
@@ -129,7 +136,7 @@ class SessionStore:
         return d
 
     def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, title, status, phase, entity_count, relation_count, "
                 "agent_count, current_round, total_rounds, created_at, updated_at "
@@ -140,7 +147,7 @@ class SessionStore:
 
     def append_log(self, session_id: str, phase: str, message: str) -> None:
         now = datetime.now().isoformat()
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 "INSERT INTO deduction_logs (session_id, phase, message, timestamp) "
                 "VALUES (?, ?, ?, ?)",
@@ -149,7 +156,7 @@ class SessionStore:
             conn.commit()
 
     def get_logs(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, phase, message, timestamp FROM deduction_logs "
                 "WHERE session_id = ? ORDER BY id ASC LIMIT ?",
@@ -158,7 +165,7 @@ class SessionStore:
         return [dict(r) for r in rows]
 
     def delete(self, session_id: str) -> None:
-        with self._connect() as conn:
+        with self._get_conn() as conn:
             conn.execute("DELETE FROM deduction_logs WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM deduction_sessions WHERE id = ?", (session_id,))
             conn.commit()

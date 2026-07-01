@@ -6,6 +6,7 @@ Supports user intervention awareness via LanceDB priority events.
 from __future__ import annotations
 
 import asyncio
+import heapq
 import json
 import logging
 import re
@@ -17,6 +18,9 @@ from .models import DeductionAgentProfile
 from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
+
+_POSITIVE_KW = frozenset({"support", "help", "cooperate", "praise", "agree"})
+_NEGATIVE_KW = frozenset({"oppose", "attack", "betray", "insult", "threaten", "block"})
 
 
 _CANDIDATE_PROMPT = """You are a strategic advisor. Generate {candidate_count} distinct action strategies for {agent_name}.
@@ -74,24 +78,48 @@ class StrategicReasoner:
         self._enable_multi_action = enable_multi_action
         self._max_actions = max(1, int(max_actions))
         self._trust_matrix: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        self._action_catalog_cache: dict[str, str] = {}
+        self._intervention_cache: str | None = None
+        self._intervention_round: int = -1
+
+    def _cached_intervention(self, round_number: int) -> str:
+        """Fetch latest intervention, cached per round."""
+        if self._intervention_round == round_number and self._intervention_cache is not None:
+            return self._intervention_cache
+        self._intervention_round = round_number
+        if self._preprocessor is not None:
+            try:
+                iv = self._preprocessor.retrieve_latest_intervention()
+                if iv:
+                    self._intervention_cache = iv.get("content", "")
+                    return self._intervention_cache
+            except Exception:
+                pass
+        self._intervention_cache = ""
+        return ""
+
+    def _cached_action_catalog(self, rule_engine: Any) -> str:
+        domain = getattr(rule_engine, "domain", "default")
+        key = f"{domain}_{self._enable_multi_action}_{self._max_actions}"
+        if key not in self._action_catalog_cache:
+            self._action_catalog_cache[key] = rule_engine.action_catalog()
+        return self._action_catalog_cache[key]
 
     def record_interaction(
         self, source: str, target: str, action_type: str, content: str,
     ) -> None:
         """Update trust matrix based on interaction sentiment."""
         delta = 0.0
-        positive = ["support", "help", "cooperate", "praise", "agree", "support"]
-        negative = ["oppose", "attack", "betray", "insult", "threaten", "block"]
         text_lower = content.lower()
         if action_type == "reply" or action_type == "interact":
-            if any(w in text_lower for w in positive):
+            if any(w in text_lower for w in _POSITIVE_KW):
                 delta = 0.3
-            elif any(w in text_lower for w in negative):
+            elif any(w in text_lower for w in _NEGATIVE_KW):
                 delta = -0.5
         elif action_type == "post":
-            if any(w in text_lower for w in positive):
+            if any(w in text_lower for w in _POSITIVE_KW):
                 delta = 0.1
-            elif any(w in text_lower for w in negative):
+            elif any(w in text_lower for w in _NEGATIVE_KW):
                 delta = -0.2
         if delta != 0.0:
             current = self._trust_matrix[source][target]
@@ -119,8 +147,9 @@ class StrategicReasoner:
         relations = self._trust_matrix.get(agent_id, {})
         if not relations:
             return "No prior trust history"
+        top = heapq.nlargest(5, relations.items(), key=lambda x: abs(x[1]))
         lines = []
-        for other, score in sorted(relations.items(), key=lambda x: -abs(x[1]))[:5]:
+        for other, score in top:
             label = "trusts" if score > 0 else "distrusts" if score < 0 else "neutral to"
             lines.append(f"  {label} {other[:12]} (score={score:+.1f})")
         return "\n".join(lines) if lines else "No significant trust relations"
@@ -132,14 +161,11 @@ class StrategicReasoner:
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         from strategy_forge.core.llm_client import Message
 
-        # 1. Check for user intervention
+        # 1. Check for user intervention (cached per round)
         user_cmd = "No external directive — act autonomously based on your profile."
-        intervention_text = ""
-        if self._preprocessor:
-            intervention = self._preprocessor.retrieve_latest_intervention()
-            if intervention:
-                intervention_text = intervention.get("content", "")
-                user_cmd = f"**EXTERNAL DIRECTIVE (priority={intervention.get('priority',1.0)}):** {intervention_text}"
+        intervention_text = self._cached_intervention(round_number)
+        if intervention_text:
+            user_cmd = intervention_text
 
         # 2. Build trust summary
         trust = self._trust_summary_for(agent.entity_id)
@@ -238,14 +264,7 @@ class StrategicReasoner:
         from strategy_forge.core.llm_client import Message
 
         actions = rule_engine.actions()
-        user_cmd = ""
-        if self._preprocessor is not None:
-            try:
-                iv = self._preprocessor.retrieve_latest_intervention()
-                if iv:
-                    user_cmd = iv.get("content", "")
-            except Exception:
-                pass
+        user_cmd = self._cached_intervention(round_number)
 
         goals = ", ".join(agent.goals) if agent.goals else "依据人格自主行动"
         imm = "；".join(self._immutable_goals) if self._immutable_goals else "无"
@@ -266,7 +285,7 @@ class StrategicReasoner:
             + f"## 近期局势\n{recent_events or '（无）'}\n"
             + (f"## 空间环境\n{spatial_context}\n" if spatial_context else "")
             + (f"## 地形与天气\n{env_context}\n" if env_context else "")
-            + f"\n## 可选行动\n{rule_engine.action_catalog()}\n\n"
+            + f"\n## 可选行动\n{self._cached_action_catalog(rule_engine)}\n\n"
         )
         if self._enable_multi_action:
             output_spec = (

@@ -50,6 +50,7 @@ class DeductionPreprocessor:
         self._cache_lock = threading.Lock()
         self._embed_cache: dict[str, list[float]] = {}
         self._recall_cache: dict[tuple, list[str]] = {}
+        self._dynamic_cache: dict[tuple, list[str]] = {}
         self._fts_ready: bool = False
         self.embed_cache_hits: int = 0
         self.recall_cache_hits: int = 0
@@ -249,12 +250,15 @@ class DeductionPreprocessor:
     ) -> list[str]:
         if self._event_table is None or self._dim <= 0:
             return []
+        cache_key = (query_text[:80], top_k, min_similarity)
+        cached = self._dynamic_cache.get(cache_key)
+        if cached is not None:
+            return cached
         try:
             query_vec = self._sync_embed_single(query_text)
         except Exception:
             return []
         fetch_k = top_k * 3
-        # 动态召回聚焦"模拟事件"，排除目标/干预(它们已由 retrieve_latest_intervention 单独注入)
         where_clause = "event_type NOT IN ('immutable_goal', 'user_intervention')"
         try:
             q = self._event_table.search(query_vec).metric("cosine")
@@ -277,7 +281,11 @@ class DeductionPreprocessor:
                 results.append(content[:300])
             if len(results) >= top_k:
                 break
+        self._dynamic_cache[cache_key] = results
         return results
+
+    def clear_round_cache(self) -> None:
+        self._dynamic_cache.clear()
 
     # ── Static chunk retrieval ──
 

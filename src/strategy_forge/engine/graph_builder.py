@@ -95,6 +95,7 @@ async def build_graph(
         high_freq = result.high_freq_entities
         low_freq = result.low_freq_entities
         all_aliases = {**high_freq, **low_freq}
+        _reverse_alias = _build_reverse_alias(all_aliases)
         alias_map_str = json.dumps(
             {k: list(v) for k, v in all_aliases.items()}, ensure_ascii=False,
         )
@@ -137,9 +138,9 @@ async def build_graph(
                     logger.warning("[Graph] Entity-driven extract '%s' failed: %s", std_name, e)
                     continue
 
-                # 归一化 + 写入 Kuzu
+                # 归一化 + 写入 Kuzu (O(1) reverse alias lookup)
                 for ent in entities:
-                    name = _normalize_name(ent.get("entity", ""), all_aliases)
+                    name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
                     ent_id = _make_id(name, "")
                     graph.upsert_entity(ent_id, name, ent.get("type", ""),
                                        ent.get("description", ""))
@@ -147,9 +148,9 @@ async def build_graph(
 
                 for rel in relations:
                     sid = _make_id(
-                        _normalize_name(rel.get("source", ""), all_aliases), "")
+                        _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
                     tid = _make_id(
-                        _normalize_name(rel.get("target", ""), all_aliases), "")
+                        _reverse_alias.get(rel.get("target", ""), rel.get("target", "")), "")
                     graph.upsert_relation(
                         sid, tid, rel.get("relation", ""),
                         evidence=rel.get("evidence", ""),
@@ -230,6 +231,16 @@ def _normalize_name(name: str, alias_map: dict[str, set[str]]) -> str:
         if name == std_name or name in aliases:
             return std_name
     return name
+
+
+def _build_reverse_alias(alias_map: dict[str, set[str]]) -> dict[str, str]:
+    """Build O(1) reverse lookup: alias → standardized name."""
+    rev: dict[str, str] = {}
+    for std_name, aliases in alias_map.items():
+        rev[std_name] = std_name
+        for a in aliases:
+            rev[a] = std_name
+    return rev
 
 
 def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

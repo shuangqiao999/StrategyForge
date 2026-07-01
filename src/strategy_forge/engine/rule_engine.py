@@ -26,11 +26,37 @@ from .models import EntityState
 
 logger = logging.getLogger(__name__)
 
+_CONDITION_RE = re.compile(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*')
+
 
 class RuleEngine:
     def __init__(self, rule_pack: dict[str, Any]):
         self.pack = self._with_defaults(rule_pack)
         self.domain = self.pack.get("domain", "generic")
+        # Pre-parse static condition strings → structured form for fast eval
+        self._parsed_conditions: dict[str, list[list[tuple[str, str, float]]]] = {}
+        for cfg in self.pack.get("auto_effects", {}).values():
+            c = cfg.get("condition", "")
+            if c:
+                self._parsed_conditions[c] = self._parse_condition(c)
+        for cfg in self.pack.get("conditional_effects", {}).values():
+            c = cfg.get("condition", "")
+            if c:
+                self._parsed_conditions[c] = self._parse_condition(c)
+
+    @staticmethod
+    def _parse_condition(condition: str) -> list[list[tuple[str, str, float]]]:
+        """Pre-parse 'a<5 and b>2 or c==1' → [[(a,<,5),(b,>,2)], [(c,==,1)]]."""
+        result: list[list[tuple[str, str, float]]] = []
+        for or_part in condition.split(" or "):
+            atoms: list[tuple[str, str, float]] = []
+            for and_part in or_part.strip().split(" and "):
+                m = _CONDITION_RE.match(and_part.strip())
+                if m:
+                    atoms.append((m.group(1), m.group(2), float(m.group(3))))
+            if atoms:
+                result.append(atoms)
+        return result
 
     # ── 构造 ──
     @classmethod
@@ -89,7 +115,7 @@ class RuleEngine:
     # ── 单决策 → 增量 ──
     @staticmethod
     def _eval_cond(condition: str, state: Any) -> bool:
-        """简单条件表达式求值器：metric op value, 可 and/or 组合。"""
+        """简单条件表达式求值器（使用预解析结构）。"""
         if not condition or not isinstance(condition, str):
             return True
         for part in condition.split(" or "):
@@ -99,8 +125,37 @@ class RuleEngine:
         return False
 
     @staticmethod
+    def _eval_cond_cached(parsed: list[list[tuple[str, str, float]]], state: Any) -> bool:
+        """Evaluate a pre-parsed condition against entity state — no string ops."""
+        for and_group in parsed:
+            ok = True
+            for metric, op, val in and_group:
+                mv = state.get_metric(metric)
+                if op == "<" and not (mv < val):
+                    ok = False
+                    break
+                if op == ">" and not (mv > val):
+                    ok = False
+                    break
+                if op == "<=" and not (mv <= val):
+                    ok = False
+                    break
+                if op == ">=" and not (mv >= val):
+                    ok = False
+                    break
+                if op == "==" and not (mv == val):
+                    ok = False
+                    break
+                if op == "!=" and not (mv != val):
+                    ok = False
+                    break
+            if ok:
+                return True
+        return False
+
+    @staticmethod
     def _eval_atom(atom: str, state: Any) -> bool:
-        m = re.match(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*', atom.strip())
+        m = _CONDITION_RE.match(atom.strip())
         if not m:
             return False
         metric, op, val = m.group(1), m.group(2), float(m.group(3))
@@ -119,7 +174,10 @@ class RuleEngine:
             for key, cfg in self.pack.get("conditional_effects", {}).items():
                 if not key.startswith(action):
                     continue
-                if self._eval_cond(cfg.get("condition", ""), state):
+                cond = cfg.get("condition", "")
+                parsed = self._parsed_conditions.get(cond)
+                ok = self._eval_cond_cached(parsed, state) if parsed else self._eval_cond(cond, state)
+                if ok:
                     for k, v in cfg.get("self_effects", {}).items():
                         self_d[k] = self_d.get(k, 0.0) + v * intensity
         if env:
@@ -139,7 +197,15 @@ class RuleEngine:
         for eid, st in states.items():
             deltas: dict[str, float] = {}
             for _label, cfg in auto.items():
-                if self._eval_cond(cfg.get("condition", ""), st):
+                cond = cfg.get("condition", "")
+                parsed = self._parsed_conditions.get(cond)
+                if parsed:
+                    ok = self._eval_cond_cached(parsed, st)
+                elif cond:
+                    ok = self._eval_cond(cond, st)
+                else:
+                    ok = True
+                if ok:
                     for metric, delta in cfg.get("effects", {}).items():
                         deltas[metric] = deltas.get(metric, 0.0) + float(delta)
             if deltas:
@@ -155,6 +221,9 @@ class RuleEngine:
         供因果链(硬档)写入图谱。默认仅返回合并 delta，向后兼容。"""
         result: dict[str, dict[str, float]] = {}
         interactions: list[dict[str, Any]] = []
+
+        # Pre-build O(1) lowercase name→id map for _resolve_target
+        lower_map = {n.lower().strip(): eid for n, eid in name_to_id.items()}
 
         def _add(eid: str, d: dict[str, float]) -> None:
             bucket = result.setdefault(eid, {})
@@ -172,8 +241,8 @@ class RuleEngine:
                                                        state=snapshot_states.get(actor))
                 _add(actor, self_d)
                 if tgt_d:
-                    tid = self._resolve_target(target, name_to_id, exclude=actor)
-                    if tid and tid in snapshot_states:
+                    tid = lower_map.get(target.lower().strip()) if target else None
+                    if tid and tid != actor and tid in snapshot_states:
                         _add(tid, tgt_d)
                         if collect_interactions:
                             interactions.append({"actor": actor, "target": tid,
@@ -185,24 +254,20 @@ class RuleEngine:
         return result
 
     @staticmethod
-    def _iter_subactions(dec: dict[str, Any]) -> list[tuple[str, float, str]]:
-        """将决策展开为 [(action_type, sub_intensity, target), ...]。
-
-        - 多动作契约：budget + actions:[{action_type, weight, target}]，
-          按 budget × (weight/Σweight) 分配；权重缺失/全零则在各动作间均分预算。
-        - 旧契约：action_type + intensity + target（视作单元素，与 v2.0 逐字节一致）。
-        """
-        def _legacy() -> list[tuple[str, float, str]]:
+    def _iter_subactions(dec: dict[str, Any]):  # generator — no return type annotation to avoid typing complexity
+        """将决策展开为 [(action_type, sub_intensity, target), ...] 的生成器。"""
+        def _legacy():
             try:
                 intensity = max(0.0, min(1.0, float(dec.get("intensity", 0.5))))
             except (TypeError, ValueError):
                 intensity = 0.5
-            return [(str(dec.get("action_type", "observe")), intensity,
-                     str(dec.get("target", "") or "").strip())]
+            yield (str(dec.get("action_type", "observe")), intensity,
+                   str(dec.get("target", "") or "").strip())
 
         actions = dec.get("actions")
         if not isinstance(actions, list) or not actions:
-            return _legacy()
+            yield from _legacy()
+            return
         try:
             budget = max(0.0, min(1.0, float(dec.get("budget", dec.get("intensity", 0.5)))))
         except (TypeError, ValueError):
@@ -218,12 +283,16 @@ class RuleEngine:
                 w = 0.0
             parsed.append((act, w, str(a.get("target", "") or "").strip()))
         if not parsed:
-            return _legacy()
+            yield from _legacy()
+            return
         total = sum(w for _a, w, _t in parsed)
         if total <= 0:
             n = len(parsed)
-            return [(act, budget / n, tgt) for act, _w, tgt in parsed]
-        return [(act, budget * (w / total), tgt) for act, w, tgt in parsed]
+            for act, _w, tgt in parsed:
+                yield (act, budget / n, tgt)
+        else:
+            for act, w, tgt in parsed:
+                yield (act, budget * (w / total), tgt)
 
     @staticmethod
     def _resolve_target(tname: str, name_to_id: dict[str, str], exclude: str | None = None) -> str | None:
