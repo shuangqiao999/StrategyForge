@@ -100,21 +100,27 @@ def build_context(
         init_radius = pack.get("initial_radii")
         ctx.spatial.init_from_dict(entity_ids, init_pos, init_vel, init_mass, init_radius)
 
-    # ── Inject ODE / Physics params from extracted world parameters ──
-    ode_params = pack.get("ode_params", {})
-    if ode_params and "params" in ode_params:
-        for metric, param_dict in ode_params["params"].items():
-            if isinstance(param_dict, dict):
-                for key, val in param_dict.items():
-                    ctx_key = f"_{key}"
-                    if ctx_key not in ctx.arrays:
-                        ctx.arrays[ctx_key] = np.full(len(entity_ids), float(val), dtype=np.float64)
+    # ── Inject ODE params from rules.json (modules.ode_engine.params) + extractor fallback ──
+    ode_cfg = pack.get("modules", {}).get("ode_engine", {})
+    ode_params: dict[str, Any] = dict(ode_cfg.get("params", {}))
+    extracted = pack.get("ode_params", {})
+    if isinstance(extracted, dict) and "params" in extracted:
+        ode_params.update(extracted["params"])
+    for metric, param_dict in ode_params.items():
+        if isinstance(param_dict, dict):
+            for key, val in param_dict.items():
+                ctx_key = key if key.startswith("_") else f"_{key}"
+                if ctx_key not in ctx.arrays:
+                    ctx.arrays[ctx_key] = np.full(len(entity_ids), float(val), dtype=np.float64)
 
-    # Inject physics explosion sources from extracted params
+    # Inject physics explosion sources from rules.json + extractor fallback
+    phys_cfg = pack.get("modules", {}).get("physics_engine", {})
     phys_extracted = pack.get("physics_params", {})
-    if phys_extracted.get("explosion_sources"):
+    all_sources = list(phys_cfg.get("explosion_sources", []))
+    all_sources.extend(phys_extracted.get("explosion_sources", []))
+    if all_sources:
         ctx.metadata.setdefault("trigger_explosion", [])
-        for src in phys_extracted["explosion_sources"]:
+        for src in all_sources:
             ctx.metadata["trigger_explosion"].append({
                 "center": src.get("center", [0, 0, 0]),
                 "power": float(src.get("power", 100.0)),

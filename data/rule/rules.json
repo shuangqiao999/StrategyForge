@@ -3,54 +3,218 @@
     "name": "⚔️ 军事战争",
     "domain": "military",
     "display_name": "军事战争",
-    "metrics": ["strength", "morale", "supply", "fatigue", "leadership"],
-    "initial_metrics": {"strength": 100, "morale": 75, "supply": 85, "fatigue": 10, "leadership": 70},
-    "thresholds": {"strength": 15, "morale": 20, "supply": 10, "leadership": 15},
-    "actions": ["attack", "defend", "invest", "maneuver", "diplomacy", "siege", "electronic_warfare", "observe"],
+    "metrics": [
+      "strength",
+      "morale",
+      "supply",
+      "fatigue",
+      "leadership"
+    ],
+    "initial_metrics": {
+      "strength": 100,
+      "morale": 75,
+      "supply": 85,
+      "fatigue": 10,
+      "leadership": 70
+    },
+    "thresholds": {
+      "strength": 15,
+      "morale": 20,
+      "supply": 10,
+      "leadership": 15
+    },
+    "actions": [
+      "attack",
+      "defend",
+      "invest",
+      "maneuver",
+      "diplomacy",
+      "siege",
+      "electronic_warfare",
+      "observe"
+    ],
     "self_effects": {
-      "attack":             {"strength": -15, "supply": -12, "fatigue": 10, "morale": -5},
-      "defend":             {"strength": -4, "morale": 2, "fatigue": 3, "supply": -3},
-      "invest":             {"supply": -10, "strength": 5, "morale": 3, "fatigue": -2},
-      "maneuver":           {"supply": -8, "fatigue": 8, "morale": -2},
-      "diplomacy":          {"morale": 2, "supply": -1},
-      "siege":              {"supply": -10, "fatigue": 8, "morale": -3},
-      "electronic_warfare": {"supply": -6, "morale": -2},
-      "observe":            {"fatigue": -5, "morale": 1}
+      "attack": {
+        "strength": -15,
+        "supply": -12,
+        "fatigue": 10,
+        "morale": -5
+      },
+      "defend": {
+        "strength": -4,
+        "morale": 2,
+        "fatigue": 3,
+        "supply": -3
+      },
+      "invest": {
+        "supply": -10,
+        "strength": 5,
+        "morale": 3,
+        "fatigue": -2
+      },
+      "maneuver": {
+        "supply": -8,
+        "fatigue": 8,
+        "morale": -2
+      },
+      "diplomacy": {
+        "morale": 2,
+        "supply": -1
+      },
+      "siege": {
+        "supply": -10,
+        "fatigue": 8,
+        "morale": -3
+      },
+      "electronic_warfare": {
+        "supply": -6,
+        "morale": -2
+      },
+      "observe": {
+        "fatigue": -5,
+        "morale": 1
+      }
     },
     "target_effects": {
-      "attack":             {"strength": -20, "morale": -12, "supply": -8},
-      "maneuver":           {"morale": -5},
-      "diplomacy":          {"morale": 3},
-      "siege":              {"supply": -12, "morale": -5},
-      "electronic_warfare": {"leadership": -8, "morale": -10}
+      "attack": {
+        "strength": -20,
+        "morale": -12,
+        "supply": -8
+      },
+      "maneuver": {
+        "morale": -5
+      },
+      "diplomacy": {
+        "morale": 3
+      },
+      "siege": {
+        "supply": -12,
+        "morale": -5
+      },
+      "electronic_warfare": {
+        "leadership": -8,
+        "morale": -10
+      }
     },
     "conditional_effects": {
-      "attack_morale_low": {"condition": "morale < 30", "self_effects": {"strength": -25, "fatigue": 5}},
-      "attack_fatigue_high": {"condition": "fatigue > 70", "self_effects": {"strength": -8, "morale": -5}},
-      "siege_starving": {"condition": "supply < 30", "self_effects": {"strength": -10, "morale": -8}},
-      "desperate_defense": {"condition": "strength < 30", "self_effects": {"morale": 8, "strength": -2}},
-      "blitzkrieg_fatigue": {"condition": "strength > 80 and fatigue < 20", "self_effects": {"fatigue": 5}}
+      "attack_morale_low": {
+        "condition": "morale < 30",
+        "self_effects": {
+          "strength": -25,
+          "fatigue": 5
+        }
+      },
+      "attack_fatigue_high": {
+        "condition": "fatigue > 70",
+        "self_effects": {
+          "strength": -8,
+          "morale": -5
+        }
+      },
+      "siege_starving": {
+        "condition": "supply < 30",
+        "self_effects": {
+          "strength": -10,
+          "morale": -8
+        }
+      },
+      "desperate_defense": {
+        "condition": "strength < 30",
+        "self_effects": {
+          "morale": 8,
+          "strength": -2
+        }
+      },
+      "blitzkrieg_fatigue": {
+        "condition": "strength > 80 and fatigue < 20",
+        "self_effects": {
+          "fatigue": 5
+        }
+      }
     },
     "delay_effects": {
-      "invest": {"delay": 2, "effects": {"strength": 8, "morale": 3, "leadership": 2}}
+      "invest": {
+        "delay": 2,
+        "effects": {
+          "strength": 8,
+          "morale": 3,
+          "leadership": 2
+        }
+      }
     },
     "auto_effects": {
-      "fatigue_recovery": {"condition": "fatigue > 20", "effects": {"fatigue": -4}},
-      "supply_drain": {"condition": "strength > 50", "effects": {"supply": -3}},
-      "attrition": {"condition": "supply < 20", "effects": {"strength": -5, "morale": -10, "leadership": -5}},
-      "war_weariness": {"condition": "fatigue > 60", "effects": {"morale": -3, "leadership": -1}},
-      "command_collapse": {"condition": "leadership < 20", "effects": {"strength": -8, "morale": -8}},
-      "logistics_snarl": {"condition": "supply < 30 and fatigue > 50", "effects": {"strength": -3, "morale": -3}}
+      "fatigue_recovery": {
+        "condition": "fatigue > 20",
+        "effects": {
+          "fatigue": -4
+        }
+      },
+      "supply_drain": {
+        "condition": "strength > 50",
+        "effects": {
+          "supply": -3
+        }
+      },
+      "attrition": {
+        "condition": "supply < 20",
+        "effects": {
+          "strength": -5,
+          "morale": -10,
+          "leadership": -5
+        }
+      },
+      "war_weariness": {
+        "condition": "fatigue > 60",
+        "effects": {
+          "morale": -3,
+          "leadership": -1
+        }
+      },
+      "command_collapse": {
+        "condition": "leadership < 20",
+        "effects": {
+          "strength": -8,
+          "morale": -8
+        }
+      },
+      "logistics_snarl": {
+        "condition": "supply < 30 and fatigue > 50",
+        "effects": {
+          "strength": -3,
+          "morale": -3
+        }
+      }
     },
     "weather_modifiers": {
-      "rain":  {"morale": -8, "supply": -10, "fatigue": 3},
-      "snow":  {"fatigue": 12, "supply": -15, "strength": -3},
-      "clear": {"morale": 2, "fatigue": -2}
+      "rain": {
+        "morale": -8,
+        "supply": -10,
+        "fatigue": 3
+      },
+      "snow": {
+        "fatigue": 12,
+        "supply": -15,
+        "strength": -3
+      },
+      "clear": {
+        "morale": 2,
+        "fatigue": -2
+      }
     },
     "terrain_modifiers": {
-      "mountain": {"fatigue": 10, "strength": -8, "morale": -3},
-      "plain":    {"morale": 2},
-      "forest":   {"supply": -5, "strength": -5, "morale": -2}
+      "mountain": {
+        "fatigue": 10,
+        "strength": -8,
+        "morale": -3
+      },
+      "plain": {
+        "morale": 2
+      },
+      "forest": {
+        "supply": -5,
+        "strength": -5,
+        "morale": -2
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -62,6 +226,15 @@
         "equations": {
           "fatigue": "fatigue_recovery",
           "supply": "supply_consumption"
+        },
+        "params": {
+          "fatigue": {
+            "_fatigue_rate": 0.05
+          },
+          "supply": {
+            "_supply_base_rate": 0.2,
+            "_supply_strength_factor": 0.01
+          }
         }
       },
       "physics_engine": {
@@ -69,57 +242,255 @@
       }
     }
   },
-
   "business": {
     "name": "📊 商业竞争",
     "domain": "business",
     "display_name": "商业竞争",
-    "metrics": ["market_share", "cash_flow", "brand", "rnd", "morale", "supply_chain"],
-    "initial_metrics": {"market_share": 20, "cash_flow": 65, "brand": 60, "rnd": 50, "morale": 70, "supply_chain": 70},
-    "thresholds": {"cash_flow": 10, "market_share": 5, "supply_chain": 15},
-    "actions": ["price_war", "invest_rnd", "marketing", "expand", "partner", "ipo", "embargo", "poach_talent", "observe"],
+    "metrics": [
+      "market_share",
+      "cash_flow",
+      "brand",
+      "rnd",
+      "morale",
+      "supply_chain"
+    ],
+    "initial_metrics": {
+      "market_share": 20,
+      "cash_flow": 65,
+      "brand": 60,
+      "rnd": 50,
+      "morale": 70,
+      "supply_chain": 70
+    },
+    "thresholds": {
+      "cash_flow": 10,
+      "market_share": 5,
+      "supply_chain": 15
+    },
+    "actions": [
+      "price_war",
+      "invest_rnd",
+      "marketing",
+      "expand",
+      "partner",
+      "ipo",
+      "embargo",
+      "poach_talent",
+      "observe"
+    ],
     "self_effects": {
-      "price_war":    {"cash_flow": -12, "market_share": 10, "brand": -6, "morale": -2},
-      "invest_rnd":   {"cash_flow": -15, "rnd": 10, "morale": 2, "brand": 1},
-      "marketing":    {"cash_flow": -10, "brand": 8, "market_share": 3, "morale": 1},
-      "expand":       {"cash_flow": -15, "market_share": 8, "morale": -4, "supply_chain": -4, "brand": 2},
-      "partner":      {"cash_flow": 15, "brand": 5, "supply_chain": 8, "morale": 3, "rnd": 2},
-      "ipo":          {"cash_flow": 50, "morale": -10, "brand": -5, "supply_chain": -3, "market_share": 2},
-      "embargo":      {"cash_flow": -5, "brand": -4, "market_share": -2, "supply_chain": -3},
-      "poach_talent": {"cash_flow": -8, "rnd": 10, "morale": 5, "brand": 2},
-      "observe":      {"cash_flow": -1, "morale": 1}
+      "price_war": {
+        "cash_flow": -12,
+        "market_share": 10,
+        "brand": -6,
+        "morale": -2
+      },
+      "invest_rnd": {
+        "cash_flow": -15,
+        "rnd": 10,
+        "morale": 2,
+        "brand": 1
+      },
+      "marketing": {
+        "cash_flow": -10,
+        "brand": 8,
+        "market_share": 3,
+        "morale": 1
+      },
+      "expand": {
+        "cash_flow": -15,
+        "market_share": 8,
+        "morale": -4,
+        "supply_chain": -4,
+        "brand": 2
+      },
+      "partner": {
+        "cash_flow": 15,
+        "brand": 5,
+        "supply_chain": 8,
+        "morale": 3,
+        "rnd": 2
+      },
+      "ipo": {
+        "cash_flow": 50,
+        "morale": -10,
+        "brand": -5,
+        "supply_chain": -3,
+        "market_share": 2
+      },
+      "embargo": {
+        "cash_flow": -5,
+        "brand": -4,
+        "market_share": -2,
+        "supply_chain": -3
+      },
+      "poach_talent": {
+        "cash_flow": -8,
+        "rnd": 10,
+        "morale": 5,
+        "brand": 2
+      },
+      "observe": {
+        "cash_flow": -1,
+        "morale": 1
+      }
     },
     "target_effects": {
-      "price_war":    {"market_share": -12, "cash_flow": -6, "morale": -4, "brand": -3},
-      "marketing":    {"market_share": -5, "brand": -2},
-      "expand":       {"market_share": -6, "supply_chain": -3},
-      "embargo":      {"supply_chain": -25, "market_share": -8, "cash_flow": -4, "morale": -3},
-      "poach_talent": {"rnd": -12, "morale": -6, "brand": -2},
-      "ipo":          {"market_share": -3, "brand": -2}
+      "price_war": {
+        "market_share": -12,
+        "cash_flow": -6,
+        "morale": -4,
+        "brand": -3
+      },
+      "marketing": {
+        "market_share": -5,
+        "brand": -2
+      },
+      "expand": {
+        "market_share": -6,
+        "supply_chain": -3
+      },
+      "embargo": {
+        "supply_chain": -25,
+        "market_share": -8,
+        "cash_flow": -4,
+        "morale": -3
+      },
+      "poach_talent": {
+        "rnd": -12,
+        "morale": -6,
+        "brand": -2
+      },
+      "ipo": {
+        "market_share": -3,
+        "brand": -2
+      }
     },
     "conditional_effects": {
-      "price_war_diminishing":  {"condition": "market_share > 40", "self_effects": {"market_share": 3, "cash_flow": -3}},
-      "price_war_capped":       {"condition": "market_share > 60", "self_effects": {"market_share": 1}},
-      "expand_cautious":        {"condition": "cash_flow < 30", "self_effects": {"morale": -6, "cash_flow": -3}},
-      "rnd_diminishing":        {"condition": "rnd > 70", "self_effects": {"rnd": 3}},
-      "rnd_capped":             {"condition": "rnd > 85", "self_effects": {"rnd": 1}},
-      "partner_synergy":        {"condition": "cash_flow < 25", "self_effects": {"cash_flow": 3, "morale": 2}},
-      "distress_protection":    {"condition": "cash_flow < 12 and market_share > 25", "self_effects": {"cash_flow": 3, "morale": -4}},
-      "bankruptcy_protection":  {"condition": "cash_flow < 8 and brand > 60", "self_effects": {"cash_flow": 2, "brand": -2}}
+      "price_war_diminishing": {
+        "condition": "market_share > 40",
+        "self_effects": {
+          "market_share": 3,
+          "cash_flow": -3
+        }
+      },
+      "price_war_capped": {
+        "condition": "market_share > 60",
+        "self_effects": {
+          "market_share": 1
+        }
+      },
+      "expand_cautious": {
+        "condition": "cash_flow < 30",
+        "self_effects": {
+          "morale": -6,
+          "cash_flow": -3
+        }
+      },
+      "rnd_diminishing": {
+        "condition": "rnd > 70",
+        "self_effects": {
+          "rnd": 3
+        }
+      },
+      "rnd_capped": {
+        "condition": "rnd > 85",
+        "self_effects": {
+          "rnd": 1
+        }
+      },
+      "partner_synergy": {
+        "condition": "cash_flow < 25",
+        "self_effects": {
+          "cash_flow": 3,
+          "morale": 2
+        }
+      },
+      "distress_protection": {
+        "condition": "cash_flow < 12 and market_share > 25",
+        "self_effects": {
+          "cash_flow": 3,
+          "morale": -4
+        }
+      },
+      "bankruptcy_protection": {
+        "condition": "cash_flow < 8 and brand > 60",
+        "self_effects": {
+          "cash_flow": 2,
+          "brand": -2
+        }
+      }
     },
     "delay_effects": {
-      "invest_rnd": {"delay": 2, "effects": {"rnd": 8, "market_share": 4, "brand": 3}},
-      "ipo":        {"delay": 1, "effects": {"morale": -3}},
-      "expand":     {"delay": 1, "effects": {"market_share": 3, "cash_flow": -2}}
+      "invest_rnd": {
+        "delay": 2,
+        "effects": {
+          "rnd": 8,
+          "market_share": 4,
+          "brand": 3
+        }
+      },
+      "ipo": {
+        "delay": 1,
+        "effects": {
+          "morale": -3
+        }
+      },
+      "expand": {
+        "delay": 1,
+        "effects": {
+          "market_share": 3,
+          "cash_flow": -2
+        }
+      }
     },
     "auto_effects": {
-      "brand_erosion":         {"condition": "brand < 30", "effects": {"brand": -1, "market_share": -2}},
-      "cash_burn":             {"condition": "cash_flow > 80", "effects": {"cash_flow": -5}},
-      "rnd_depreciation":      {"condition": "rnd > 70", "effects": {"rnd": -1}},
-      "market_share_buffer":   {"condition": "market_share > 30 and cash_flow < 20", "effects": {"cash_flow": 2}},
-      "brand_buffer":          {"condition": "brand > 70 and cash_flow < 15", "effects": {"cash_flow": 1}},
-      "supply_chain_risk":     {"condition": "supply_chain < 30", "effects": {"cash_flow": -4, "market_share": -2}},
-      "supply_chain_collapse": {"condition": "supply_chain < 15", "effects": {"cash_flow": -8, "market_share": -3, "morale": -5}}
+      "brand_erosion": {
+        "condition": "brand < 30",
+        "effects": {
+          "brand": -1,
+          "market_share": -2
+        }
+      },
+      "cash_burn": {
+        "condition": "cash_flow > 80",
+        "effects": {
+          "cash_flow": -5
+        }
+      },
+      "rnd_depreciation": {
+        "condition": "rnd > 70",
+        "effects": {
+          "rnd": -1
+        }
+      },
+      "market_share_buffer": {
+        "condition": "market_share > 30 and cash_flow < 20",
+        "effects": {
+          "cash_flow": 2
+        }
+      },
+      "brand_buffer": {
+        "condition": "brand > 70 and cash_flow < 15",
+        "effects": {
+          "cash_flow": 1
+        }
+      },
+      "supply_chain_risk": {
+        "condition": "supply_chain < 30",
+        "effects": {
+          "cash_flow": -4,
+          "market_share": -2
+        }
+      },
+      "supply_chain_collapse": {
+        "condition": "supply_chain < 15",
+        "effects": {
+          "cash_flow": -8,
+          "market_share": -3,
+          "morale": -5
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -135,6 +506,21 @@
           "cash_flow": "decay",
           "brand": "logistic",
           "supply_chain": "supply_consumption"
+        },
+        "params": {
+          "market_share": {
+            "_carrying_capacity": 100,
+            "_logistic_rate": 0.05
+          },
+          "cash_flow": {
+            "_decay_rate": 0.03
+          },
+          "brand": {
+            "_logistic_rate": 0.02
+          },
+          "supply_chain": {
+            "_supply_base_rate": 0.1
+          }
         }
       },
       "physics_engine": {
@@ -142,53 +528,209 @@
       }
     }
   },
-
   "politics": {
     "name": "🏛️ 政治博弈",
     "domain": "politics",
     "display_name": "政治博弈",
-    "metrics": ["support_rate", "legislative_power", "intl_relations", "economy", "unity"],
-    "initial_metrics": {"support_rate": 55, "legislative_power": 45, "intl_relations": 60, "economy": 50, "unity": 55},
-    "thresholds": {"support_rate": 15, "unity": 10},
-    "actions": ["campaign", "legislate", "diplomacy", "reform", "attack_opponent", "propaganda", "fact_check", "observe"],
+    "metrics": [
+      "support_rate",
+      "legislative_power",
+      "intl_relations",
+      "economy",
+      "unity"
+    ],
+    "initial_metrics": {
+      "support_rate": 55,
+      "legislative_power": 45,
+      "intl_relations": 60,
+      "economy": 50,
+      "unity": 55
+    },
+    "thresholds": {
+      "support_rate": 15,
+      "unity": 10
+    },
+    "actions": [
+      "campaign",
+      "legislate",
+      "diplomacy",
+      "reform",
+      "attack_opponent",
+      "propaganda",
+      "fact_check",
+      "observe"
+    ],
     "self_effects": {
-      "campaign":        {"support_rate": 8, "economy": -8, "unity": -4},
-      "legislate":       {"legislative_power": 6, "support_rate": -3, "unity": -2},
-      "diplomacy":       {"intl_relations": 8, "support_rate": 1},
-      "reform":          {"economy": -12, "support_rate": -10, "unity": -8, "legislative_power": -5},
-      "attack_opponent": {"support_rate": 4, "unity": -6, "legislative_power": -3},
-      "propaganda":      {"support_rate": 6, "unity": -4, "intl_relations": -2},
-      "fact_check":      {"support_rate": 2, "unity": 1},
-      "observe":         {"unity": 1, "legislative_power": 0.5}
+      "campaign": {
+        "support_rate": 8,
+        "economy": -8,
+        "unity": -4
+      },
+      "legislate": {
+        "legislative_power": 6,
+        "support_rate": -3,
+        "unity": -2
+      },
+      "diplomacy": {
+        "intl_relations": 8,
+        "support_rate": 1
+      },
+      "reform": {
+        "economy": -12,
+        "support_rate": -10,
+        "unity": -8,
+        "legislative_power": -5
+      },
+      "attack_opponent": {
+        "support_rate": 4,
+        "unity": -6,
+        "legislative_power": -3
+      },
+      "propaganda": {
+        "support_rate": 6,
+        "unity": -4,
+        "intl_relations": -2
+      },
+      "fact_check": {
+        "support_rate": 2,
+        "unity": 1
+      },
+      "observe": {
+        "unity": 1,
+        "legislative_power": 0.5
+      }
     },
     "target_effects": {
-      "attack_opponent": {"support_rate": -10, "unity": -6, "legislative_power": -2},
-      "campaign":        {"support_rate": -4},
-      "legislate":       {"legislative_power": -5},
-      "propaganda":      {"support_rate": -8, "unity": -4},
-      "fact_check":      {"support_rate": 3, "unity": 2}
+      "attack_opponent": {
+        "support_rate": -10,
+        "unity": -6,
+        "legislative_power": -2
+      },
+      "campaign": {
+        "support_rate": -4
+      },
+      "legislate": {
+        "legislative_power": -5
+      },
+      "propaganda": {
+        "support_rate": -8,
+        "unity": -4
+      },
+      "fact_check": {
+        "support_rate": 3,
+        "unity": 2
+      }
     },
     "conditional_effects": {
-      "campaign_boom": {"condition": "economy > 70", "self_effects": {"support_rate": 4}},
-      "campaign_slump": {"condition": "economy < 30", "self_effects": {"support_rate": -8}},
-      "reform_unity_crisis": {"condition": "unity < 40", "self_effects": {"unity": -5, "support_rate": -5}},
-      "attack_justified": {"condition": "intl_relations < 30 or support_rate > 70", "self_effects": {"support_rate": 6}},
-      "attack_unjustified": {"condition": "intl_relations > 70 and support_rate < 40", "self_effects": {"support_rate": -4}},
-      "diplomacy_overreach": {"condition": "intl_relations > 80", "self_effects": {"support_rate": -3, "unity": -2}}
+      "campaign_boom": {
+        "condition": "economy > 70",
+        "self_effects": {
+          "support_rate": 4
+        }
+      },
+      "campaign_slump": {
+        "condition": "economy < 30",
+        "self_effects": {
+          "support_rate": -8
+        }
+      },
+      "reform_unity_crisis": {
+        "condition": "unity < 40",
+        "self_effects": {
+          "unity": -5,
+          "support_rate": -5
+        }
+      },
+      "attack_justified": {
+        "condition": "intl_relations < 30 or support_rate > 70",
+        "self_effects": {
+          "support_rate": 6
+        }
+      },
+      "attack_unjustified": {
+        "condition": "intl_relations > 70 and support_rate < 40",
+        "self_effects": {
+          "support_rate": -4
+        }
+      },
+      "diplomacy_overreach": {
+        "condition": "intl_relations > 80",
+        "self_effects": {
+          "support_rate": -3,
+          "unity": -2
+        }
+      }
     },
     "delay_effects": {
-      "reform": {"delay": 3, "effects": {"economy": 15, "support_rate": 5, "unity": 3}},
-      "legislate": {"delay": 1, "effects": {"support_rate": 2}}
+      "reform": {
+        "delay": 3,
+        "effects": {
+          "economy": 15,
+          "support_rate": 5,
+          "unity": 3
+        }
+      },
+      "legislate": {
+        "delay": 1,
+        "effects": {
+          "support_rate": 2
+        }
+      }
     },
     "auto_effects": {
-      "unity_drift": {"condition": "unity < 30", "effects": {"unity": -2}},
-      "internal_crisis": {"condition": "unity < 30", "effects": {"support_rate": -2, "legislative_power": -1}},
-      "total_fragmentation": {"condition": "unity < 15", "effects": {"support_rate": -4, "economy": -3}},
-      "support_erosion": {"condition": "support_rate < 25", "effects": {"support_rate": -2}},
-      "economic_hope": {"condition": "economy > 60", "effects": {"support_rate": 1}},
-      "economic_contagion": {"condition": "economy < 25", "effects": {"support_rate": -3, "unity": -2, "legislative_power": -1}},
-      "prosperity_complacency": {"condition": "economy > 75", "effects": {"support_rate": -1, "unity": -1}},
-      "implementation_friction": {"condition": "legislative_power > 70", "effects": {"economy": -1}}
+      "unity_drift": {
+        "condition": "unity < 30",
+        "effects": {
+          "unity": -2
+        }
+      },
+      "internal_crisis": {
+        "condition": "unity < 30",
+        "effects": {
+          "support_rate": -2,
+          "legislative_power": -1
+        }
+      },
+      "total_fragmentation": {
+        "condition": "unity < 15",
+        "effects": {
+          "support_rate": -4,
+          "economy": -3
+        }
+      },
+      "support_erosion": {
+        "condition": "support_rate < 25",
+        "effects": {
+          "support_rate": -2
+        }
+      },
+      "economic_hope": {
+        "condition": "economy > 60",
+        "effects": {
+          "support_rate": 1
+        }
+      },
+      "economic_contagion": {
+        "condition": "economy < 25",
+        "effects": {
+          "support_rate": -3,
+          "unity": -2,
+          "legislative_power": -1
+        }
+      },
+      "prosperity_complacency": {
+        "condition": "economy > 75",
+        "effects": {
+          "support_rate": -1,
+          "unity": -1
+        }
+      },
+      "implementation_friction": {
+        "condition": "legislative_power > 70",
+        "effects": {
+          "economy": -1
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -202,45 +744,164 @@
           "support_rate": "logistic",
           "economy": "logistic",
           "unity": "decay"
+        },
+        "params": {
+          "support_rate": {
+            "_carrying_capacity": 100
+          },
+          "economy": {
+            "_carrying_capacity": 100
+          }
         }
       }
     }
   },
-
   "ecology": {
     "name": "🌿 生态环境",
     "domain": "ecology",
     "display_name": "生态环境",
-    "metrics": ["population", "resources", "pollution", "biodiversity", "stability"],
-    "initial_metrics": {"population": 60, "resources": 70, "pollution": 25, "biodiversity": 65, "stability": 60},
-    "thresholds": {"population": 15, "resources": 10, "biodiversity": 10, "stability": 15},
-    "actions": ["exploit", "conserve", "pollute_control", "expand_habitat", "compete", "restoration", "observe"],
+    "metrics": [
+      "population",
+      "resources",
+      "pollution",
+      "biodiversity",
+      "stability"
+    ],
+    "initial_metrics": {
+      "population": 60,
+      "resources": 70,
+      "pollution": 25,
+      "biodiversity": 65,
+      "stability": 60
+    },
+    "thresholds": {
+      "population": 15,
+      "resources": 10,
+      "biodiversity": 10,
+      "stability": 15
+    },
+    "actions": [
+      "exploit",
+      "conserve",
+      "pollute_control",
+      "expand_habitat",
+      "compete",
+      "restoration",
+      "observe"
+    ],
     "self_effects": {
-      "exploit":         {"resources": -20, "population": 10, "pollution": 15, "biodiversity": -8},
-      "conserve":        {"resources": 5, "biodiversity": 6, "population": -3, "stability": 2},
-      "pollute_control": {"pollution": -20, "resources": -12, "stability": 8, "population": -2},
-      "expand_habitat":  {"population": 12, "resources": -15, "biodiversity": -5},
-      "compete":         {"population": 6, "biodiversity": -8, "stability": -3},
-      "restoration":     {"resources": -10, "biodiversity": 2, "stability": 2, "pollution": -5},
-      "observe":         {"stability": 1}
+      "exploit": {
+        "resources": -20,
+        "population": 10,
+        "pollution": 15,
+        "biodiversity": -8
+      },
+      "conserve": {
+        "resources": 5,
+        "biodiversity": 6,
+        "population": -3,
+        "stability": 2
+      },
+      "pollute_control": {
+        "pollution": -20,
+        "resources": -12,
+        "stability": 8,
+        "population": -2
+      },
+      "expand_habitat": {
+        "population": 12,
+        "resources": -15,
+        "biodiversity": -5
+      },
+      "compete": {
+        "population": 6,
+        "biodiversity": -8,
+        "stability": -3
+      },
+      "restoration": {
+        "resources": -10,
+        "biodiversity": 2,
+        "stability": 2,
+        "pollution": -5
+      },
+      "observe": {
+        "stability": 1
+      }
     },
     "target_effects": {
-      "compete": {"population": -10, "resources": -8, "stability": -2},
-      "exploit": {"resources": -8, "biodiversity": -3}
+      "compete": {
+        "population": -10,
+        "resources": -8,
+        "stability": -2
+      },
+      "exploit": {
+        "resources": -8,
+        "biodiversity": -3
+      }
     },
     "conditional_effects": {
-      "exploit_desperate": {"condition": "resources < 30", "self_effects": {"pollution": 8, "biodiversity": -5}},
-      "conservation_emergency": {"condition": "biodiversity < 30", "self_effects": {"resources": -5, "stability": 3}}
+      "exploit_desperate": {
+        "condition": "resources < 30",
+        "self_effects": {
+          "pollution": 8,
+          "biodiversity": -5
+        }
+      },
+      "conservation_emergency": {
+        "condition": "biodiversity < 30",
+        "self_effects": {
+          "resources": -5,
+          "stability": 3
+        }
+      }
     },
     "delay_effects": {
-      "restoration": {"delay": 2, "effects": {"biodiversity": 5, "stability": 3, "pollution": -3}}
+      "restoration": {
+        "delay": 2,
+        "effects": {
+          "biodiversity": 5,
+          "stability": 3,
+          "pollution": -3
+        }
+      }
     },
     "auto_effects": {
-      "pollution_erosion": {"condition": "pollution > 70", "effects": {"population": -3, "biodiversity": -2, "stability": -2}},
-      "biodiversity_regen": {"condition": "biodiversity > 80 and pollution < 30", "effects": {"stability": 2}},
-      "resource_depletion": {"condition": "resources < 20", "effects": {"resources": -5, "pollution": 3, "stability": -3}},
-      "ecosystem_collapse": {"condition": "biodiversity < 15", "effects": {"stability": -10, "population": -5}},
-      "tipping_point": {"condition": "stability < 20", "effects": {"population": -4, "biodiversity": -4}}
+      "pollution_erosion": {
+        "condition": "pollution > 70",
+        "effects": {
+          "population": -3,
+          "biodiversity": -2,
+          "stability": -2
+        }
+      },
+      "biodiversity_regen": {
+        "condition": "biodiversity > 80 and pollution < 30",
+        "effects": {
+          "stability": 2
+        }
+      },
+      "resource_depletion": {
+        "condition": "resources < 20",
+        "effects": {
+          "resources": -5,
+          "pollution": 3,
+          "stability": -3
+        }
+      },
+      "ecosystem_collapse": {
+        "condition": "biodiversity < 15",
+        "effects": {
+          "stability": -10,
+          "population": -5
+        }
+      },
+      "tipping_point": {
+        "condition": "stability < 20",
+        "effects": {
+          "population": -4,
+          "biodiversity": -4
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -256,51 +917,180 @@
           "resources": "resource_depletion",
           "pollution": "pollution_spread",
           "biodiversity": "logistic"
+        },
+        "params": {
+          "population": {
+            "_carrying_capacity": 1000
+          },
+          "biodiversity": {
+            "_carrying_capacity": 100
+          }
         }
       },
       "physics_engine": {
-        "diffusion_fields": ["pollution"],
+        "diffusion_fields": [
+          "pollution"
+        ],
         "diffusion_rate": 0.08
       }
     }
   },
-
   "urban": {
     "name": "🏙️ 城市规划",
     "domain": "urban",
     "display_name": "城市规划",
-    "metrics": ["population", "employment", "infrastructure", "finance", "satisfaction"],
-    "initial_metrics": {"population": 50, "employment": 65, "infrastructure": 55, "finance": 60, "satisfaction": 65},
-    "thresholds": {"finance": 15, "satisfaction": 15, "employment": 10, "infrastructure": 15},
-    "actions": ["build_infra", "develop_industry", "welfare", "attract_talent", "regulate", "observe"],
+    "metrics": [
+      "population",
+      "employment",
+      "infrastructure",
+      "finance",
+      "satisfaction"
+    ],
+    "initial_metrics": {
+      "population": 50,
+      "employment": 65,
+      "infrastructure": 55,
+      "finance": 60,
+      "satisfaction": 65
+    },
+    "thresholds": {
+      "finance": 15,
+      "satisfaction": 15,
+      "employment": 10,
+      "infrastructure": 15
+    },
+    "actions": [
+      "build_infra",
+      "develop_industry",
+      "welfare",
+      "attract_talent",
+      "regulate",
+      "observe"
+    ],
     "self_effects": {
-      "build_infra":      {"finance": -18, "infrastructure": 15, "satisfaction": 4, "employment": 2},
-      "develop_industry": {"finance": -12, "employment": 12, "population": 6, "satisfaction": -4},
-      "welfare":          {"finance": -15, "satisfaction": 15, "employment": -2},
-      "attract_talent":   {"finance": -10, "population": 6, "employment": 5, "satisfaction": 2},
-      "regulate":         {"satisfaction": -3, "finance": 8, "infrastructure": 3, "employment": -2},
-      "observe":          {"finance": 1}
+      "build_infra": {
+        "finance": -18,
+        "infrastructure": 15,
+        "satisfaction": 4,
+        "employment": 2
+      },
+      "develop_industry": {
+        "finance": -12,
+        "employment": 12,
+        "population": 6,
+        "satisfaction": -4
+      },
+      "welfare": {
+        "finance": -15,
+        "satisfaction": 15,
+        "employment": -2
+      },
+      "attract_talent": {
+        "finance": -10,
+        "population": 6,
+        "employment": 5,
+        "satisfaction": 2
+      },
+      "regulate": {
+        "satisfaction": -3,
+        "finance": 8,
+        "infrastructure": 3,
+        "employment": -2
+      },
+      "observe": {
+        "finance": 1
+      }
     },
     "target_effects": {
-      "attract_talent":   {"population": -8, "employment": -6},
-      "develop_industry": {"population": -5, "satisfaction": -3}
+      "attract_talent": {
+        "population": -8,
+        "employment": -6
+      },
+      "develop_industry": {
+        "population": -5,
+        "satisfaction": -3
+      }
     },
     "conditional_effects": {
-      "build_infra_strained": {"condition": "finance < 30", "self_effects": {"satisfaction": -5, "infrastructure": 5}},
-      "talent_shortage": {"condition": "employment > 80", "self_effects": {"satisfaction": -4, "finance": -5}}
+      "build_infra_strained": {
+        "condition": "finance < 30",
+        "self_effects": {
+          "satisfaction": -5,
+          "infrastructure": 5
+        }
+      },
+      "talent_shortage": {
+        "condition": "employment > 80",
+        "self_effects": {
+          "satisfaction": -4,
+          "finance": -5
+        }
+      }
     },
     "delay_effects": {
-      "develop_industry": {"delay": 2, "effects": {"employment": 8, "infrastructure": 5, "finance": 5}},
-      "welfare": {"delay": 1, "effects": {"satisfaction": 6, "population": 2}}
+      "develop_industry": {
+        "delay": 2,
+        "effects": {
+          "employment": 8,
+          "infrastructure": 5,
+          "finance": 5
+        }
+      },
+      "welfare": {
+        "delay": 1,
+        "effects": {
+          "satisfaction": 6,
+          "population": 2
+        }
+      }
     },
     "auto_effects": {
-      "population_growth": {"condition": "employment > 65 and satisfaction > 70 and finance > 40", "effects": {"population": 3}},
-      "population_decline": {"condition": "employment < 30 or satisfaction < 30", "effects": {"population": -2}},
-      "infrastructure_decay": {"condition": "infrastructure > 70", "effects": {"infrastructure": -1}},
-      "fiscal_crisis": {"condition": "finance < 15", "effects": {"employment": -4, "satisfaction": -5, "infrastructure": -2}},
-      "brain_drain": {"condition": "satisfaction < 25 and employment < 40", "effects": {"population": -3, "employment": -2}},
-      "over_regulation": {"condition": "satisfaction < 40 and employment > 60", "effects": {"employment": -1}},
-      "gentrification": {"condition": "finance > 80 and satisfaction > 70", "effects": {"population": -2, "satisfaction": -3}}
+      "population_growth": {
+        "condition": "employment > 65 and satisfaction > 70 and finance > 40",
+        "effects": {
+          "population": 3
+        }
+      },
+      "population_decline": {
+        "condition": "employment < 30 or satisfaction < 30",
+        "effects": {
+          "population": -2
+        }
+      },
+      "infrastructure_decay": {
+        "condition": "infrastructure > 70",
+        "effects": {
+          "infrastructure": -1
+        }
+      },
+      "fiscal_crisis": {
+        "condition": "finance < 15",
+        "effects": {
+          "employment": -4,
+          "satisfaction": -5,
+          "infrastructure": -2
+        }
+      },
+      "brain_drain": {
+        "condition": "satisfaction < 25 and employment < 40",
+        "effects": {
+          "population": -3,
+          "employment": -2
+        }
+      },
+      "over_regulation": {
+        "condition": "satisfaction < 40 and employment > 60",
+        "effects": {
+          "employment": -1
+        }
+      },
+      "gentrification": {
+        "condition": "finance > 80 and satisfaction > 70",
+        "effects": {
+          "population": -2,
+          "satisfaction": -3
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -312,6 +1102,14 @@
         "equations": {
           "population": "logistic",
           "finance": "logistic"
+        },
+        "params": {
+          "population": {
+            "_carrying_capacity": 200
+          },
+          "finance": {
+            "_carrying_capacity": 200
+          }
         }
       },
       "physics_engine": {
@@ -320,41 +1118,136 @@
       }
     }
   },
-
   "tech": {
     "name": "🔬 科技竞赛",
     "domain": "tech",
     "display_name": "科技竞赛",
-    "metrics": ["tech_lead", "chip_stock", "talent_pool", "patent_barrier", "commercialization"],
-    "initial_metrics": {"tech_lead": 50, "chip_stock": 60, "talent_pool": 55, "patent_barrier": 45, "commercialization": 40},
-    "thresholds": {"tech_lead": 15, "chip_stock": 15, "talent_pool": 10, "patent_barrier": 10},
-    "actions": ["invest_rd", "export_control", "talent_war", "standards_battle", "observe"],
+    "metrics": [
+      "tech_lead",
+      "chip_stock",
+      "talent_pool",
+      "patent_barrier",
+      "commercialization"
+    ],
+    "initial_metrics": {
+      "tech_lead": 50,
+      "chip_stock": 60,
+      "talent_pool": 55,
+      "patent_barrier": 45,
+      "commercialization": 40
+    },
+    "thresholds": {
+      "tech_lead": 15,
+      "chip_stock": 15,
+      "talent_pool": 10,
+      "patent_barrier": 10
+    },
+    "actions": [
+      "invest_rd",
+      "export_control",
+      "talent_war",
+      "standards_battle",
+      "observe"
+    ],
     "self_effects": {
-      "invest_rd":        {"chip_stock": -15, "tech_lead": 12, "talent_pool": 2, "patent_barrier": 3},
-      "export_control":   {"chip_stock": -8, "commercialization": -10},
-      "talent_war":       {"commercialization": -10, "talent_pool": 10},
-      "standards_battle": {"patent_barrier": 10, "commercialization": -6},
-      "observe":          {"tech_lead": 1}
+      "invest_rd": {
+        "chip_stock": -15,
+        "tech_lead": 12,
+        "talent_pool": 2,
+        "patent_barrier": 3
+      },
+      "export_control": {
+        "chip_stock": -8,
+        "commercialization": -10
+      },
+      "talent_war": {
+        "commercialization": -10,
+        "talent_pool": 10
+      },
+      "standards_battle": {
+        "patent_barrier": 10,
+        "commercialization": -6
+      },
+      "observe": {
+        "tech_lead": 1
+      }
     },
     "target_effects": {
-      "export_control":   {"chip_stock": -25, "tech_lead": -10, "commercialization": -5},
-      "talent_war":       {"talent_pool": -10},
-      "standards_battle": {"commercialization": -8, "patent_barrier": -5}
+      "export_control": {
+        "chip_stock": -25,
+        "tech_lead": -10,
+        "commercialization": -5
+      },
+      "talent_war": {
+        "talent_pool": -10
+      },
+      "standards_battle": {
+        "commercialization": -8,
+        "patent_barrier": -5
+      }
     },
     "conditional_effects": {
-      "invest_rd_catchup": {"condition": "tech_lead < 30", "self_effects": {"tech_lead": 8}},
-      "forced_innovation": {"condition": "tech_lead < 20 and chip_stock < 20", "self_effects": {"tech_lead": 5, "talent_pool": 3}}
+      "invest_rd_catchup": {
+        "condition": "tech_lead < 30",
+        "self_effects": {
+          "tech_lead": 8
+        }
+      },
+      "forced_innovation": {
+        "condition": "tech_lead < 20 and chip_stock < 20",
+        "self_effects": {
+          "tech_lead": 5,
+          "talent_pool": 3
+        }
+      }
     },
     "delay_effects": {
-      "invest_rd": {"delay": 2, "effects": {"patent_barrier": 8, "commercialization": 6, "tech_lead": 5}},
-      "talent_war": {"delay": 1, "effects": {"talent_pool": 5}}
+      "invest_rd": {
+        "delay": 2,
+        "effects": {
+          "patent_barrier": 8,
+          "commercialization": 6,
+          "tech_lead": 5
+        }
+      },
+      "talent_war": {
+        "delay": 1,
+        "effects": {
+          "talent_pool": 5
+        }
+      }
     },
     "auto_effects": {
-      "chip_obsolescence": {"condition": "chip_stock > 50", "effects": {"chip_stock": -3}},
-      "patent_decay": {"condition": "patent_barrier > 70", "effects": {"patent_barrier": -2}},
-      "innovation_stagnation": {"condition": "tech_lead > 80", "effects": {"tech_lead": -2}},
-      "talent_burnout": {"condition": "talent_pool > 80", "effects": {"talent_pool": -1}},
-      "research_diminishing_returns": {"condition": "tech_lead > 70", "effects": {"tech_lead": -1}}
+      "chip_obsolescence": {
+        "condition": "chip_stock > 50",
+        "effects": {
+          "chip_stock": -3
+        }
+      },
+      "patent_decay": {
+        "condition": "patent_barrier > 70",
+        "effects": {
+          "patent_barrier": -2
+        }
+      },
+      "innovation_stagnation": {
+        "condition": "tech_lead > 80",
+        "effects": {
+          "tech_lead": -2
+        }
+      },
+      "talent_burnout": {
+        "condition": "talent_pool > 80",
+        "effects": {
+          "talent_pool": -1
+        }
+      },
+      "research_diminishing_returns": {
+        "condition": "tech_lead > 70",
+        "effects": {
+          "tech_lead": -1
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -366,45 +1259,149 @@
         "equations": {
           "tech_lead": "logistic",
           "talent_pool": "logistic"
+        },
+        "params": {
+          "tech_lead": {
+            "_carrying_capacity": 100
+          },
+          "talent_pool": {
+            "_carrying_capacity": 100
+          }
         }
       }
     }
   },
-
   "info_war": {
     "name": "📰 舆论信息战",
     "domain": "info_war",
     "display_name": "舆论信息战",
-    "metrics": ["narrative_dominance", "public_trust", "polarization", "media_reach"],
-    "initial_metrics": {"narrative_dominance": 50, "public_trust": 65, "polarization": 35, "media_reach": 50},
-    "thresholds": {"public_trust": 15, "narrative_dominance": 10, "polarization": 80},
-    "actions": ["propaganda", "fact_check", "leak_info", "framing_battle", "observe"],
+    "metrics": [
+      "narrative_dominance",
+      "public_trust",
+      "polarization",
+      "media_reach"
+    ],
+    "initial_metrics": {
+      "narrative_dominance": 50,
+      "public_trust": 65,
+      "polarization": 35,
+      "media_reach": 50
+    },
+    "thresholds": {
+      "public_trust": 15,
+      "narrative_dominance": 10,
+      "polarization": 80
+    },
+    "actions": [
+      "propaganda",
+      "fact_check",
+      "leak_info",
+      "framing_battle",
+      "observe"
+    ],
     "self_effects": {
-      "propaganda":     {"narrative_dominance": 10, "polarization": 8, "public_trust": -5},
-      "fact_check":     {"public_trust": 8, "polarization": -5, "narrative_dominance": -3},
-      "leak_info":      {"narrative_dominance": -8, "polarization": 12, "public_trust": -10},
-      "framing_battle": {"narrative_dominance": 6, "media_reach": 8, "public_trust": -3},
-      "observe":        {"media_reach": 2}
+      "propaganda": {
+        "narrative_dominance": 10,
+        "polarization": 8,
+        "public_trust": -5
+      },
+      "fact_check": {
+        "public_trust": 8,
+        "polarization": -5,
+        "narrative_dominance": -3
+      },
+      "leak_info": {
+        "narrative_dominance": -8,
+        "polarization": 12,
+        "public_trust": -10
+      },
+      "framing_battle": {
+        "narrative_dominance": 6,
+        "media_reach": 8,
+        "public_trust": -3
+      },
+      "observe": {
+        "media_reach": 2
+      }
     },
     "target_effects": {
-      "propaganda":     {"public_trust": -8},
-      "leak_info":      {"public_trust": -12, "polarization": 10},
-      "framing_battle": {"public_trust": -6, "narrative_dominance": -4}
+      "propaganda": {
+        "public_trust": -8
+      },
+      "leak_info": {
+        "public_trust": -12,
+        "polarization": 10
+      },
+      "framing_battle": {
+        "public_trust": -6,
+        "narrative_dominance": -4
+      }
     },
     "conditional_effects": {
-      "propaganda_backfire": {"condition": "public_trust < 30", "self_effects": {"narrative_dominance": -10, "public_trust": -10}},
-      "fact_check_boost": {"condition": "polarization > 60", "self_effects": {"public_trust": 5}},
-      "echo_chamber": {"condition": "polarization > 75", "self_effects": {"public_trust": -3, "polarization": 2}}
+      "propaganda_backfire": {
+        "condition": "public_trust < 30",
+        "self_effects": {
+          "narrative_dominance": -10,
+          "public_trust": -10
+        }
+      },
+      "fact_check_boost": {
+        "condition": "polarization > 60",
+        "self_effects": {
+          "public_trust": 5
+        }
+      },
+      "echo_chamber": {
+        "condition": "polarization > 75",
+        "self_effects": {
+          "public_trust": -3,
+          "polarization": 2
+        }
+      }
     },
     "delay_effects": {
-      "leak_info": {"delay": 1, "effects": {"narrative_dominance": -5, "public_trust": -8, "polarization": 5}},
-      "framing_battle": {"delay": 1, "effects": {"media_reach": 6}}
+      "leak_info": {
+        "delay": 1,
+        "effects": {
+          "narrative_dominance": -5,
+          "public_trust": -8,
+          "polarization": 5
+        }
+      },
+      "framing_battle": {
+        "delay": 1,
+        "effects": {
+          "media_reach": 6
+        }
+      }
     },
     "auto_effects": {
-      "polarization_drift": {"condition": "polarization > 50", "effects": {"polarization": 2}},
-      "trust_decay": {"condition": "public_trust < 25", "effects": {"public_trust": -2}},
-      "audience_fatigue": {"condition": "media_reach > 70", "effects": {"public_trust": -1, "polarization": 1}},
-      "truth_decay": {"condition": "public_trust < 20 and polarization > 60", "effects": {"narrative_dominance": -3, "public_trust": -3}}
+      "polarization_drift": {
+        "condition": "polarization > 50",
+        "effects": {
+          "polarization": 2
+        }
+      },
+      "trust_decay": {
+        "condition": "public_trust < 25",
+        "effects": {
+          "public_trust": -2
+        }
+      },
+      "audience_fatigue": {
+        "condition": "media_reach > 70",
+        "effects": {
+          "public_trust": -1,
+          "polarization": 1
+        }
+      },
+      "truth_decay": {
+        "condition": "public_trust < 20 and polarization > 60",
+        "effects": {
+          "narrative_dominance": -3,
+          "public_trust": -3
+        }
+      }
     },
     "modules": {
       "metric_ownership": {
@@ -416,33 +1413,58 @@
         "equations": {
           "public_trust": "logistic",
           "polarization": "logistic"
+        },
+        "params": {
+          "public_trust": {
+            "_carrying_capacity": 100
+          },
+          "polarization": {
+            "_carrying_capacity": 100
+          }
         }
       }
     }
   },
-
   "geo_strategy": {
     "name": "🌐 大国博弈（跨域联动）",
     "domain": "geo_strategy",
     "display_name": "大国博弈",
     "metrics": [
-      "strength", "morale", "supply", "fatigue",
-      "cash_flow", "supply_chain",
-      "support_rate", "intl_relations", "unity",
+      "strength",
+      "morale",
+      "supply",
+      "fatigue",
+      "cash_flow",
+      "supply_chain",
+      "support_rate",
+      "intl_relations",
+      "unity",
       "tech_lead",
-      "public_trust", "polarization"
+      "public_trust",
+      "polarization"
     ],
     "initial_metrics": {
-      "strength": 100, "morale": 75, "supply": 85, "fatigue": 10,
-      "cash_flow": 65, "supply_chain": 70,
-      "support_rate": 55, "intl_relations": 60, "unity": 55,
+      "strength": 100,
+      "morale": 75,
+      "supply": 85,
+      "fatigue": 10,
+      "cash_flow": 65,
+      "supply_chain": 70,
+      "support_rate": 55,
+      "intl_relations": 60,
+      "unity": 55,
       "tech_lead": 50,
-      "public_trust": 65, "polarization": 35
+      "public_trust": 65,
+      "polarization": 35
     },
     "thresholds": {
-      "strength": 15, "morale": 20, "supply": 10,
-      "cash_flow": 10, "supply_chain": 15,
-      "support_rate": 15, "unity": 10,
+      "strength": 15,
+      "morale": 20,
+      "supply": 10,
+      "cash_flow": 10,
+      "supply_chain": 15,
+      "support_rate": 15,
+      "unity": 10,
       "tech_lead": 15,
       "public_trust": 15
     },
@@ -458,51 +1480,87 @@
     ],
     "self_effects": {
       "military_offensive": {
-        "strength": -15, "supply": -12, "fatigue": 10, "morale": -5,
-        "cash_flow": -10, "supply_chain": -5,
-        "support_rate": -3, "intl_relations": -8, "unity": -2
+        "strength": -15,
+        "supply": -12,
+        "fatigue": 10,
+        "morale": -5,
+        "cash_flow": -10,
+        "supply_chain": -5,
+        "support_rate": -3,
+        "intl_relations": -8,
+        "unity": -2
       },
       "economic_mobilization": {
-        "cash_flow": -12, "supply_chain": 12, "strength": 5, "morale": 3,
-        "support_rate": -2, "unity": -1
+        "cash_flow": -12,
+        "supply_chain": 12,
+        "strength": 5,
+        "morale": 3,
+        "support_rate": -2,
+        "unity": -1
       },
       "diplomatic_engagement": {
-        "intl_relations": 12, "support_rate": 2, "public_trust": 3,
-        "cash_flow": 5, "unity": 2
+        "intl_relations": 12,
+        "support_rate": 2,
+        "public_trust": 3,
+        "cash_flow": 5,
+        "unity": 2
       },
       "tech_investment": {
-        "cash_flow": -20, "tech_lead": 12,
-        "strength": 5, "supply_chain": 3
+        "cash_flow": -20,
+        "tech_lead": 12,
+        "strength": 5,
+        "supply_chain": 3
       },
       "domestic_propaganda": {
-        "support_rate": 8, "unity": 3, "morale": 5,
-        "public_trust": -5, "polarization": 6, "intl_relations": -3
+        "support_rate": 8,
+        "unity": 3,
+        "morale": 5,
+        "public_trust": -5,
+        "polarization": 6,
+        "intl_relations": -3
       },
       "trade_warfare": {
-        "cash_flow": -8, "supply_chain": 10, "support_rate": -3,
-        "intl_relations": -10, "public_trust": -4
+        "cash_flow": -8,
+        "supply_chain": 10,
+        "support_rate": -3,
+        "intl_relations": -10,
+        "public_trust": -4
       },
       "defensive_buildup": {
-        "strength": -3, "supply": -5, "fatigue": -2, "morale": 5,
-        "cash_flow": -8, "support_rate": 2
+        "strength": -3,
+        "supply": -5,
+        "fatigue": -2,
+        "morale": 5,
+        "cash_flow": -8,
+        "support_rate": 2
       },
       "observe": {
-        "fatigue": -5, "morale": 1, "unity": 1, "public_trust": 1
+        "fatigue": -5,
+        "morale": 1,
+        "unity": 1,
+        "public_trust": 1
       }
     },
     "target_effects": {
       "military_offensive": {
-        "strength": -20, "morale": -12, "supply": -8,
-        "supply_chain": -10, "cash_flow": -8,
-        "intl_relations": -5, "public_trust": -4
+        "strength": -20,
+        "morale": -12,
+        "supply": -8,
+        "supply_chain": -10,
+        "cash_flow": -8,
+        "intl_relations": -5,
+        "public_trust": -4
       },
       "trade_warfare": {
-        "supply_chain": -25, "cash_flow": -12,
-        "support_rate": -6, "intl_relations": -8,
+        "supply_chain": -25,
+        "cash_flow": -12,
+        "support_rate": -6,
+        "intl_relations": -8,
         "tech_lead": -5
       },
       "domestic_propaganda": {
-        "public_trust": -6, "intl_relations": -3
+        "public_trust": -6,
+        "intl_relations": -3
       },
       "diplomatic_engagement": {
         "intl_relations": 3
@@ -511,75 +1569,137 @@
     "conditional_effects": {
       "offensive_weariness": {
         "condition": "fatigue > 65",
-        "self_effects": {"morale": -5, "support_rate": -4}
+        "self_effects": {
+          "morale": -5,
+          "support_rate": -4
+        }
       },
       "war_economy_boom": {
         "condition": "support_rate > 70 and cash_flow > 60",
-        "self_effects": {"supply_chain": 5, "morale": 3}
+        "self_effects": {
+          "supply_chain": 5,
+          "morale": 3
+        }
       },
       "tech_catchup_bonus": {
         "condition": "tech_lead < 30",
-        "self_effects": {"tech_lead": 8, "strength": 3}
+        "self_effects": {
+          "tech_lead": 8,
+          "strength": 3
+        }
       },
       "propaganda_backfire": {
         "condition": "public_trust < 30",
-        "self_effects": {"support_rate": -8, "polarization": 5}
+        "self_effects": {
+          "support_rate": -8,
+          "polarization": 5
+        }
       },
       "diplomatic_isolation": {
         "condition": "intl_relations < 25",
-        "self_effects": {"cash_flow": -6, "supply_chain": -8, "support_rate": -3}
+        "self_effects": {
+          "cash_flow": -6,
+          "supply_chain": -8,
+          "support_rate": -3
+        }
       },
       "rally_around_flag": {
         "condition": "strength < 30 and support_rate > 50",
-        "self_effects": {"morale": 10, "unity": 5, "strength": 3}
+        "self_effects": {
+          "morale": 10,
+          "unity": 5,
+          "strength": 3
+        }
       }
     },
     "delay_effects": {
       "economic_mobilization": {
         "delay": 2,
-        "effects": {"cash_flow": 10, "supply_chain": 8, "strength": 8, "support_rate": 3}
+        "effects": {
+          "cash_flow": 10,
+          "supply_chain": 8,
+          "strength": 8,
+          "support_rate": 3
+        }
       },
       "tech_investment": {
         "delay": 2,
-        "effects": {"tech_lead": 8, "strength": 5, "cash_flow": 8}
+        "effects": {
+          "tech_lead": 8,
+          "strength": 5,
+          "cash_flow": 8
+        }
       },
       "diplomatic_engagement": {
         "delay": 1,
-        "effects": {"intl_relations": 6, "cash_flow": 5}
+        "effects": {
+          "intl_relations": 6,
+          "cash_flow": 5
+        }
       }
     },
     "auto_effects": {
       "war_exhaustion": {
         "condition": "fatigue > 60 and strength > 40",
-        "effects": {"support_rate": -2, "morale": -3, "unity": -1}
+        "effects": {
+          "support_rate": -2,
+          "morale": -3,
+          "unity": -1
+        }
       },
       "economic_strain": {
         "condition": "cash_flow < 20",
-        "effects": {"supply_chain": -3, "strength": -3, "morale": -5, "support_rate": -4}
+        "effects": {
+          "supply_chain": -3,
+          "strength": -3,
+          "morale": -5,
+          "support_rate": -4
+        }
       },
       "diplomatic_decay": {
         "condition": "intl_relations > 80",
-        "effects": {"intl_relations": -2}
+        "effects": {
+          "intl_relations": -2
+        }
       },
       "polarization_erosion": {
         "condition": "polarization > 60",
-        "effects": {"public_trust": -2, "support_rate": -3, "unity": -2}
+        "effects": {
+          "public_trust": -2,
+          "support_rate": -3,
+          "unity": -2
+        }
       },
       "tech_race_pressure": {
         "condition": "tech_lead < 40",
-        "effects": {"cash_flow": -4, "tech_lead": 2}
+        "effects": {
+          "cash_flow": -4,
+          "tech_lead": 2
+        }
       },
       "supply_chain_attrition": {
         "condition": "supply_chain < 30 and fatigue > 40",
-        "effects": {"strength": -5, "supply": -5, "morale": -4}
+        "effects": {
+          "strength": -5,
+          "supply": -5,
+          "morale": -4
+        }
       },
       "internal_resilience": {
         "condition": "unity > 70 and support_rate > 60",
-        "effects": {"strength": 2, "morale": 2}
+        "effects": {
+          "strength": 2,
+          "morale": 2
+        }
       },
       "collapse_spiral": {
         "condition": "unity < 20 and support_rate < 25",
-        "effects": {"cash_flow": -8, "strength": -8, "intl_relations": -5, "public_trust": -5}
+        "effects": {
+          "cash_flow": -8,
+          "strength": -8,
+          "intl_relations": -5,
+          "public_trust": -5
+        }
       }
     },
     "modules": {
@@ -598,6 +1718,23 @@
           "cash_flow": "decay",
           "supply_chain": "supply_consumption",
           "tech_lead": "logistic"
+        },
+        "params": {
+          "fatigue": {
+            "_fatigue_rate": 0.04
+          },
+          "supply": {
+            "_supply_base_rate": 0.15
+          },
+          "cash_flow": {
+            "_decay_rate": 0.01
+          },
+          "supply_chain": {
+            "_supply_base_rate": 0.1
+          },
+          "tech_lead": {
+            "_carrying_capacity": 100
+          }
         }
       },
       "physics_engine": {
