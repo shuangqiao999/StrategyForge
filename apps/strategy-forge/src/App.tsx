@@ -558,7 +558,7 @@ export default function App() {
           fetchCausal(selectedId);
           fetchTokens(selectedId);
         } else if (d.type === "status") {
-          if (["complete","failed","paused"].includes(d.status)) return; // [DONE] will handle terminal status
+          if (["complete","failed"].includes(d.status)) return; // [DONE] will handle terminal status
           fetchSessions();
         } else if (d.type === "error") {
           // ignore
@@ -819,6 +819,24 @@ export default function App() {
                       停止推演
                     </button>
                   </>
+                ) : selected?.status === "paused" ? (
+                  <button
+                    className="btnSmall"
+                    style={{ marginRight: 6, background: "#16a34a", color: "#fff", border: "none" }}
+                    onClick={handleStart}
+                    disabled={loading}
+                  >
+                    继续推演
+                  </button>
+                ) : selected?.status === "complete" ? (
+                  <button
+                    className="btnSmall btnSmallPrimary"
+                    style={{ marginRight: 6 }}
+                    onClick={handleStart}
+                    disabled={loading}
+                  >
+                    重新推演
+                  </button>
                 ) : (
                   <button
                     className="btnSmall btnSmallPrimary"
@@ -826,7 +844,7 @@ export default function App() {
                     onClick={handleStart}
                     disabled={loading}
                   >
-                    {selected?.status === "complete" ? "重新推演" : selected?.status === "paused" ? "继续推演" : "启动推演"}
+                    启动推演
                   </button>
                 )}
               </div>

@@ -22,6 +22,7 @@ from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from ._utils import extract_text
 from .models import DeductionAgentProfile, SimulationAction, SimulationRound
+from .orchestrator import _PhaseCancelledError
 from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
@@ -216,10 +217,10 @@ class SimulationEngine:
             async with sem:
                 return await self._agent_decide(client, agent, round_number)
 
-        tasks = [process_agent(a) for a in ordered]
-        results = await asyncio.gather(*tasks)
-
-        for action in results:
+        for agent in ordered:
+            if self._cancel is not None and self._cancel.is_set():
+                raise _PhaseCancelledError()
+            action = await process_agent(agent)
             if action is not None:
                 sim_round.actions.append(action)
                 self._event_history.append({
@@ -515,13 +516,19 @@ class SimulationEngine:
 
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
-        raw_results = await asyncio.gather(*[decide(a) for a in ordered], return_exceptions=True)
+        # 逐代理决策（逐个等待，确保取消信号在代理之间能被及时检测）
         decisions: list[dict[str, Any]] = []
-        for i, result in enumerate(raw_results):
-            if isinstance(result, BaseException):
-                self._log("simulation", f"agent {ordered[i].name} 决策失败: {result}")
+        for i, agent in enumerate(ordered):
+            if self._cancel is not None and self._cancel.is_set():
+                self._log("simulation", f"取消信号：已处理 {i}/{len(ordered)} 代理后停止")
+                return sim_round
+            raw = await decide(agent)
+            if isinstance(raw, BaseException):
+                self._log("simulation", f"agent {agent.name} 决策失败: {raw}")
             else:
-                decisions.append(result)
+                decisions.append(raw)
+        # raw_results kept below for backward compat
+        raw_results = decisions
 
         # ── 轮前：自动效应（条件触发，逐实体结算）+ 延迟效应到期结算 ──
         ranges = re_engine.ranges()
