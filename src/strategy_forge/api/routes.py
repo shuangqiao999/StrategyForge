@@ -212,6 +212,42 @@ async def cancel_deduction(session_id: str, request: Request):
     return {"cancelled": False}
 
 
+@router.post("/session/{session_id}/pause")
+async def pause_deduction(session_id: str, request: Request):
+    """暂停推演：保存当前进度到快照，状态变为 paused。"""
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    if session.status not in (SessionStatus.SIMULATING, SessionStatus.REPORTING):
+        raise HTTPException(409, f"无法暂停：当前状态为 {session.status.value}")
+    cancels = _ded_cancel_state(request.app)
+    ev = cancels.get(session_id)
+    if ev is not None:
+        ev.set()
+        engine.log(session_id, "control", "用户暂停推演")
+        return {"session_id": session_id, "status": "pausing"}
+    return {"session_id": session_id, "status": "idle"}
+
+
+@router.post("/session/{session_id}/resume")
+async def resume_deduction(session_id: str, request: Request):
+    """继续推演：从 paused 断点恢复。"""
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    if session.status != SessionStatus.PAUSED:
+        raise HTTPException(409, f"无法继续：当前状态为 {session.status.value}")
+    engine.log(session_id, "control", "用户继续推演")
+    # Re-use /start logic which handles paused→resume
+    cancel_event = asyncio.Event()
+    cancels = _ded_cancel_state(request.app)
+    cancels[session_id] = cancel_event
+    asyncio.create_task(_run_deduction(engine, session_id, cancel_event, cancels))
+    return {"session_id": session_id, "status": "resuming"}
+
+
 # ── 策略优化器 (蒙特卡洛多方案对比) ──
 
 class OptimizeRequest(BaseModel):

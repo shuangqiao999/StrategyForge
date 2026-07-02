@@ -415,11 +415,28 @@ export default function App() {
     if (!selectedId) return;
     setLoading(true);
     try {
-      await fetch(`${API_BASE}/session/${selectedId}/start/cancel`, { method: "POST" });
+      await fetch(`${API_BASE}/session/${selectedId}/pause`, { method: "POST" });
     } catch { /* ignore */ }
     setLoading(false);
     await fetchSessions();
   }, [selectedId, fetchSessions]);
+
+  const handleResume = useCallback(async () => {
+    if (!selectedId) return;
+    setLoading(true);
+    setLogs([]);
+    try {
+      await persistSettings(selectedId);
+      const r = await fetch(`${API_BASE}/session/${selectedId}/resume`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+      setLoading(false);
+      await fetchSessions();
+    } catch (e: any) {
+      setLoading(false);
+      alert("继续推演失败: " + (e.message || "未知错误"));
+    }
+    setLoading(false);
+  }, [selectedId, fetchSessions, persistSettings]);
 
   const handleDelete = useCallback(async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -798,7 +815,7 @@ export default function App() {
                     {selected.status === "simulating" ? "推演中" : "推演中"}
                   </button>
                 ) : selected?.status === "paused" ? (
-                  <button className="btnSmall" style={{ marginRight: 6, background: "#3b82f6", color: "#fff", border: "none" }} onClick={handleStart} disabled={loading}>
+                  <button className="btnSmall" style={{ marginRight: 6, background: "#3b82f6", color: "#fff", border: "none" }} onClick={handleResume} disabled={loading}>
                     继续推演
                   </button>
                 ) : (
