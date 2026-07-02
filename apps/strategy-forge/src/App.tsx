@@ -539,6 +539,7 @@ export default function App() {
           fetchGraph(selectedId);
           fetchTimeline(selectedId);
           fetchCausal(selectedId);
+          fetchTokens(selectedId);
         } else if (d.type === "status") {
           if (["complete","failed","paused"].includes(d.status)) return; // [DONE] will handle terminal status
           fetchSessions();
