@@ -551,7 +551,7 @@ export default function App() {
       } catch { /* ignore */ }
     };
     es.onerror = () => { es.close(); sseSidRef.current = null; fetchSessions(); };
-    return () => { es.close(); };  // do NOT clear sseSidRef here; session still connected
+    return () => { if (sseSidRef.current !== selectedId) es.close(); };  // do NOT clear sseSidRef here; session still connected
   }, [selectedId, sessions]);
 
   // Token 统计：前 3 次每 10 秒拉取，之后每 2 分钟
