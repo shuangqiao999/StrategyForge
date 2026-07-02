@@ -811,13 +811,14 @@ export default function App() {
                     </button>
                   )
                 ) : selected && RUNNING_SET.has(selected.status) ? (
-                  <button className="btnSmall" style={{ marginRight: 6, background: "#22c55e", color: "#fff", border: "none" }} onClick={handleCancel} disabled={loading}>
-                    {selected.status === "simulating" ? "推演中" : "推演中"}
-                  </button>
-                ) : selected?.status === "paused" ? (
-                  <button className="btnSmall" style={{ marginRight: 6, background: "#3b82f6", color: "#fff", border: "none" }} onClick={handleResume} disabled={loading}>
-                    继续推演
-                  </button>
+                  <>
+                    <span style={{ fontSize: 12, color: "#22c55e", background: "#052e16", borderRadius: 4, padding: "2px 8px", marginRight: 4 }}>
+                      推演中
+                    </span>
+                    <button className="btnSmall" style={{ marginRight: 6, background: "#ef4444", color: "#fff", border: "none" }} onClick={handleCancel} disabled={loading}>
+                      停止推演
+                    </button>
+                  </>
                 ) : (
                   <button
                     className="btnSmall btnSmallPrimary"
@@ -825,7 +826,7 @@ export default function App() {
                     onClick={handleStart}
                     disabled={loading}
                   >
-                    {selected?.status === "complete" ? "重新推演" : "启动推演"}
+                    {selected?.status === "complete" ? "重新推演" : selected?.status === "paused" ? "继续推演" : "启动推演"}
                   </button>
                 )}
               </div>

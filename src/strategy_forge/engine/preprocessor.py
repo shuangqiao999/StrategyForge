@@ -416,7 +416,7 @@ class DeductionPreprocessor:
         import re
         for std_name, aliases in all_entities.items():
             count = len(re.findall(re.escape(std_name), source))
-            if count >= 3:
+            if count >= 2:
                 high_freq[std_name] = aliases
             else:
                 low_freq[std_name] = aliases
@@ -432,7 +432,7 @@ class DeductionPreprocessor:
                 high_freq.clear(); low_freq.clear()
                 for std_name, aliases in merged.items():
                     count = len(re.findall(re.escape(std_name), source))
-                    if count >= 3:
+                    if count >= 2:
                         high_freq[std_name] = aliases
                     else:
                         low_freq[std_name] = aliases
