@@ -540,6 +540,7 @@ export default function App() {
           fetchTimeline(selectedId);
           fetchCausal(selectedId);
         } else if (d.type === "status") {
+          if (["complete","failed","paused"].includes(d.status)) return; // [DONE] will handle terminal status
           fetchSessions();
         } else if (d.type === "error") {
           // ignore
