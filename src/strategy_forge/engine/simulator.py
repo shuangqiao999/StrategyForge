@@ -574,7 +574,8 @@ class SimulationEngine:
                 build_context,
             )
             entity_ids = [a.entity_id for a in self.agents if a.entity_id in states]
-            ctx = build_context(states, self._rule_engine, entity_ids, round_number)
+            ctx = build_context(states, self._rule_engine, entity_ids, round_number,
+                                prev_spatial=getattr(self, "_spatial_state", None))
             for mod in self._algorithm_modules:
                 try:
                     ctx = mod.execute(ctx)

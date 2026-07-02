@@ -27,8 +27,8 @@ def _build_hash(p: np.ndarray, r: np.ndarray) -> tuple[dict, float]:
     return hmap, cell_size
 
 
-def _hash_neighbor_candidates(c: tuple, hmap: dict, cell: tuple[int, int, int]) -> None:
-    """Yield all entity indices in 3x3x3 adjacent cells."""
+def _hash_neighbor_candidates(candidates: set[int], hmap: dict, cell: tuple[int, int, int]) -> None:
+    """Collect all entity indices in 3x3x3 adjacent cells into the candidates set."""
     seen: set[int] = set()
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
@@ -37,7 +37,7 @@ def _hash_neighbor_candidates(c: tuple, hmap: dict, cell: tuple[int, int, int]) 
                 for idx in hmap.get(neighbor, []):
                     if idx not in seen:
                         seen.add(idx)
-                        c.add(idx)
+                        candidates.add(idx)
 
 
 class PhysicsModule(AlgorithmModule):
@@ -118,22 +118,26 @@ class PhysicsModule(AlgorithmModule):
     def _resolve_collisions_brute(self, sp: Any, e: float) -> None:
         n = len(sp.positions)
         p, v, r, m = sp.positions, sp.velocities, sp.radii, sp.masses
+        # Vectorized: compute all pairwise distances at once for moderate N
         for i in range(n):
-            for j in range(i + 1, n):
-                dvec = p[i] - p[j]
-                dist = float(np.linalg.norm(dvec))
-                min_dist = r[i] + r[j]
-                if dist >= min_dist or dist < 1e-9:
-                    continue
-                self._collision_response(p, v, m, i, j, dvec, dist, min_dist, e)
+            dvec = p[i] - p[i+1:]
+            dist = np.linalg.norm(dvec, axis=1)
+            min_dist = r[i] + r[i+1:]
+            mask = (dist < min_dist) & (dist > 1e-9)
+            if not mask.any():
+                continue
+            for j_offset in np.where(mask)[0]:
+                j = i + 1 + j_offset
+                self._collision_response(p, v, m, i, j, dvec[j_offset],
+                                         float(dist[j_offset]), float(min_dist[j_offset]), e)
 
     def _resolve_collisions_hash(self, sp: Any, e: float) -> None:
-        hmap, _ = _build_hash(sp.positions, sp.radii)
+        hmap, cell_size = _build_hash(sp.positions, sp.radii)
         p, v, r, m = sp.positions, sp.velocities, sp.radii, sp.masses
         for i in range(len(p)):
-            cell = (int(np.floor(p[i, 0] / (np.max(r) * 2.0 + 1e-3))),
-                    int(np.floor(p[i, 1] / (np.max(r) * 2.0 + 1e-3))),
-                    int(np.floor(p[i, 2] / (np.max(r) * 2.0 + 1e-3))))
+            cell = (int(np.floor(p[i, 0] / cell_size)),
+                    int(np.floor(p[i, 1] / cell_size)),
+                    int(np.floor(p[i, 2] / cell_size)))
             candidates: set[int] = set()
             _hash_neighbor_candidates(candidates, hmap, cell)
             for j in candidates:
@@ -171,32 +175,41 @@ class PhysicsModule(AlgorithmModule):
         sigma_scale = float(self._params.get("diffusion_sigma_scale", 3.0))
         p = sp.positions
         target_keys = ctx.diffusion_fields if ctx.diffusion_fields else []
+        # Spatial hash for large N to avoid O(N²) cost
+        if n > 150:
+            hmap, cell_size = _build_hash(sp.positions, sp.radii)
         for key in target_keys:
             if key not in ctx.arrays:
                 continue
             arr = ctx.arrays[key]
-            valid = ~np.isnan(arr)
-            if valid.sum() < 2:
-                continue
             new_arr = arr.copy()
             for i in range(n):
-                if not valid[i]:
+                # Spatial hash neighbor lookup for large N
+                if n > 150:
+                    cell = (int(np.floor(p[i, 0] / cell_size)),
+                            int(np.floor(p[i, 1] / cell_size)),
+                            int(np.floor(p[i, 2] / cell_size)))
+                    candidates: set[int] = set()
+                    _hash_neighbor_candidates(candidates, hmap, cell)
+                    j_indices = np.array([j for j in candidates if j != i], dtype=np.intp)
+                else:
+                    j_indices = np.array([j for j in range(n) if j != i], dtype=np.intp)
+                if len(j_indices) == 0:
                     continue
-                dvec = p - p[i]
+                dvec = p[j_indices] - p[i]
                 sqdist = np.sum(dvec * dvec, axis=1)
                 sigma2 = (sp.radii[i] * sigma_scale) ** 2
                 weights = np.exp(-sqdist / (sigma2 + 1e-6))
-                weights[i] = 0.0
                 w_sum = weights.sum()
                 if w_sum > 1e-9:
-                    new_arr[i] += rate * np.sum((arr - arr[i]) * weights) / w_sum
+                    new_arr[i] += rate * np.sum((arr[j_indices] - arr[i]) * weights) / w_sum
             ctx.arrays[key] = new_arr
 
     def _apply_explosions(self, sp: Any, ctx: ModuleContext) -> None:
         # Static sources from rule pack
         sources: list[dict] = list(self._params.get("explosion_sources", []))
-        # Dynamic triggers from ctx.metadata
-        for trigger in ctx.metadata.get("trigger_explosion", []):
+        # Dynamic triggers from ctx.metadata (removed after consumption)
+        for trigger in ctx.metadata.pop("trigger_explosion", []):
             sources.append({
                 "center": trigger.get("center", [0, 0, 0]),
                 "power": float(trigger.get("power", 100.0)),

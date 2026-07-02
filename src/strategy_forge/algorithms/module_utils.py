@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from .base import AlgorithmModule, ModuleContext, SpatialState, arrays_to_states, states_to_arrays
 from .ode_module import ODEModule
 from .physics_module import PhysicsModule
@@ -71,8 +73,13 @@ def build_context(
     rule_engine: Any,
     entity_ids: list[str],
     round_number: int,
+    prev_spatial: Any = None,
 ) -> ModuleContext:
-    """Build a ModuleContext from current EntityState dicts and rule pack config."""
+    """Build a ModuleContext from current EntityState dicts and rule pack config.
+
+    If prev_spatial is provided, spatial state (positions/velocities/forces)
+    carries over from the previous round instead of re-initializing.
+    """
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
     metric_names: list[str] = pack.get("metrics", [])
 
@@ -83,12 +90,36 @@ def build_context(
     phys_cfg = pack.get("modules", {}).get("physics_engine", {})
     ctx.diffusion_fields = list(phys_cfg.get("diffusion_fields", []))
 
-    # Spatial initialization
-    init_pos = pack.get("initial_positions")
-    init_vel = pack.get("initial_velocities")
-    init_mass = pack.get("initial_masses")
-    init_radius = pack.get("initial_radii")
-    ctx.spatial.init_from_dict(entity_ids, init_pos, init_vel, init_mass, init_radius)
+    # Spatial initialization: carry over from previous round if available
+    if prev_spatial is not None:
+        ctx.spatial = prev_spatial
+    else:
+        init_pos = pack.get("initial_positions")
+        init_vel = pack.get("initial_velocities")
+        init_mass = pack.get("initial_masses")
+        init_radius = pack.get("initial_radii")
+        ctx.spatial.init_from_dict(entity_ids, init_pos, init_vel, init_mass, init_radius)
+
+    # ── Inject ODE / Physics params from extracted world parameters ──
+    ode_params = pack.get("ode_params", {})
+    if ode_params and "params" in ode_params:
+        for metric, param_dict in ode_params["params"].items():
+            if isinstance(param_dict, dict):
+                for key, val in param_dict.items():
+                    ctx_key = f"_{key}"
+                    if ctx_key not in ctx.arrays:
+                        ctx.arrays[ctx_key] = np.full(len(entity_ids), float(val), dtype=np.float64)
+
+    # Inject physics explosion sources from extracted params
+    phys_extracted = pack.get("physics_params", {})
+    if phys_extracted.get("explosion_sources"):
+        ctx.metadata.setdefault("trigger_explosion", [])
+        for src in phys_extracted["explosion_sources"]:
+            ctx.metadata["trigger_explosion"].append({
+                "center": src.get("center", [0, 0, 0]),
+                "power": float(src.get("power", 100.0)),
+                "radius": float(src.get("radius", 50.0)),
+            })
 
     return ctx
 

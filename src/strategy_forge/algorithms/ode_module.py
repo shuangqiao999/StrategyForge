@@ -26,28 +26,45 @@ logger = logging.getLogger(__name__)
 # ── Built-in ODE presets (pure functions: values, ctx_arrays → dy/dt) ──
 
 
-def _decay(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Exponential decay: dy/dt = -0.02 * y"""
-    return -0.02 * values
+def _decay(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Exponential decay: dy/dt = -rate * y. Rate configurable via ctx['_decay_rate']. Default 0.02."""
+    rate = float(ctx.get("_decay_rate", 0.02))
+    return -rate * values
 
 
-def _logistic(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Logistic growth w/ carrying capacity 100: dy/dt = r*y*(1-y/K)"""
-    return 0.03 * values * (1.0 - values / 100.0)
+def _logistic(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Logistic growth w/ configurable carrying capacity: dy/dt = rate*y*(1-y/K)
+    
+    Reads K from ctx['_carrying_capacity'] or defaults to ctx['_metric_range_hi'].
+    Falls back to 100.0 as absolute default.
+    """
+    K = float(ctx.get("_carrying_capacity",
+              ctx.get("_metric_range_hi", 100.0)))
+    if K <= 0:
+        K = 100.0
+    rate = float(ctx.get("_logistic_rate", 0.03))
+    return rate * values * (1.0 - values / K)
 
 
-def _fatigue_recovery(values: np.ndarray, _ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Fast recovery when high, slow when low: dy/dt = -0.05 * sqrt(y)"""
+def _fatigue_recovery(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Fast recovery when high, slow when low: dy/dt = -rate * sqrt(y).
+    Rate configurable via ctx['_fatigue_rate']. Default 0.05."""
+    rate = float(ctx.get("_fatigue_rate", 0.05))
     dy = np.zeros_like(values)
     mask = values > 0
-    dy[mask] = -0.05 * np.sqrt(values[mask])
+    dy[mask] = -rate * np.sqrt(values[mask])
     return dy
 
 
 def _supply_consumption(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Constant rate drain with strength-scaled consumption"""
+    """Constant rate drain with strength-scaled consumption. Clamped so supply never goes negative."""
     strength = ctx.get("strength", np.zeros_like(values))
-    return -0.3 - 0.01 * np.abs(strength) / 100.0
+    rate = float(ctx.get("_supply_base_rate", 0.3))
+    strength_factor = float(ctx.get("_supply_strength_factor", 0.01))
+    raw = -rate - strength_factor * np.abs(strength) / 100.0
+    # Clamp: derivative cannot drive value below 0 faster than its current value
+    dt = float(ctx.get("_dt", 1.0))
+    return np.maximum(raw, -values / max(dt, 0.01))
 
 
 def _pollution_spread(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
@@ -99,6 +116,8 @@ class ODEModule(AlgorithmModule):
     def execute(self, ctx: ModuleContext) -> ModuleContext:
         if not ctx.arrays:
             return ctx
+        if not hasattr(self, '_ode_defs'):
+            return ctx
         if _HAS_SCIPY:
             return self._execute_scipy(ctx)
         return self._execute_euler(ctx)
@@ -118,21 +137,24 @@ class ODEModule(AlgorithmModule):
         self._check_deps(ctx, keys)
 
         def ode_system(_t: float, y: np.ndarray) -> np.ndarray:
-            # Rebuild per-metric views into ctx.arrays
+            # Rebuild per-metric views into a local copy (avoids mutating ctx.arrays during integration steps)
+            views: dict[str, np.ndarray] = {}
             start = 0
             for k in keys:
-                ctx.arrays[k] = y[start:start + n]
+                views[k] = y[start:start + n]
                 start += n
             deriv_parts: list[np.ndarray] = []
             for k in keys:
                 eq_name = self._ode_defs.get(k, "")
                 eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
                 if eq_fn is not None:
-                    deriv_parts.append(eq_fn(ctx.arrays[k], ctx.arrays))
+                    deriv_parts.append(eq_fn(views[k], views))
                 else:
                     deriv_parts.append(np.zeros(n, dtype=np.float64))
             return np.concatenate(deriv_parts)
 
+        # Save pre-integration snapshot for recovery on failure
+        arrays_snapshot = {k: v.copy() for k, v in ctx.arrays.items()}
         try:
             sol = _scipy_solve_ivp(
                 ode_system, (0.0, ctx.dt), y0,
@@ -146,16 +168,20 @@ class ODEModule(AlgorithmModule):
                     ctx.arrays[k] = final[start:start + n]
                     start += n
             else:
-                logger.warning("[ODE] RK45 integration failed: %s", sol.message)
+                logger.warning("[ODE] RK45 integration failed: %s — restoring pre-integration state", sol.message)
+                ctx.arrays = arrays_snapshot
         except Exception as e:
-            logger.warning("[ODE] scipy solve_ivp failed: %s", e)
+            logger.warning("[ODE] scipy solve_ivp failed: %s — restoring pre-integration state", e)
+            ctx.arrays = arrays_snapshot
         return ctx
 
     def _execute_euler(self, ctx: ModuleContext) -> ModuleContext:
         """Simple Euler integration — no scipy dependency."""
+        keys = list(ctx.arrays.keys())
+        self._check_deps(ctx, keys)
         sub_dt = ctx.dt / max(self._sub_steps, 1)
         for _ in range(self._sub_steps):
-            for key in list(ctx.arrays.keys()):
+            for key in keys:
                 eq_name = self._ode_defs.get(key, "")
                 eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
                 if eq_fn is not None:

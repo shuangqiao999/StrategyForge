@@ -14,7 +14,7 @@ import numpy as np
 
 @dataclass
 class SpatialState:
-    """3D spatial state for N entities. All arrays are float32, shape (N,3) or (N,)."""
+    """3D spatial state for N entities. All arrays are float64, shape (N,3) or (N,)."""
 
     positions: np.ndarray = field(default_factory=lambda: np.empty((0, 3), dtype=np.float64))
     velocities: np.ndarray = field(default_factory=lambda: np.empty((0, 3), dtype=np.float64))
@@ -33,7 +33,7 @@ class SpatialState:
     ) -> None:
         """Initialize from dict maps or auto-scatter entities in a 3D box."""
         n = len(entity_ids)
-        rng = np.random.RandomState(42)
+        rng = np.random.default_rng()
         self.positions = np.zeros((n, 3), dtype=np.float64)
         self.velocities = np.zeros((n, 3), dtype=np.float64)
         self.masses = np.ones(n, dtype=np.float64)
@@ -133,16 +133,18 @@ def states_to_arrays(
     entity_ids: list[str],
 ) -> dict[str, np.ndarray]:
     """Convert EntityState metrics dicts → ModuleContext.arrays.
-
-    Returns NaN for missing entities/metrics so modules can detect absence.
+    
+    Missing entities/metrics default to 0.0 to avoid NaN propagation in ODE/physics modules.
     """
     result: dict[str, np.ndarray] = {}
     for metric in metric_names:
-        arr = np.full(len(entity_ids), np.nan, dtype=np.float64)
+        arr = np.zeros(len(entity_ids), dtype=np.float64)
         for i, eid in enumerate(entity_ids):
             st = states.get(eid)
             if st is not None:
-                arr[i] = float(st.metrics.get(metric, np.nan))
+                val = st.metrics.get(metric)
+                if val is not None and not np.isnan(float(val)):
+                    arr[i] = float(val)
         result[metric] = arr
     return result
 
