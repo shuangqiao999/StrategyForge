@@ -515,7 +515,13 @@ class SimulationEngine:
 
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
-        decisions = await asyncio.gather(*[decide(a) for a in ordered])
+        raw_results = await asyncio.gather(*[decide(a) for a in ordered], return_exceptions=True)
+        decisions: list[dict[str, Any]] = []
+        for i, result in enumerate(raw_results):
+            if isinstance(result, BaseException):
+                self._log("simulation", f"agent {ordered[i].name} 决策失败: {result}")
+            else:
+                decisions.append(result)
 
         # ── 轮前：自动效应（条件触发，逐实体结算）+ 延迟效应到期结算 ──
         ranges = re_engine.ranges()
