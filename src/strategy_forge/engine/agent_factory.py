@@ -89,16 +89,24 @@ async def create_agents_from_graph(
             r = result.get_next()
             persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
 
-    # Deduplicate entities with sub-name relationships (e.g. "特朗普" vs "美国（特朗普）")
+    # Deduplicate using alias map from preprocessor (no substring matching)
     if len(persons) > 1:
-        sorted_ps = sorted(persons, key=lambda p: len(p.get("name", "")), reverse=True)
+        alias_to_std: dict[str, str] = {}
+        if preprocessor and preprocessor.result:
+            for std, aliases in preprocessor.result.entity_aliases.items():
+                alias_to_std[std] = std
+                for a in aliases:
+                    alias_to_std[a] = std
         seen: set[str] = set()
         deduped: list[dict] = []
-        for p in sorted_ps:
+        for p in persons:
             name = p.get("name", "")
-            if any(name in n or n in name for n in seen):
+            std_name = alias_to_std.get(name, name)
+            if std_name in seen:
                 continue
-            seen.add(name)
+            seen.add(std_name)
+            if std_name != name:
+                p["name"] = std_name
             deduped.append(p)
         if len(deduped) < len(persons):
             log_fn("agents", f"实体去重: {len(persons)} → {len(deduped)}")

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ class PreprocessResult:
     chunks: list[Any]
     high_freq_entities: dict[str, set[str]]
     low_freq_entities: dict[str, set[str]]
+    entity_aliases: dict[str, set[str]] = field(default_factory=dict)
     total_chunks: int = 0
     total_entities: int = 0
 
@@ -388,6 +389,7 @@ class DeductionPreprocessor:
             self._result = PreprocessResult(
                 session_id=self.session_id, chunks=list(chunks),
                 high_freq_entities=high_freq, low_freq_entities=low_freq,
+                entity_aliases=all_entities,
                 total_chunks=len(chunks), total_entities=len(all_entities))
             return self._result
 
@@ -408,6 +410,7 @@ class DeductionPreprocessor:
         self._result = PreprocessResult(
             session_id=self.session_id, chunks=list(chunks),
             high_freq_entities=high_freq, low_freq_entities=low_freq,
+            entity_aliases=all_entities,
             total_chunks=len(chunks), total_entities=len(all_entities))
         return self._result
 
