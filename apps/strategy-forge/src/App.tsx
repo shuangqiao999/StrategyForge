@@ -550,7 +550,7 @@ export default function App() {
         }
       } catch { /* ignore */ }
     };
-    es.onerror = () => { es.close(); sseSidRef.current = null; };
+    es.onerror = () => { es.close(); sseSidRef.current = null; fetchSessions(); };
     return () => { es.close(); };  // do NOT clear sseSidRef here; session still connected
   }, [selectedId, sessions]);
 
