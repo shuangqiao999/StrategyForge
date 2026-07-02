@@ -28,6 +28,19 @@ class PreprocessResult:
     total_entities: int = 0
 
 
+def _merge_entity_dicts(jieba_entities: dict[str, set[str]],
+                        llm_entities: dict[str, set[str]]) -> dict[str, set[str]]:
+    """Merge LLM-discovered entities into jieba entity dict. Dedup by name."""
+    merged = dict(jieba_entities)
+    for name, _aliases in llm_entities.items():
+        key = name.strip()
+        if not key:
+            continue
+        if key not in merged:
+            merged[key] = set()
+    return merged
+
+
 class DeductionPreprocessor:
     # 嵌入文本上限：放宽到与切片上限(1536)一致，避免长 chunk 只嵌入开头导致召回不全。
     _INDEX_PREFIX_LEN = 1536
@@ -288,6 +301,50 @@ class DeductionPreprocessor:
     def clear_round_cache(self) -> None:
         self._dynamic_cache.clear()
 
+    def _llm_entity_discovery(self, source: str) -> dict[str, set[str]]:
+        """Use LLM to discover named entities that jieba's POS tagger misses
+        (organizations, abbreviations, compound names, etc.)."""
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        import httpx
+
+        prompt = (
+            "列出以下文本中出现的所有专有名词实体（人名、地名、机构名、组织名、国家名、事件名、缩写）。"
+            "每行输出一个实体名，不要编号，不要解释，不要重复。\n\n"
+            f"文本：\n{source[:6000]}"
+        )
+        client = LLMClient()
+        headers = {"Content-Type": "application/json"}
+        if client.api_key:
+            headers["Authorization"] = f"Bearer {client.api_key}"
+
+        try:
+            import re
+            with httpx.Client(timeout=httpx.Timeout(30.0), headers=headers) as http:
+                resp = http.post(
+                    f"{client.api_base}/chat/completions",
+                    json={
+                        "model": client.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                lines = [line.strip() for line in content.split("\n") if line.strip()]
+                entities: dict[str, set[str]] = {}
+                for line in lines:
+                    line = re.sub(r'^[\d\-•·\.\s]+', '', line)
+                    line = line.strip()
+                    if len(line) < 2 or len(line) > 50:
+                        continue
+                    entities.setdefault(line, set())
+                logger.info("[Preprocessor] LLM discovered %d additional entities", len(entities))
+                return entities
+        except Exception as e:
+            logger.warning("[Preprocessor] LLM entity discovery failed: %s", e)
+            return {}
+
     # ── Static chunk retrieval ──
 
     def _hybrid_or_vector_search(self, table: Any, query_vec: list[float],
@@ -363,8 +420,27 @@ class DeductionPreprocessor:
                 high_freq[std_name] = aliases
             else:
                 low_freq[std_name] = aliases
-        logger.info("[Preprocessor] Entities: %d total, %d high-freq, %d low-freq",
+        logger.info("[Preprocessor] Entities (jieba): %d total, %d high-freq, %d low-freq",
                     len(all_entities), len(high_freq), len(low_freq))
+
+        # 2.5 LLM-assisted entity discovery — catches entities jieba misses (orgs, abbreviations, compounds)
+        try:
+            llm_entities = self._llm_entity_discovery(source)
+            if llm_entities:
+                merged = _merge_entity_dicts(all_entities, llm_entities)
+                # Re-split high/low with merged entities
+                high_freq.clear(); low_freq.clear()
+                for std_name, aliases in merged.items():
+                    count = len(re.findall(re.escape(std_name), source))
+                    if count >= 3:
+                        high_freq[std_name] = aliases
+                    else:
+                        low_freq[std_name] = aliases
+                logger.info("[Preprocessor] Entities (jieba+LLM): %d total, %d high-freq, %d low-freq",
+                            len(merged), len(high_freq), len(low_freq))
+                all_entities = merged
+        except Exception as e:
+            logger.warning("[Preprocessor] LLM entity discovery failed, using jieba only: %s", e)
 
         # 3. LanceDB vector indexing
         dim = self._auto_detect_dim()
