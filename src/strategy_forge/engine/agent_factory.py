@@ -89,6 +89,21 @@ async def create_agents_from_graph(
             r = result.get_next()
             persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
 
+    # Deduplicate entities with sub-name relationships (e.g. "特朗普" vs "美国（特朗普）")
+    if len(persons) > 1:
+        sorted_ps = sorted(persons, key=lambda p: len(p.get("name", "")), reverse=True)
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for p in sorted_ps:
+            name = p.get("name", "")
+            if any(name in n or n in name for n in seen):
+                continue
+            seen.add(name)
+            deduped.append(p)
+        if len(deduped) < len(persons):
+            log_fn("agents", f"实体去重: {len(persons)} → {len(deduped)}")
+        persons = deduped
+
     max_agents = min(len(persons), config.deduction_max_agents)
     log_fn("agents", f"从 {len(persons)} 个实体中生成最多 {max_agents} 个智能体")
 
