@@ -352,7 +352,7 @@ class DeductionPreprocessor:
         logger.info("[Preprocessor] Chunked into %d semantic chunks", len(chunks))
 
         # 2. Jieba POS entity extraction
-        all_entities = extract_named_entities(source, top_k=1000, min_freq=2)
+        all_entities = extract_named_entities(source, top_k=1000, min_freq=1)
         high_freq: dict[str, set[str]] = {}
         low_freq: dict[str, set[str]] = {}
         import re

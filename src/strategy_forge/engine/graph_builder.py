@@ -113,7 +113,7 @@ async def build_graph(
                 text="__TEXT__",
                 entity_types=", ".join(entity_type_names),
                 relation_types=", ".join(relation_type_names),
-                candidate_entities=", ".join(candidate_names[:80]),
+                candidate_entities=", ".join(candidate_names[:200]),
                 alias_map=alias_map_str,
             )
 
