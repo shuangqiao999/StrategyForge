@@ -219,7 +219,7 @@ async def pause_deduction(session_id: str, request: Request):
     session = engine.get_session(session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
-    if session.status not in (SessionStatus.SIMULATING, SessionStatus.REPORTING):
+    if session.status.value not in _RUNNING_STATUSES:
         raise HTTPException(409, f"无法暂停：当前状态为 {session.status.value}")
     cancels = _ded_cancel_state(request.app)
     ev = cancels.get(session_id)

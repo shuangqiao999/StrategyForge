@@ -401,22 +401,22 @@ export default function App() {
       await persistSettings(selectedId);
       const r = await fetch(`${API_BASE}/session/${selectedId}/start`, { method: "POST" });
       if (!r.ok) throw new Error(await r.text());
-      setLoading(false);
-      // /start 立即返回 started，轮询一次状态让按钮切到"取消推演"
       await fetchSessions();
     } catch (e: any) {
-      setLoading(false);
       alert("推演启动失败: " + (e.message || "未知错误"));
     }
     setLoading(false);
-  }, [selectedId, fetchSessions, fetchGraph, fetchLogs, fetchReport, fetchTimeline, fetchCausal, persistSettings]);
+  }, [selectedId, fetchSessions, persistSettings]);
 
   const handleCancel = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
     try {
-      await fetch(`${API_BASE}/session/${selectedId}/pause`, { method: "POST" });
-    } catch { /* ignore */ }
+      const r = await fetch(`${API_BASE}/session/${selectedId}/pause`, { method: "POST" });
+      if (!r.ok) throw new Error(await r.text());
+    } catch (e: any) {
+      alert("停止推演失败: " + (e.message || "未知错误"));
+    }
     setLoading(false);
     await fetchSessions();
   }, [selectedId, fetchSessions]);
