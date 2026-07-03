@@ -319,26 +319,27 @@ class DeductionGraphStore:
         links: list[dict[str, Any]] = []
         rows = self.query(
             f"MATCH (a:{self.AGENT_TABLE})-[:ACTED]->(ev:{self.EVENT_TABLE}) "
-            "RETURN a.id, a.name, ev.id, ev.event_type, ev.round, ev.description "
+            "RETURN a.id, a.name, a.background, ev.id, ev.event_type, ev.round, ev.description "
             f"ORDER BY ev.round LIMIT {int(limit)}"
         )
         for r in rows:
-            aid, aname, eid, etype, rnd, desc = r[0], r[1], r[2], r[3], r[4], r[5]
-            nodes.setdefault(aid, {"id": aid, "kind": "agent", "label": aname or aid[:8]})
+            aid, aname, abg, eid, etype, rnd, edesc = r[0], r[1], r[2], r[3], r[4], r[5], r[6]
+            nodes.setdefault(aid, {"id": aid, "kind": "agent", "label": aname or aid[:8],
+                                   "desc": (abg or "")[:120]})
             nodes.setdefault(eid, {"id": eid, "kind": "event",
                                    "label": f"R{rnd or 0}:{etype or ''}",
-                                   "desc": (desc or "")[:80]})
+                                   "desc": (edesc or "")[:80]})
             links.append({"source": aid, "target": eid, "type": "ACTED", "label": etype or ""})
         crows = self.query(
             f"MATCH (ev:{self.EVENT_TABLE})-[c:CAUSED]->(e:{self.NODE_TABLE}) "
-            f"RETURN ev.id, e.id, e.name, c.metric, c.amount LIMIT {int(limit) * 4}"
+            f"RETURN ev.id, e.id, e.name, e.description, c.metric, c.amount LIMIT {int(limit) * 4}"
         )
         for r in crows:
-            eid, tid, tname, metric, amount = r[0], r[1], r[2], r[3], r[4]
-            # 补全：CAUSED 边的源 Event 若在 ACTED 批次被截断，仍创建节点（避免孤儿 entity）
+            eid, tid, tname, tdesc, metric, amount = r[0], r[1], r[2], r[3], r[4], r[5]
             nodes.setdefault(eid, {"id": eid, "kind": "event",
                                    "label": f"EV:{eid[:8]}", "desc": ""})
-            nodes.setdefault(tid, {"id": tid, "kind": "entity", "label": tname or tid[:8]})
+            nodes.setdefault(tid, {"id": tid, "kind": "entity", "label": tname or tid[:8],
+                                   "desc": (tdesc or "")[:120]})
             lbl = f"{metric}{amount:+.0f}" if amount is not None else (metric or "")
             links.append({"source": eid, "target": tid, "type": "CAUSED", "label": lbl})
         # 硬上限：预防极端数据量导致前端力导图卡死
