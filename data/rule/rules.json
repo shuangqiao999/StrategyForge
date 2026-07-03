@@ -311,6 +311,30 @@
                 50
               ]
             }
+          },
+          {
+            "from": "patrol",
+            "to": "combat",
+            "condition": {
+              "distance_to_enemy": [
+                "<",
+                50
+              ]
+            }
+          },
+          {
+            "from": "combat",
+            "to": "retreat",
+            "condition": {
+              "strength": [
+                "<",
+                40
+              ],
+              "distance_to_enemy": [
+                "<",
+                30
+              ]
+            }
           }
         ],
         "action_map": {
@@ -2294,6 +2318,30 @@
               ],
               "unity": [
                 ">",
+                50
+              ]
+            }
+          },
+          {
+            "from": "observe",
+            "to": "engage",
+            "condition": {
+              "distance_to_enemy": [
+                "<",
+                100
+              ]
+            }
+          },
+          {
+            "from": "engage",
+            "to": "retreat",
+            "condition": {
+              "strength": [
+                "<",
+                50
+              ],
+              "distance_to_enemy": [
+                "<",
                 50
               ]
             }

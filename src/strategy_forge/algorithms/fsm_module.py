@@ -12,6 +12,8 @@ from typing import Any
 
 import numpy as np
 
+import numpy as np
+
 from .base import AlgorithmModule, ModuleContext
 
 
@@ -110,10 +112,15 @@ class FiniteStateMachineModule(AlgorithmModule):
 
     @staticmethod
     def _match_condition(ctx: ModuleContext, idx: int, condition: dict) -> bool:
+        """Check if entity idx satisfies all condition thresholds.
+        
+        Supports virtual spatial metrics:
+          - distance_to_enemy / distance_to_ally: computed from ctx.spatial + metadata.
+        """
         for metric, (op, threshold) in condition.items():
-            if metric not in ctx.arrays:
+            val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
+            if val is None:
                 return False
-            val = float(ctx.arrays[metric][idx])
             if op == "<" and not (val < float(threshold)):
                 return False
             if op == ">" and not (val > float(threshold)):
@@ -125,3 +132,42 @@ class FiniteStateMachineModule(AlgorithmModule):
             if op == "==" and not (abs(val - float(threshold)) < 1e-9):
                 return False
         return True
+
+    @staticmethod
+    def _resolve_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
+        """Resolve a metric value: real arrays first, then virtual spatial metrics."""
+        # Real metric from arrays
+        if metric in ctx.arrays:
+            arr = ctx.arrays[metric]
+            if idx < len(arr):
+                return float(arr[idx])
+        # Virtual spatial metrics
+        sp = ctx.spatial
+        n = len(sp.positions)
+        if idx >= n:
+            return None
+        if metric in ("distance_to_enemy", "distance_to_ally"):
+            enemy_ids = ctx.metadata.get("fsm.enemy_ids", [])
+            ally_ids = ctx.metadata.get("fsm.ally_ids", [])
+            targets = enemy_ids if "enemy" in metric else ally_ids
+            if not targets:
+                return None
+            min_dist = float("inf")
+            for tidx in targets:
+                if not isinstance(tidx, int) or tidx >= n or tidx == idx:
+                    continue
+                    continue
+                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[tidx]))
+                if d < min_dist:
+                    min_dist = d
+            return min_dist if min_dist != float("inf") else None
+        if metric == "distance_to_nearest_entity":
+            min_dist = float("inf")
+            for j in range(n):
+                if j == idx:
+                    continue
+                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[j]))
+                if d < min_dist:
+                    min_dist = d
+            return min_dist if min_dist != float("inf") else None
+        return None

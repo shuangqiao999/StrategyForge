@@ -82,7 +82,11 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
 
 def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
     """Validate FSM transition_rules condition metrics are in the rule pack."""
-    metrics_set = set(metrics)
+    # Virtual spatial metrics that don't need to be in the rule pack metrics list
+    _VIRTUAL_METRICS = frozenset({
+        "distance_to_enemy", "distance_to_ally", "distance_to_nearest_entity",
+    })
+    metrics_set = set(metrics) | _VIRTUAL_METRICS
     for rule in cfg.get("transition_rules", []):
         condition = rule.get("condition", {})
         for metric in condition:

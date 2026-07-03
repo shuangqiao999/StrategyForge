@@ -396,7 +396,31 @@ class SimulationEngine:
             for a in alive_agents:
                 if a.entity_id == self_id:
                     continue
-                line = states[a.entity_id].to_prompt_context()
+                st = states[a.entity_id]
+                line = st.to_prompt_context()
+                # ── Trend perception: show multi-round metric deltas ──
+                hist = getattr(st, "history", []) or []
+                if len(hist) >= 6:  # at least 2 rounds with ~3 metrics each
+                    trend_parts = []
+                    # Reconstruct per-round metric values from history entries
+                    by_round: dict[int, dict[str, float]] = {}
+                    for entry in hist:
+                        if isinstance(entry, dict):
+                            r = entry.get("round", 0)
+                            metric = entry.get("metric", "")
+                            val = entry.get("new", entry.get("value", 0))
+                            if r and metric:
+                                by_round.setdefault(r, {})[metric] = float(val)
+                    rounds = sorted(by_round.keys())
+                    if len(rounds) >= 2:
+                        first, last = by_round[rounds[0]], by_round[rounds[-1]]
+                        for metric in re_engine.metrics():
+                            v0, v1 = first.get(metric, 0), last.get(metric, 0)
+                            if v0 > 0 and abs(v1 - v0) > 3.0:
+                                symbol = "↑" if v1 > v0 else "↓"
+                                trend_parts.append(f"{metric}{symbol}{abs(v1-v0):.0f}")
+                    if trend_parts:
+                        line += f"  多轮趋势: {', '.join(trend_parts)}"
                 if self._spatial_state is not None and idx_self is not None:
                     sp = self._spatial_state
                     idx_other = alive_id_to_idx.get(a.entity_id)
@@ -498,16 +522,25 @@ class SimulationEngine:
         _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
         _spatial_ctxs = {a.entity_id: spatial_self_ctx(a.entity_id) for a in alive_agents}
         _env_ctx = env_context()
+        # ── Causal feedback: per-agent last round outcomes ──
+        _causal_ctxs = {
+            a.entity_id: "\n".join(getattr(self, "_last_round_outcomes", {}).get(a.entity_id, []))
+            for a in alive_agents
+        }
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any]:
             async with sem:
                 static_text, dynamic_text = await _recall(agent)
+                rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
+                causal = _causal_ctxs.get(agent.entity_id, "")
+                if causal:
+                    rel_ctx = f"上一轮行动效果: {causal}\n{rel_ctx}" if rel_ctx else f"上一轮行动效果: {causal}"
                 d = await self.reasoner.reason_quantified(
                     agent, states[agent.entity_id], re_engine,
                     recent_events=recent, other_context=_other_ctxs.get(agent.entity_id, ""),
                     round_number=round_number, client=client,
                     static_knowledge=static_text, dynamic_memory=dynamic_text,
-                    relationship_context=self._rel_context.get(agent.entity_id, {}).get("summary", ""),
+                    relationship_context=rel_ctx,
                     spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
                     env_context=_env_ctx,
                 )
@@ -577,11 +610,24 @@ class SimulationEngine:
                 if eid in states:
                     states[eid].apply_deltas(d, round_number, ranges)
 
-        # ── 轮后：调度延迟效应（动作触发的 delay_effects）──
+        # ── 轮后：调度延迟效应 + 保存因果反馈 ──
+        self._last_round_outcomes: dict[str, list[dict]] = {}
         for dec in decisions:
             actor = dec.get("actor_id")
             if actor not in states:
                 continue
+            # Causal feedback for next round
+            my_deltas = deltas.get(actor, {})
+            if my_deltas:
+                summary = ", ".join(f"{k}{v:+.1f}" for k, v in my_deltas.items())
+                target = dec.get("target", "")
+                action = dec.get("action_type", "?")
+                target_name = target if target else "自身"
+                self._last_round_outcomes.setdefault(actor, []).append(
+                    f"你的 {action} 对 {target_name} 造成: {summary}" if target else
+                    f"你的 {action} 自身效应: {summary}"
+                )
+            # Delay effect scheduling
             for action, sub_intensity, _target in re_engine._iter_subactions(dec):
                 delay_cfg = re_engine.pack.get("delay_effects", {}).get(action)
                 if delay_cfg and sub_intensity > 0:
