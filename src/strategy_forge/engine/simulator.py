@@ -569,9 +569,13 @@ class SimulationEngine:
                 inter_by_actor[_it["actor"]] = [_it]
             else:
                 bucket.append(_it)
-        for eid, d in deltas.items():
-            if eid in states:
-                states[eid].apply_deltas(d, round_number, ranges)
+        # Bulk JIT delta application for large entity counts
+        if len(states) >= 20:
+            _bulk_apply_deltas(states, deltas, ranges, re_engine.metrics())
+        else:
+            for eid, d in deltas.items():
+                if eid in states:
+                    states[eid].apply_deltas(d, round_number, ranges)
 
         # ── 轮后：调度延迟效应（动作触发的 delay_effects）──
         for dec in decisions:
@@ -729,6 +733,46 @@ class SimulationEngine:
         resp = await client.chat([Message(role="user", content=prompt)],
                                  system="你是推演解说员，把数值变化翻译成简洁叙事。", temperature=0.5)
         return extract_text(resp).strip()[:300]
+
+
+def _bulk_apply_deltas(
+    states: dict[str, Any],
+    deltas: dict[str, dict[str, float]],
+    ranges: dict[str, Any],
+    metric_names: list[str],
+) -> None:
+    """Bulk JIT delta application for large entity counts."""
+    from strategy_forge.engine._jit_utils import batch_apply_deltas
+
+    entity_ids = list(states.keys())
+    if not entity_ids:
+        return
+    N = len(entity_ids)
+    M = len(metric_names)
+    metrics_arr = np.zeros((N, M), dtype=np.float64)
+    deltas_arr = np.zeros((N, M), dtype=np.float64)
+    lo_arr = np.full(M, -1e12, dtype=np.float64)
+    hi_arr = np.full(M, 1e12, dtype=np.float64)
+
+    for i, eid in enumerate(entity_ids):
+        st = states[eid]
+        for m, name in enumerate(metric_names):
+            metrics_arr[i, m] = float(st.metrics.get(name, 0.0))
+            d = deltas.get(eid, {}).get(name, 0.0)
+            deltas_arr[i, m] = float(d) if d is not None else 0.0
+
+    for m, name in enumerate(metric_names):
+        rng = ranges.get(name, [0.0, 100.0])
+        if rng and len(rng) >= 2:
+            lo_arr[m] = float(rng[0])
+            hi_arr[m] = float(rng[1])
+
+    batch_apply_deltas(metrics_arr, deltas_arr, lo_arr, hi_arr)
+
+    for i, eid in enumerate(entity_ids):
+        st = states[eid]
+        for m, name in enumerate(metric_names):
+            st.metrics[name] = float(metrics_arr[i, m])
 
 
 def _parse_action_json(raw: str) -> dict[str, Any]:
