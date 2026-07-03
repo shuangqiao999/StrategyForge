@@ -1150,25 +1150,49 @@ export default function App() {
                                </span>
                                <button onClick={() => setSelectedCausalNode(null)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 14 }}>✕</button>
                              </div>
-                             <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>
-                               {(() => {
-                                 const node = causal.nodes.find(n => n.id === selectedCausalNode);
-                                 if (!node) return null;
-                                 const descParts: string[] = [];
-                                 if (node.kind) descParts.push(`类型：${node.kind}`);
-                                 if (node.desc) descParts.push(node.desc);
-                                 const relatedLinks = causal.links.filter(l => l.source === selectedCausalNode || l.target === selectedCausalNode);
-                                 if (relatedLinks.length > 0) {
-                                   descParts.push(`关联（${relatedLinks.length} 条因果边）`);
-                                   relatedLinks.slice(0, 5).forEach(l => {
-                                     const dir = l.source === selectedCausalNode ? "→" : "←";
-                                     const other = l.source === selectedCausalNode ? causal.nodes.find(n => n.id === l.target)?.label : causal.nodes.find(n => n.id === l.source)?.label;
-                                     descParts.push(`  ${dir} ${other}: ${l.label}`);
-                                   });
-                                 }
-                                 return descParts.map((p, idx) => <div key={idx}>{p}</div>);
-                               })()}
-                             </div>
+                              <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>
+                                {(() => {
+                                  const node = causal.nodes.find(n => n.id === selectedCausalNode);
+                                  if (!node) return null;
+                                  const descParts: any[] = [];
+                                  if (node.kind) descParts.push(<div key="kind">类型：{node.kind}</div>);
+                                  if (node.desc) descParts.push(<div key="desc">{node.desc}</div>);
+                                  // Collect connected nodes by direction
+                                  const relatedLinks = causal.links.filter(l => l.source === selectedCausalNode || l.target === selectedCausalNode);
+                                  if (relatedLinks.length === 0) return descParts;
+                                  const incomingLinks = relatedLinks.filter(l => l.target === selectedCausalNode);
+                                  const outgoingLinks = relatedLinks.filter(l => l.source === selectedCausalNode);
+                                  // Helper: get top-5 connected nodes sorted by link count
+                                  const getTopNodes = (links: typeof relatedLinks, pickId: (l: typeof relatedLinks[0]) => string, limit: number) => {
+                                    const nodeIds = new Set(links.map(pickId));
+                                    const scored = Array.from(nodeIds).map(id => {
+                                      const n = causal.nodes.find(nn => nn.id === id);
+                                      const count = links.filter(l => pickId(l) === id).length;
+                                      return { node: n, count };
+                                    }).filter(x => x.node).sort((a, b) => b.count - a.count).slice(0, limit);
+                                    return scored;
+                                  };
+                                  // Incoming nodes (source → selected)
+                                  if (incomingLinks.length > 0) {
+                                    const topIn = getTopNodes(incomingLinks, l => l.source, 5);
+                                    descParts.push(<div key="in-title" style={{ marginTop: 6, color: "#a78bfa", fontWeight: 600 }}>──── 来源（{topIn.length} 个节点指向此处）</div>);
+                                    topIn.forEach((x, i) => {
+                                      const lbl = x.node!.label + (x.node!.desc ? ` — ${x.node!.desc.slice(0, 80)}` : "");
+                                      descParts.push(<div key={`in-${i}`} style={{ paddingLeft: 8 }}>• [{x.node!.kind}] {lbl}</div>);
+                                    });
+                                  }
+                                  // Outgoing nodes (selected → target)
+                                  if (outgoingLinks.length > 0) {
+                                    const topOut = getTopNodes(outgoingLinks, l => l.target, 5);
+                                    descParts.push(<div key="out-title" style={{ marginTop: 6, color: "#60a5fa", fontWeight: 600 }}>──── 去向（指向 {topOut.length} 个节点）</div>);
+                                    topOut.forEach((x, i) => {
+                                      const lbl = x.node!.label + (x.node!.desc ? ` — ${x.node!.desc.slice(0, 80)}` : "");
+                                      descParts.push(<div key={`out-${i}`} style={{ paddingLeft: 8 }}>• [{x.node!.kind}] {lbl}</div>);
+                                    });
+                                  }
+                                  return descParts;
+                                })()}
+                              </div>
                            </div>
                          )}
                          <div>
