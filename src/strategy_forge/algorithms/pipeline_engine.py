@@ -58,6 +58,17 @@ class PipelineEngine:
         if not order:
             order = list(self._modules.keys())
 
+        # Auto-sort: IS_FINALIZER modules always run last.
+        # This ensures analysis modules (opinion_dynamics, fsm) write metadata
+        # before finalizer modules (ode_engine, physics_engine) overwrite arrays.
+        original = list(order)
+        finalizers = [n for n in order
+                      if self._modules.get(n) and getattr(self._modules[n], "IS_FINALIZER", False)]
+        non_final = [n for n in order if n not in finalizers]
+        order = non_final + finalizers
+        if order != original:
+            logger.debug("[Pipeline] finalizers sorted to end: %s", [n for n in order if n in finalizers])
+
         for name in order:
             mod = self._modules.get(name)
             if mod is None:

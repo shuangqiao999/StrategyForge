@@ -536,14 +536,23 @@ npx tauri dev      # 完整桌面应用（自动构建并联调）
 规则包 (rules.json modules 段)
     │
     ▼
-module_utils.build_module_chain()    ── 工厂：创建 ODE + Physics 模块链
+module_utils.build_pipeline()    ── 工厂：PipelineEngine + 模块注册表
     │
-    ├─ ODEModule.execute(ctx)        ── 连续数值演化
-    └─ PhysicsModule.execute(ctx)    ── 空间物理模拟
+    ├─ 分析模块 (IS_FINALIZER=False) ── 写 metadata（建议/状态）
+    │   ├─ OpinionDynamicsModule ── 观点动力学传播
+    │   └─ FiniteStateMachineModule ── 代理自治状态转移
+    │
+    ├─ 写模块 (IS_FINALIZER=True) ── 写 ctx.arrays（最终结算）
+    │   ├─ ODEModule.execute(ctx) ── 连续数值演化
+    │   └─ PhysicsModule.execute(ctx) ── 空间物理模拟
     │
     ▼
-module_utils.apply_context_results() ── 模块输出写回 EntityState
+module_utils.apply_context_results() ── arrays 写回 EntityState
 ```
+
+**IS_FINALIZER 合约**：声明 `IS_FINALIZER = True` 的模块自动排到管线末尾执行，确保分析模块（观点动力学、FSM）在写模块（ODE、Physics）修改 arrays 之前完成计算。PipelineEngine 在 run() 时自动重排，即使 `rules.json` 的顺序写反了也不会导致"分析结果被覆盖"。
+
+**FSM 配置校验**：`build_pipeline()` 加载时对 `transition_rules` 中的 condition 指标做 fail-fast 校验。若指标名不存在于规则包的 `metrics` 列表中，抛出 `ConfigValidationError`（而非静默跳过），确保配置错误在推演启动前暴露。
 
 每轮推演的算法模块调用流程：
 1. `build_context()` — 从 `EntityState` 字典构建 `ModuleContext`（含 numpy 数组形式的指标 + `SpatialState` 空间状态）

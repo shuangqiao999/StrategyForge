@@ -620,10 +620,86 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "idle",
+        "command_states": [
+          "strategy"
+        ],
+        "transition_rules": [
+          {
+            "from": "idle",
+            "to": "expand",
+            "condition": {
+              "cash_flow": [
+                ">",
+                50
+              ],
+              "market_share": [
+                ">",
+                15
+              ]
+            }
+          },
+          {
+            "from": "expand",
+            "to": "retrench",
+            "condition": {
+              "cash_flow": [
+                "<",
+                20
+              ]
+            }
+          },
+          {
+            "from": "retrench",
+            "to": "expand",
+            "condition": {
+              "cash_flow": [
+                ">",
+                60
+              ]
+            }
+          },
+          {
+            "from": "idle",
+            "to": "defensive",
+            "condition": {
+              "brand": [
+                "<",
+                30
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "idle": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "expand": {
+            "action_type": "expand",
+            "intensity": 0.5,
+            "target": ""
+          },
+          "retrench": {
+            "action_type": "observe",
+            "intensity": 0.4,
+            "target": ""
+          },
+          "defensive": {
+            "action_type": "marketing",
+            "intensity": 0.6,
+            "target": ""
+          },
+          "strategy": null
+        }
       }
     }
   },
@@ -855,10 +931,66 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "stable",
+        "command_states": [
+          "campaign"
+        ],
+        "transition_rules": [
+          {
+            "from": "stable",
+            "to": "campaign",
+            "condition": {
+              "support_rate": [
+                ">",
+                60
+              ]
+            }
+          },
+          {
+            "from": "campaign",
+            "to": "defensive",
+            "condition": {
+              "support_rate": [
+                "<",
+                35
+              ]
+            }
+          },
+          {
+            "from": "defensive",
+            "to": "stable",
+            "condition": {
+              "support_rate": [
+                ">",
+                50
+              ],
+              "economy": [
+                ">",
+                40
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "stable": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "campaign": null,
+          "defensive": {
+            "action_type": "reform",
+            "intensity": 0.6,
+            "target": ""
+          }
+        }
       }
     }
   },
@@ -1041,10 +1173,66 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "stable",
+        "command_states": [
+          "intervention"
+        ],
+        "transition_rules": [
+          {
+            "from": "stable",
+            "to": "intervention",
+            "condition": {
+              "pollution": [
+                ">",
+                60
+              ]
+            }
+          },
+          {
+            "from": "intervention",
+            "to": "stable",
+            "condition": {
+              "pollution": [
+                "<",
+                30
+              ],
+              "biodiversity": [
+                ">",
+                40
+              ]
+            }
+          },
+          {
+            "from": "stable",
+            "to": "expansion",
+            "condition": {
+              "resources": [
+                ">",
+                70
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "stable": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "intervention": null,
+          "expansion": {
+            "action_type": "expand",
+            "intensity": 0.5,
+            "target": ""
+          }
+        }
       }
     }
   },
@@ -1231,10 +1419,66 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "maintain",
+        "command_states": [
+          "develop"
+        ],
+        "transition_rules": [
+          {
+            "from": "maintain",
+            "to": "develop",
+            "condition": {
+              "finance": [
+                ">",
+                50
+              ],
+              "employment": [
+                ">",
+                40
+              ]
+            }
+          },
+          {
+            "from": "develop",
+            "to": "austerity",
+            "condition": {
+              "finance": [
+                "<",
+                20
+              ]
+            }
+          },
+          {
+            "from": "austerity",
+            "to": "maintain",
+            "condition": {
+              "finance": [
+                ">",
+                45
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "maintain": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "develop": null,
+          "austerity": {
+            "action_type": "regulate",
+            "intensity": 0.6,
+            "target": ""
+          }
+        }
       }
     }
   },
@@ -1391,10 +1635,52 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "research",
+        "command_states": [
+          "pivot"
+        ],
+        "transition_rules": [
+          {
+            "from": "research",
+            "to": "launch",
+            "condition": {
+              "rnd": [
+                ">",
+                70
+              ],
+              "talent_pool": [
+                ">",
+                50
+              ]
+            }
+          },
+          {
+            "from": "launch",
+            "to": "research",
+            "condition": {
+              "rnd": [
+                "<",
+                30
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "research": {
+            "action_type": "invest_rnd",
+            "intensity": 0.5,
+            "target": ""
+          },
+          "launch": null,
+          "pivot": null
+        }
       }
     }
   },
@@ -1552,10 +1838,66 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "monitor",
+        "command_states": [
+          "offensive"
+        ],
+        "transition_rules": [
+          {
+            "from": "monitor",
+            "to": "offensive",
+            "condition": {
+              "public_trust": [
+                ">",
+                50
+              ],
+              "morale": [
+                ">",
+                40
+              ]
+            }
+          },
+          {
+            "from": "offensive",
+            "to": "defensive",
+            "condition": {
+              "public_trust": [
+                "<",
+                25
+              ]
+            }
+          },
+          {
+            "from": "defensive",
+            "to": "monitor",
+            "condition": {
+              "defense": [
+                ">",
+                60
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "monitor": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "offensive": null,
+          "defensive": {
+            "action_type": "countermeasure",
+            "intensity": 0.7,
+            "target": ""
+          }
+        }
       }
     }
   },
@@ -1877,10 +2219,70 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "observe",
+        "command_states": [
+          "engage"
+        ],
+        "transition_rules": [
+          {
+            "from": "observe",
+            "to": "engage",
+            "condition": {
+              "strength": [
+                ">",
+                70
+              ],
+              "intl_relations": [
+                ">",
+                40
+              ]
+            }
+          },
+          {
+            "from": "engage",
+            "to": "retreat",
+            "condition": {
+              "strength": [
+                "<",
+                35
+              ]
+            }
+          },
+          {
+            "from": "retreat",
+            "to": "observe",
+            "condition": {
+              "supply": [
+                ">",
+                60
+              ],
+              "unity": [
+                ">",
+                50
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "observe": {
+            "action_type": "observe",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "engage": null,
+          "retreat": {
+            "action_type": "maneuver",
+            "intensity": 0.5,
+            "target": ""
+          }
+        }
       }
     }
   }

@@ -43,6 +43,8 @@ def _hash_neighbor_candidates(candidates: set[int], hmap: dict, cell: tuple[int,
 class PhysicsModule(AlgorithmModule):
     """3D physics engine with selectable subsystems."""
 
+    IS_FINALIZER = True
+
     def __init__(self) -> None:
         self._enabled: dict[str, bool] = {
             "dynamics": True,

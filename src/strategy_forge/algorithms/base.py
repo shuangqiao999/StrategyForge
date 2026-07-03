@@ -101,10 +101,14 @@ class AlgorithmModule(ABC):
     Subclasses may optionally define:
       - REQUIRED_SIGNALS: list[str] — metadata keys that must exist in ctx before execute.
       - OUTPUT_SIGNALS: list[str] — metadata keys this module writes to ctx.
+      - IS_FINALIZER: bool — True if this module writes to ctx.arrays directly.
+        Finalizers are automatically sorted to the end of the pipeline to ensure
+        analysis modules (opinion_dynamics, fsm) run before array-writing modules.
     """
 
     REQUIRED_SIGNALS: list[str] = []
     OUTPUT_SIGNALS: list[str] = []
+    IS_FINALIZER: bool = False
 
     @property
     @abstractmethod

@@ -100,6 +100,8 @@ _ODE_DEPS: dict[str, list[str]] = {
 class ODEModule(AlgorithmModule):
     """Continuous-time metric evolution (vectorized RK45 or fallback Euler)."""
 
+    IS_FINALIZER = True
+
     @property
     def name(self) -> str:
         return "ode_engine"

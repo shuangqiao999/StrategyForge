@@ -1,6 +1,7 @@
 """Module chain factory — creates and configures algorithm modules from rule pack data."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,12 @@ from .ode_module import ODEModule
 from .opinion_dynamics import OpinionDynamicsModule
 from .physics_module import PhysicsModule
 from .pipeline_engine import PipelineEngine
+
+logger = logging.getLogger(__name__)
+
+
+class ConfigValidationError(ValueError):
+    """Raised when rules.json configuration is invalid (fail-fast before deduction starts)."""
 
 
 # ── Module class registry (maps config keys to concrete classes) ──
@@ -63,7 +70,28 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
 
         module = cls()
         module.configure(cfg)
+
+        # FSM config validation: fail-fast on invalid condition metrics
+        if name == "finite_state_machine":
+            _validate_fsm_config(cfg, metrics)
+
         engine.register(module)
+
+    return engine
+
+
+def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
+    """Validate FSM transition_rules condition metrics are in the rule pack."""
+    metrics_set = set(metrics)
+    for rule in cfg.get("transition_rules", []):
+        condition = rule.get("condition", {})
+        for metric in condition:
+            if metric not in metrics_set:
+                raise ConfigValidationError(
+                    f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
+                    f"references metric '{metric}' which is not in the rule pack metrics "
+                    f"{metrics}. Check rules.json transition_rules."
+                )
 
     return engine
 
