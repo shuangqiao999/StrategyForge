@@ -19,9 +19,17 @@ StrategyForge 是一款本地优先的多智能体战略推演工具：以一段
 - **实时干预**：推演中注入用户指令，影响智能体决策方向。
 - **不可变目标（pre-goal）**：为会话设定最终战略目标，贯穿全轮次。
 
+### 智能体决策增强
+
+代理每轮决策时接收三维信息，而非仅看当前数值快照：
+
+- **趋势感知**：从 `EntityState.history` 重建多轮指标变化，注入 prompt 为 `多轮趋势: strength↓30 supply↓12`，让 LLM 感知实体是在"变强"还是"溃败"。
+- **因果反馈**：每轮结束后记录各代理 `attack/defend` 等动作的实际效果（如 `strength -20, morale -12`），下一轮决策时作为"上一轮行动效果"反馈给代理，形成战术适应回路。
+- **空间 FSM**：`FiniteStateMachine` 支持虚拟空间指标（`distance_to_enemy`、`distance_to_ally`），使实体能基于 3D 战场距离自动切换状态（如靠近敌人 < 50m 时从 patrol 切 combat），无需 LLM 调用。
+
 ### 模拟模式
 
-- **量化模式（规则包驱动）**：内置 8 个领域规则包（军事 / 商业 / 政治 / 生态 / 城市 / 科技 / 信息战 / 地缘战略），用 `EntityState` + 规则效应做数值演化，由数值阈值与结构化胜利条件**客观判胜负**。支持自定义规则包与自动领域识别。
+- **量化模式（规则包驱动）**：内置 8 个领域规则包（军事 / 商业 / 政治 / 生态 / 城市 / 科技 / 信息战 / 地缘战略），用 `EntityState` + 规则效应做数值演化，由数值阈值与结构化胜利条件**客观判胜负**。支持自定义规则包与自动领域识别。地缘战略领域额外支持加权综合判定（`elimination.weighted_score`），避免大国因单一指标波动误出局。
 - **叙事模式**：无规则包时由 LLM 自由推理决策与判胜。
 - **多动作资源分配**（会话级开关）：每轮可把总预算按权重分配到多个动作、并可分别指向不同对手（混合策略 / 多线博弈）。
 
@@ -575,10 +583,12 @@ module_utils.apply_context_results() ── arrays 写回 EntityState
 
 | 预设名 | 数学形式 | 适用指标 |
 |--------|----------|----------|
-| `decay` | dy/dt = −0.02 × y | 现金、资源自然衰减 |
-| `logistic` | dy/dt = 0.03 × y × (1 − y/100) | 人口、市场份额、品牌 |
-| `fatigue_recovery` | dy/dt = −0.05 × √y | 疲劳度恢复 |
-| `supply_consumption` | dy/dt = −0.3 − 0.01 × |strength|/100 | 供给持续消耗 |
+| `decay` | dy/dt = −rate × y | 现金、资源自然衰减 |
+| `logistic` | dy/dt = rate × y × (1 − y/K) | 人口、市场份额、品牌 |
+| `competitive_logistic` | logistic + 扩散 + 竞争（领先者溢出、追赶者加速） | 技术领先、人才竞争 |
+| `cash_flow_dynamics` | dy/dt = −rate×y + base_recovery + scale×(supply_chain/100)×(tech_lead/100) | 经济体现金流（含大而不倒保护） |
+| `fatigue_recovery` | dy/dt = −rate × √y | 疲劳度恢复 |
+| `supply_consumption` | dy/dt = −rate − strength_factor×|strength|/100 | 供给持续消耗 |
 | `pollution_spread` | dy/dt = 0.001×factories − 0.05×greens − 0.01×y | 环境污染扩散 |
 | `resource_depletion` | dy/dt = −0.005 × |population| | 资源随人口消耗 |
 
@@ -875,13 +885,13 @@ python -m pytest tests/ -v
 
 ```bash
 python scripts/test_algorithms_lmstudio.py         # ODE + Physics + Token + 量化全流程（5 项）
-python scripts/test_pause_resume_lmstudio.py       # 暂停/恢复流程（取消信号响应 + 快照保存/载入）
-python scripts/test_quantified_lmstudio.py         # 量化推演闭环
+python scripts/test_architecture_lmstudio.py      # 架构改进：趋势感知 + 因果反馈 + 空间FSM（13 项）
+python scripts/test_ode_n37_lmstudio.py           # ODE N=37大修：metadata标量注入 + 无NaN污染（10 项）
+python scripts/test_fsm_config_lmstudio.py        # FSM配置修复 + 全领域pipeline + 全流程（20 项）
+python scripts/test_pause_resume_lmstudio.py      # 暂停/恢复：取消信号即时响应 + 快照保存载入
 python scripts/test_multi_action_lmstudio.py       # 多动作资源分配
 python scripts/test_optimizer_lmstudio.py          # 蒙特卡洛优化器
-python scripts/test_optimizer_report_lmstudio.py   # 优化器 + 报告生成
 python scripts/test_graph_fulllink_lmstudio.py     # Kuzu 关系反哺 + 时序 + 因果链
-python scripts/test_lancedb_fulllink_lmstudio.py   # LanceDB 全文检索链路
 python scripts/test_geo_strategy.py               # 地缘战略全流程
 ```
 
