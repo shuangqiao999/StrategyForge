@@ -1297,7 +1297,7 @@ export default function App() {
                             <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{c.label}</div>
                             <div style={{ fontSize: 18, fontWeight: 700, color: c.color }}>{c.value}</div>
                           </div>
-                        ))}
+                        ))})()}
                       </div>
 
                       {/* 各阶段分布 */}
