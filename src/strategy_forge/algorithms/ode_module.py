@@ -80,6 +80,36 @@ def _resource_depletion(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.nd
     return -0.005 * np.abs(population)
 
 
+def _competitive_logistic(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Tech/talent competition: logistic growth + diffusion + crowding.
+    
+    - Leaders (>global_mean) lose advantage through knowledge spillover
+    - Laggards (<global_mean) gain from absorption of frontier tech
+    - Crowding effect prevents all entities converging to 100
+    """
+    K = float(ctx.get("_carrying_capacity", 100))
+    rate = float(ctx.get("_logistic_rate", 0.06))
+    global_mean = float(ctx.get("_global_mean", 50))
+    diffusion_rate = float(ctx.get("_diffusion_rate", 0.015))
+    comp = float(ctx.get("_competition_factor", 0.3))
+    growth = rate * values * (1.0 - values / K)
+    actual_mean = np.mean(values)
+    diffusion = diffusion_rate * (actual_mean - values)
+    crowding = comp * values * np.abs(values - actual_mean) / K
+    return growth + diffusion - crowding
+
+
+def _cash_flow_dynamics(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
+    """Cash flow with base recovery + scale protection from supply chain & tech."""
+    rate = float(ctx.get("_decay_rate", 0.01))
+    base = float(ctx.get("_base_recovery", 0.0))
+    scale = float(ctx.get("_scale_protection", 0.0))
+    supply_chain = ctx.get("supply_chain", np.zeros_like(values))
+    tech_lead = ctx.get("tech_lead", np.ones_like(values) * 50)
+    protection = base + scale * (np.clip(supply_chain, 0, 100) / 100.0) * (np.clip(tech_lead, 0, 100) / 100.0)
+    return -rate * values + protection
+
+
 ODE_PRESETS: dict[str, Any] = {
     "decay": _decay,
     "logistic": _logistic,
@@ -87,6 +117,8 @@ ODE_PRESETS: dict[str, Any] = {
     "supply_consumption": _supply_consumption,
     "pollution_spread": _pollution_spread,
     "resource_depletion": _resource_depletion,
+    "competitive_logistic": _competitive_logistic,
+    "cash_flow_dynamics": _cash_flow_dynamics,
 }
 
 # Cross-metric dependencies for logging warnings
@@ -94,6 +126,7 @@ _ODE_DEPS: dict[str, list[str]] = {
     "supply_consumption": ["strength"],
     "pollution_spread": ["factory_output", "green_coverage"],
     "resource_depletion": ["population"],
+    "cash_flow_dynamics": ["supply_chain", "tech_lead"],
 }
 
 

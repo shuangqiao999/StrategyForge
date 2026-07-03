@@ -297,6 +297,18 @@ class RuleEngine:
 
     # ── 存亡 ──
     def is_alive(self, state: EntityState) -> bool:
+        elim = self.pack.get("elimination")
+        if elim and elim.get("mode") == "weighted_score":
+            weights = elim.get("weights", {})
+            hard = elim.get("hard_core", {})
+            score = sum(state.get_metric(m) * w for m, w in weights.items())
+            threshold = float(elim.get("threshold_score", 30.0))
+            if score < threshold:
+                return False
+            for m, floor in hard.items():
+                if state.get_metric(m) <= float(floor):
+                    return False
+            return True
         return state.is_alive(self.pack["thresholds"])
 
     # ── 结构化胜利条件 → 客观判胜负 ──

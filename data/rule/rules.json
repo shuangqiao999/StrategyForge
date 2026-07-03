@@ -1956,11 +1956,11 @@
         "supply": -12,
         "fatigue": 10,
         "morale": -5,
-        "cash_flow": -10,
+        "cash_flow": -12,
         "supply_chain": -5,
-        "support_rate": -3,
-        "intl_relations": -8,
-        "unity": -2
+        "support_rate": 5,
+        "intl_relations": -12,
+        "unity": 4
       },
       "economic_mobilization": {
         "cash_flow": -12,
@@ -1972,10 +1972,10 @@
       },
       "diplomatic_engagement": {
         "intl_relations": 12,
-        "support_rate": 2,
-        "public_trust": 3,
-        "cash_flow": 5,
-        "unity": 2
+        "cash_flow": 3,
+        "fatigue": 6,
+        "support_rate": -2,
+        "public_trust": -1
       },
       "tech_investment": {
         "cash_flow": -20,
@@ -1994,9 +1994,10 @@
       "trade_warfare": {
         "cash_flow": -8,
         "supply_chain": 10,
-        "support_rate": -3,
-        "intl_relations": -10,
-        "public_trust": -4
+        "support_rate": 6,
+        "intl_relations": -12,
+        "public_trust": -4,
+        "polarization": 4
       },
       "defensive_buildup": {
         "strength": -3,
@@ -2039,6 +2040,27 @@
       }
     },
     "conditional_effects": {
+      "tech_catchup_bonus": {
+        "condition": "tech_lead < 50",
+        "self_effects": {
+          "tech_lead": 6,
+          "strength": 2
+        }
+      },
+      "tech_overreach_penalty": {
+        "condition": "tech_lead > 85",
+        "self_effects": {
+          "polarization": 4,
+          "public_trust": -3
+        }
+      },
+      "economic_resilience": {
+        "condition": "cash_flow < 15 and supply_chain > 70",
+        "self_effects": {
+          "cash_flow": 4,
+          "support_rate": 2
+        }
+      },
       "offensive_weariness": {
         "condition": "fatigue > 65",
         "self_effects": {
@@ -2051,13 +2073,6 @@
         "self_effects": {
           "supply_chain": 5,
           "morale": 3
-        }
-      },
-      "tech_catchup_bonus": {
-        "condition": "tech_lead < 30",
-        "self_effects": {
-          "tech_lead": 8,
-          "strength": 3
         }
       },
       "propaganda_backfire": {
@@ -2172,6 +2187,18 @@
           "intl_relations": -5,
           "public_trust": -5
         }
+      },
+      "cash_flow_protection": {
+        "condition": "cash_flow < 15 and strength > 70 and supply_chain > 60",
+        "effects": {
+          "cash_flow": 3
+        }
+      },
+      "economic_resilience_auto": {
+        "condition": "cash_flow < 20 and tech_lead > 50",
+        "effects": {
+          "cash_flow": 2
+        }
       }
     },
     "modules": {
@@ -2187,9 +2214,9 @@
         "equations": {
           "fatigue": "fatigue_recovery",
           "supply": "supply_consumption",
-          "cash_flow": "decay",
+          "cash_flow": "cash_flow_dynamics",
           "supply_chain": "supply_consumption",
-          "tech_lead": "logistic"
+          "tech_lead": "competitive_logistic"
         },
         "params": {
           "fatigue": {
@@ -2199,13 +2226,19 @@
             "_supply_base_rate": 0.15
           },
           "cash_flow": {
-            "_decay_rate": 0.01
+            "_decay_rate": 0.008,
+            "_base_recovery": 1.5,
+            "_scale_protection": 10.0
           },
           "supply_chain": {
             "_supply_base_rate": 0.1
           },
           "tech_lead": {
-            "_carrying_capacity": 100
+            "_carrying_capacity": 100,
+            "_logistic_rate": 0.06,
+            "_global_mean": 50,
+            "_diffusion_rate": 0.015,
+            "_competition_factor": 0.3
           }
         }
       },
@@ -2279,6 +2312,25 @@
             "target": ""
           }
         }
+      }
+    },
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "strength": 0.25,
+        "morale": 0.1,
+        "supply": 0.1,
+        "cash_flow": 0.15,
+        "supply_chain": 0.1,
+        "support_rate": 0.1,
+        "unity": 0.1,
+        "tech_lead": 0.05,
+        "public_trust": 0.05
+      },
+      "threshold_score": 30.0,
+      "hard_core": {
+        "strength": 8,
+        "cash_flow": 3
       }
     }
   }

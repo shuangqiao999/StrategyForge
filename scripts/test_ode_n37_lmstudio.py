@@ -59,8 +59,8 @@ def test_ode_n37():
           f'{ctx2.arrays["fatigue"][0]:.2f} < {init_m["fatigue"]}')
     check("supply下降(消耗)", ctx2.arrays["supply"][0] < init_m["supply"],
           f'{ctx2.arrays["supply"][0]:.2f} < {init_m["supply"]}')
-    check("cash_flow下降(decay)", ctx2.arrays["cash_flow"][0] < init_m["cash_flow"],
-          f'{ctx2.arrays["cash_flow"][0]:.2f} < {init_m["cash_flow"]}')
+    check("cash_flow变化(新dynamics方程)", abs(ctx2.arrays["cash_flow"][0] - init_m["cash_flow"]) > 0.01,
+          f'{ctx2.arrays["cash_flow"][0]:.2f} vs {init_m["cash_flow"]}')
 
 
 # ── Test 3: Full pipeline (3 agents, military domain for LLM test) ──
