@@ -5,10 +5,13 @@ Controlled by FORGE_DISABLE_NUMBA env var for environments where numba is unavai
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _USE_NUMBA = os.getenv("FORGE_DISABLE_NUMBA", "").strip().lower() not in ("1", "true", "yes")
 
@@ -20,6 +23,11 @@ if _USE_NUMBA:
         _HAS_NUMBA = False
 else:
     _HAS_NUMBA = False
+
+if _HAS_NUMBA:
+    logger.info("[JIT] batch delta acceleration: numba JIT enabled")
+else:
+    logger.info("[JIT] batch delta acceleration: numpy fallback (numba not available)")
 
 
 def batch_apply_deltas(

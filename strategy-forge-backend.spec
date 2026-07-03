@@ -31,7 +31,16 @@ hiddenimports += [
     'scipy.integrate._ivp',
     'scipy.integrate._ivp.rk',
     'scipy.integrate._ivp.common',
+    'numba',
+    'numba.core',
+    'numba.core.types',
+    'numba.core.typing',
+    'numba.targets',
+    'llvmlite',
+    'llvmlite.binding',
 ]
+hiddenimports += collect_submodules('numba')
+hiddenimports += collect_submodules('llvmlite')
 
 a = Analysis(
     ['src/strategy_forge/main.py'],
@@ -109,6 +118,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['VCRUNTIME140.dll', 'python3.dll', '*.pyd', 'llvmlite*.dll'],
     name='strategy-forge-backend',
 )
