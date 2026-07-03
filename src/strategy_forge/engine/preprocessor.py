@@ -30,15 +30,45 @@ class PreprocessResult:
 
 def _merge_entity_dicts(jieba_entities: dict[str, set[str]],
                         llm_entities: dict[str, set[str]]) -> dict[str, set[str]]:
-    """Merge LLM-discovered entities into jieba entity dict. Dedup by name."""
+    """Merge LLM-discovered entities into jieba entity dict. Dedup by name with fuzzy matching."""
     merged = dict(jieba_entities)
     for name, _aliases in llm_entities.items():
         key = name.strip()
         if not key:
             continue
-        if key not in merged:
+        # Fuzzy dedup: check if this name is a near-match of any existing entity
+        existing = _find_fuzzy_match(key, merged.keys())
+        if existing:
+            merged[existing].update(_aliases or set())
+            logger.debug("[Preprocessor] fuzzy merge: %s → %s", key, existing)
+        elif key not in merged:
             merged[key] = set()
     return merged
+
+
+def _find_fuzzy_match(name: str, candidates, max_edit_dist: int = 2) -> str | None:
+    """Find near-match in candidates using Levenshtein distance or substring containment."""
+    for c in candidates:
+        if len(name) >= 3 and len(c) >= 3 and (name in c or c in name):
+            return c  # substring containment (handles "赖清德" vs "赖清德（台湾）")
+        if _levenshtein(name, c) <= max_edit_dist:
+            return c
+    return None
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Pure Python Levenshtein distance — no external dependency."""
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if len(b) == 0:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (ca != cb)))
+        prev = curr
+    return prev[-1]
 
 
 class DeductionPreprocessor:
