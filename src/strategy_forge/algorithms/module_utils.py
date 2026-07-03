@@ -6,66 +6,80 @@ from typing import Any
 import numpy as np
 
 from .base import AlgorithmModule, ModuleContext, SpatialState, arrays_to_states, states_to_arrays
+from .fsm_module import FiniteStateMachineModule
 from .ode_module import ODEModule
+from .opinion_dynamics import OpinionDynamicsModule
 from .physics_module import PhysicsModule
+from .pipeline_engine import PipelineEngine
+
+
+# ── Module class registry (maps config keys to concrete classes) ──
+_MODULE_CLASSES: dict[str, type[AlgorithmModule]] = {
+    "ode_engine": ODEModule,
+    "physics_engine": PhysicsModule,
+    "opinion_dynamics": OpinionDynamicsModule,
+    "finite_state_machine": FiniteStateMachineModule,
+}
+
+
+def build_pipeline(rule_engine: Any) -> PipelineEngine:
+    """Build a PipelineEngine with all modules configured from rule pack.
+
+    Reads rules.json modules.pipeline.order for execution order.
+    Falls back to [ode_engine, physics_engine] if no pipeline config exists.
+    """
+    pack: dict[str, Any] = getattr(rule_engine, "pack", {})
+    pack_modules: dict[str, Any] = pack.get("modules", {})
+    pipeline_cfg: dict[str, Any] = pack_modules.get("pipeline", {})
+    metrics: list[str] = pack.get("metrics", [])
+
+    # ODE preset auto-matching (fallback when no equations defined)
+    ode_preset_map = {
+        "fatigue": "fatigue_recovery", "supply": "supply_consumption",
+        "pollution": "pollution_spread", "resources": "resource_depletion",
+        "population": "logistic", "economy": "logistic",
+        "market_share": "logistic", "cash_flow": "decay", "brand": "logistic",
+    }
+
+    engine = PipelineEngine()
+
+    order = pipeline_cfg.get("order", ["ode_engine", "physics_engine"])
+
+    for name in order:
+        cls = _MODULE_CLASSES.get(name)
+        if cls is None:
+            continue
+        cfg = dict(pack_modules.get(name, {}))
+
+        # ODE auto-config: fill equations from preset map if empty
+        if name == "ode_engine" and not cfg.get("equations"):
+            final_eqs: dict[str, str] = {}
+            for metric in metrics:
+                for pattern, preset in ode_preset_map.items():
+                    if pattern in metric:
+                        final_eqs[metric] = preset
+                        break
+            cfg["equations"] = final_eqs
+
+        module = cls()
+        module.configure(cfg)
+        engine.register(module)
+
+    return engine
 
 
 def build_module_chain(rule_engine: Any) -> list[AlgorithmModule]:
-    """Create the default algorithm module chain from a RuleEngine instance.
-
-    Configuration priority: rules.json ``modules`` section > built-in presets.
-    If a rule pack has no ``modules`` key, behaviour is identical to before.
-    """
-    modules: list[AlgorithmModule] = []
+    """Backward-compat: returns module list from build_pipeline."""
+    engine = build_pipeline(rule_engine)
+    result: list[AlgorithmModule] = []
+    # Get order from pipeline config
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
-    pack_modules: dict[str, Any] = pack.get("modules", {})
-
-    # ── ODE module ──
-    ode_user_eqs: dict[str, str] = pack_modules.get("ode_engine", {}).get("equations", {})
-    # Built-in name→preset mapping (fallback when no user definition exists)
-    ode_preset_map = {
-        "fatigue": "fatigue_recovery",
-        "supply": "supply_consumption",
-        "pollution": "pollution_spread",
-        "resources": "resource_depletion",
-        "population": "logistic",
-        "economy": "logistic",
-        "market_share": "logistic",
-        "cash_flow": "decay",
-        "brand": "logistic",
-    }
-    final_eqs: dict[str, str] = {}
-    for metric in pack.get("metrics", []):
-        if metric in ode_user_eqs:
-            final_eqs[metric] = ode_user_eqs[metric]       # user override
-        else:
-            for pattern, preset in ode_preset_map.items():   # fallback preset
-                if pattern in metric:
-                    final_eqs[metric] = preset
-                    break
-    ode_cfg: dict[str, Any] = {
-        "sub_steps": int(pack_modules.get("ode_engine", {}).get("sub_steps", 4)),
-        "equations": final_eqs,
-    }
-    ode = ODEModule()
-    ode.configure(ode_cfg)
-    modules.append(ode)
-
-    # ── Physics module ──
-    phys_user: dict[str, Any] = pack_modules.get("physics_engine", {})
-    phys_cfg: dict[str, Any] = {
-        "subsystems": phys_user.get("subsystems", ["dynamics", "collision", "diffusion", "explosion"]),
-        "gravity": float(phys_user.get("gravity", 9.8)),
-        "damping": float(phys_user.get("damping", 0.98)),
-        "collision_elasticity": float(phys_user.get("collision_elasticity", 0.5)),
-        "diffusion_rate": float(phys_user.get("diffusion_rate", 0.05)),
-        "explosion_sources": phys_user.get("explosion_sources", []),
-    }
-    phys = PhysicsModule()
-    phys.configure(phys_cfg)
-    modules.append(phys)
-
-    return modules
+    order = pack.get("modules", {}).get("pipeline", {}).get("order", ["ode_engine", "physics_engine"])
+    for name in order:
+        mod = engine.get(name)
+        if mod is not None:
+            result.append(mod)
+    return result
 
 
 def build_context(

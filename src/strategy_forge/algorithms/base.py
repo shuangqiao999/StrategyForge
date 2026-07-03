@@ -96,7 +96,15 @@ class ModuleContext:
 
 
 class AlgorithmModule(ABC):
-    """Abstract base for all algorithm modules — domain-agnostic."""
+    """Abstract base for all algorithm modules — domain-agnostic.
+
+    Subclasses may optionally define:
+      - REQUIRED_SIGNALS: list[str] — metadata keys that must exist in ctx before execute.
+      - OUTPUT_SIGNALS: list[str] — metadata keys this module writes to ctx.
+    """
+
+    REQUIRED_SIGNALS: list[str] = []
+    OUTPUT_SIGNALS: list[str] = []
 
     @property
     @abstractmethod
@@ -113,6 +121,13 @@ class AlgorithmModule(ABC):
     def configure(self, params: dict[str, Any]) -> None:
         """Optional module-specific configuration. Called before execute()."""
         pass
+
+    def _validate(self, ctx: ModuleContext) -> bool:
+        """Check that all REQUIRED_SIGNALS are present in ctx.metadata."""
+        for sig in self.REQUIRED_SIGNALS:
+            if sig not in ctx.metadata:
+                return False
+        return True
 
     @abstractmethod
     def execute(self, ctx: ModuleContext) -> ModuleContext:
