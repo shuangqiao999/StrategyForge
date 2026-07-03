@@ -411,6 +411,12 @@ class DeductionOrchestrator:
             self._log("simulation", f"  第 {rnd} 轮完成: {len(result.actions)} 个动作")
             if self._round_callback:
                 self._round_callback(rnd, total_rounds)
+            # Persist token stats incrementally (survives pause/interrupt)
+            from strategy_forge.core.token_counter import accumulator
+            stats = accumulator.get_session_stats(self.session.id)
+            if stats:
+                self.store.update(self.session.id,
+                                  token_json=_json.dumps(stats, ensure_ascii=False))
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "

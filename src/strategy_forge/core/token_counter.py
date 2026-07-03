@@ -48,7 +48,7 @@ class TokenAccumulator:
         tot.completion_tokens += stats.completion_tokens
         tot.total_tokens += stats.total_tokens
         tot.duration_ms += stats.duration_ms
-        if phase == "simulation" and round_num > 0:
+        if phase == "simulation" and round_num >= 0:
             rounds: dict = entry["rounds"]  # type: ignore[assignment]
             if round_num not in rounds:
                 rounds[round_num] = TokenStats()

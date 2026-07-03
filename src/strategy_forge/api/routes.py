@@ -154,6 +154,9 @@ async def delete_session(session_id: str, request: Request):
         engine.delete_session(session_id)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    # Cleanup accumulator to free memory
+    from strategy_forge.core.token_counter import accumulator
+    accumulator.remove_session(session_id)
     return {"deleted": session_id}
 
 

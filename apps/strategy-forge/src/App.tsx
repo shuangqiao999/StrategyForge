@@ -300,7 +300,7 @@ export default function App() {
         const d = await r.json();
         setTokenData(d.stats && Object.keys(d.stats).length > 0 ? d.stats : null);
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { console.error("Token fetch failed:", e.message); }
   }, []);
 
   const fetchDomains = useCallback(async () => {
@@ -1284,10 +1284,13 @@ export default function App() {
                     <>
                       {/* 总览卡片 */}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 20 }}>
-                        {[
-                          { label: "总 Tokens", value: (tokenData.total_tokens / 1_000_000).toFixed(2) + " M", color: "#3b82f6" },
-                          { label: "输入", value: (tokenData.total_prompt_tokens / 1_000_000).toFixed(2) + " M", color: "#8b5cf6" },
-                          { label: "输出", value: (tokenData.total_completion_tokens / 1_000_000).toFixed(2) + " M", color: "#06b6d4" },
+                        {(() => {
+                          const fmt = (n: number) => n < 10000 ? `${n}` : n < 1_000_000 ? `${(n / 1000).toFixed(1)}K` : `${(n / 1_000_000).toFixed(2)}M`;
+                          const t = (n: number) => `${fmt(n)} (入${fmt(tokenData.total_prompt_tokens)}/出${fmt(tokenData.total_completion_tokens)})`;
+                          return [
+                          { label: "总 Tokens", value: fmt(tokenData.total_tokens), color: "#3b82f6" },
+                          { label: "输入", value: fmt(tokenData.total_prompt_tokens), color: "#8b5cf6" },
+                          { label: "输出", value: fmt(tokenData.total_completion_tokens), color: "#06b6d4" },
                           { label: "输入/输出比", value: tokenData.total_prompt_tokens > 0 ? `1:${(tokenData.total_completion_tokens / tokenData.total_prompt_tokens).toFixed(2)}` : "N/A", color: "#f59e0b" },
                         ].map(c => (
                           <div key={c.label} style={{ background: "#0f172a", borderRadius: 8, padding: 12, borderLeft: `3px solid ${c.color}` }}>
@@ -1306,14 +1309,14 @@ export default function App() {
                               <div key={phase} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ width: 80, fontSize: 12, color: "#94a3b8", textAlign: "right", flexShrink: 0 }}>{phase === "ontology" ? "本体生成" : phase === "quantify" ? "量化识别" : phase === "graph" ? "图谱构建" : phase === "agents" ? "智能体工厂" : phase === "simulation" ? "模拟推演" : phase === "report" ? "报告生成" : phase === "resume" ? "续推恢复" : phase}</span>
                                 <div style={{ flex: 1, height: 20, background: "#0f172a", borderRadius: 4, overflow: "hidden", display: "flex" }}>
-                                  {tokenData.total_tokens > 0 && (
+                                   {tokenData.total_tokens > 0 && (
                                     <>
-                                      <div style={{ height: "100%", background: "#8b5cf6", width: `${(pdata.prompt / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输入 ${(pdata.prompt/1_000_000).toFixed(2)}M`} />
-                                      <div style={{ height: "100%", background: "#06b6d4", width: `${(pdata.completion / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输出 ${(pdata.completion/1_000_000).toFixed(2)}M`} />
+                                      <div style={{ height: "100%", background: "#8b5cf6", width: `${(pdata.prompt / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输入 ${pdata.prompt.toLocaleString()}`} />
+                                      <div style={{ height: "100%", background: "#06b6d4", width: `${(pdata.completion / tokenData.total_tokens * 100).toFixed(1)}%` }} title={`输出 ${pdata.completion.toLocaleString()}`} />
                                     </>
                                   )}
                                 </div>
-                                <span style={{ width: 60, fontSize: 11, color: "#64748b", textAlign: "left", flexShrink: 0 }}>{(pdata.total / 1_000_000).toFixed(2)} M</span>
+                                <span style={{ width: 60, fontSize: 11, color: "#64748b", textAlign: "left", flexShrink: 0 }}>{pdata.total < 10000 ? pdata.total : pdata.total < 1_000_000 ? (pdata.total/1000).toFixed(1) + "K" : (pdata.total/1_000_000).toFixed(2) + "M"}</span>
                               </div>
                             ))}
                           </div>
@@ -1341,8 +1344,10 @@ export default function App() {
                                   {/* Y axis labels */}
                                   {[0, 1, 2, 3, 4].map(i => {
                                     const y = chartH - (i / 4) * chartH + 10;
-                                    const val = (maxTotal / 1_000_000 * i / 4).toFixed(1);
-                                    return <text key={i} x={padL - 8} y={y + 4} textAnchor="end" fill="#64748b" fontSize={10}>{val}M</text>;
+                                    const val = maxTotal < 10000 ? (maxTotal * i / 4).toFixed(0)
+                                      : maxTotal < 1_000_000 ? ((maxTotal / 1000) * i / 4).toFixed(1) + "K"
+                                      : ((maxTotal / 1_000_000) * i / 4).toFixed(1) + "M";
+                                    return <text key={i} x={padL - 8} y={y + 4} textAnchor="end" fill="#64748b" fontSize={10}>{val}</text>;
                                   })}
                                   {/* Grid lines */}
                                   {[0, 1, 2, 3, 4].map(i => {
@@ -1360,7 +1365,7 @@ export default function App() {
                                         <rect x={x} y={yBase - hPrompt - hCompl} width={barW} height={hPrompt} fill="#8b5cf6" rx={2} />
                                         <rect x={x} y={yBase - hCompl} width={barW} height={hCompl} fill="#06b6d4" rx={2} />
                                         <text x={x + barW / 2} y={yBase + 14} textAnchor="middle" fill="#64748b" fontSize={9}>R{rnd}</text>
-                                        <title>{`R${rnd}: 入${(rdata.prompt/1_000_000).toFixed(3)}M 出${(rdata.completion/1_000_000).toFixed(3)}M 合计${(rdata.total/1_000_000).toFixed(3)}M`}</title>
+                                        <title>{`R${rnd}: 入${rdata.prompt.toLocaleString()} 出${rdata.completion.toLocaleString()} 合计${rdata.total.toLocaleString()}`}</title>
                                       </g>
                                     );
                                   })}
