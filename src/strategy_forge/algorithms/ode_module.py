@@ -145,6 +145,10 @@ class ODEModule(AlgorithmModule):
             for k in keys:
                 views[k] = y[start:start + n]
                 start += n
+            # Merge scalar ODE params from ctx.metadata as actual scalars
+            ode_params = ctx.metadata.get("ode_params", {})
+            for k, v in ode_params.items():
+                views[k] = float(v)
             deriv_parts: list[np.ndarray] = []
             for k in keys:
                 eq_name = self._ode_defs.get(k, "")
@@ -181,13 +185,18 @@ class ODEModule(AlgorithmModule):
         """Simple Euler integration — no scipy dependency."""
         keys = list(ctx.arrays.keys())
         self._check_deps(ctx, keys)
+        # Build augmented context with scalar ODE params
+        ode_params = ctx.metadata.get("ode_params", {})
+        augmented = dict(ctx.arrays)
+        for k, v in ode_params.items():
+            augmented[k] = float(v)
         sub_dt = ctx.dt / max(self._sub_steps, 1)
         for _ in range(self._sub_steps):
             for key in keys:
                 eq_name = self._ode_defs.get(key, "")
                 eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
                 if eq_fn is not None:
-                    dy = eq_fn(ctx.arrays[key], ctx.arrays)
+                    dy = eq_fn(ctx.arrays[key], augmented)
                 else:
                     dy = np.zeros_like(ctx.arrays[key])
                 ctx.arrays[key] = ctx.arrays[key] + dy * sub_dt

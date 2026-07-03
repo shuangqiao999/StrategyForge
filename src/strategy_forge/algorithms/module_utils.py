@@ -146,12 +146,13 @@ def build_context(
     extracted = pack.get("ode_params", {})
     if isinstance(extracted, dict) and "params" in extracted:
         ode_params.update(extracted["params"])
-    for metric, param_dict in ode_params.items():
-        if isinstance(param_dict, dict):
-            for key, val in param_dict.items():
-                ctx_key = key if key.startswith("_") else f"_{key}"
-                if ctx_key not in ctx.arrays:
-                    ctx.arrays[ctx_key] = np.full(len(entity_ids), float(val), dtype=np.float64)
+    if ode_params:
+        ctx.metadata.setdefault("ode_params", {})
+        for metric, param_dict in ode_params.items():
+            if isinstance(param_dict, dict):
+                for key, val in param_dict.items():
+                    ctx_key = key if key.startswith("_") else f"_{key}"
+                    ctx.metadata["ode_params"][ctx_key] = float(val)
 
     # Inject physics explosion sources from rules.json + extractor fallback
     phys_cfg = pack.get("modules", {}).get("physics_engine", {})
