@@ -1228,7 +1228,7 @@
           },
           "intervention": null,
           "expansion": {
-            "action_type": "expand",
+            "action_type": "expand_habitat",
             "intensity": 0.5,
             "target": ""
           }
@@ -1651,7 +1651,7 @@
             "from": "research",
             "to": "launch",
             "condition": {
-              "rnd": [
+              "tech_lead": [
                 ">",
                 70
               ],
@@ -1665,7 +1665,7 @@
             "from": "launch",
             "to": "research",
             "condition": {
-              "rnd": [
+              "tech_lead": [
                 "<",
                 30
               ]
@@ -1674,7 +1674,7 @@
         ],
         "action_map": {
           "research": {
-            "action_type": "invest_rnd",
+            "action_type": "invest_rd",
             "intensity": 0.5,
             "target": ""
           },
@@ -1857,10 +1857,6 @@
               "public_trust": [
                 ">",
                 50
-              ],
-              "morale": [
-                ">",
-                40
               ]
             }
           },
@@ -1878,7 +1874,7 @@
             "from": "defensive",
             "to": "monitor",
             "condition": {
-              "defense": [
+              "media_reach": [
                 ">",
                 60
               ]
@@ -1893,7 +1889,7 @@
           },
           "offensive": null,
           "defensive": {
-            "action_type": "countermeasure",
+            "action_type": "fact_check",
             "intensity": 0.7,
             "target": ""
           }
@@ -2278,7 +2274,7 @@
           },
           "engage": null,
           "retreat": {
-            "action_type": "maneuver",
+            "action_type": "defensive_buildup",
             "intensity": 0.5,
             "target": ""
           }

@@ -93,8 +93,6 @@ def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
                     f"{metrics}. Check rules.json transition_rules."
                 )
 
-    return engine
-
 
 def build_module_chain(rule_engine: Any) -> list[AlgorithmModule]:
     """Backward-compat: returns module list from build_pipeline."""
