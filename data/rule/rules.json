@@ -242,10 +242,95 @@
       },
       "pipeline": {
         "order": [
+          "finite_state_machine",
           "ode_engine",
           "physics_engine"
         ],
         "conditionals": {}
+      },
+      "finite_state_machine": {
+        "default_state": "patrol",
+        "command_states": [
+          "combat"
+        ],
+        "transition_rules": [
+          {
+            "from": "patrol",
+            "to": "combat",
+            "condition": {
+              "strength": [
+                ">",
+                80
+              ],
+              "morale": [
+                ">",
+                50
+              ]
+            }
+          },
+          {
+            "from": "combat",
+            "to": "retreat",
+            "condition": {
+              "strength": [
+                "<",
+                30
+              ]
+            }
+          },
+          {
+            "from": "retreat",
+            "to": "patrol",
+            "condition": {
+              "supply": [
+                ">",
+                60
+              ]
+            }
+          },
+          {
+            "from": "patrol",
+            "to": "defend",
+            "condition": {
+              "morale": [
+                "<",
+                30
+              ]
+            }
+          },
+          {
+            "from": "defend",
+            "to": "combat",
+            "condition": {
+              "strength": [
+                ">",
+                70
+              ],
+              "supply": [
+                ">",
+                50
+              ]
+            }
+          }
+        ],
+        "action_map": {
+          "patrol": {
+            "action_type": "maneuver",
+            "intensity": 0.3,
+            "target": ""
+          },
+          "retreat": {
+            "action_type": "maneuver",
+            "intensity": 0.9,
+            "target": ""
+          },
+          "defend": {
+            "action_type": "defend",
+            "intensity": 0.6,
+            "target": ""
+          },
+          "combat": null
+        }
       }
     }
   },

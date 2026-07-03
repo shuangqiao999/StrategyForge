@@ -517,11 +517,29 @@ class SimulationEngine:
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
         # 逐代理决策（逐个等待，确保取消信号在代理之间能被及时检测）
+        # ── FSM 分流：上一轮的 FSM 状态决定本轮哪些代理走 LLM ──
+        fsm_states = getattr(self, "_last_fsm_states", None)
+        fsm_actions = getattr(self, "_last_fsm_actions", None)
+        fsm_command = getattr(self, "_last_fsm_command_states", {"combat"})
         decisions: list[dict[str, Any]] = []
+
         for i, agent in enumerate(ordered):
             if self._cancel is not None and self._cancel.is_set():
                 self._log("simulation", f"取消信号：已处理 {i}/{len(ordered)} 代理后停止")
                 return sim_round
+            # Check if FSM should drive this agent
+            state = fsm_states[i] if fsm_states is not None and i < len(fsm_states) else None
+            if state is not None and state not in fsm_command:
+                # FSM deterministic action — skip LLM
+                act = None
+                if fsm_actions is not None and i < len(fsm_actions) and fsm_actions[i]:
+                    act = fsm_actions[i]
+                if act is None:
+                    act = {"action_type": "observe", "intensity": 0.3, "target": "", "rationale": f"[FSM] {state}"}
+                act["actor_id"] = agent.entity_id
+                decisions.append(act)
+                continue
+            # LLM decision for command-state agents
             raw = await decide(agent)
             if isinstance(raw, BaseException):
                 self._log("simulation", f"agent {agent.name} 决策失败: {raw}")
@@ -585,6 +603,13 @@ class SimulationEngine:
             # Cache spatial state for next round's decision prompts
             if hasattr(ctx, "spatial"):
                 self._spatial_state = ctx.spatial
+            # Save FSM state for next round's agent decision split
+            if "fsm.agent_states" in ctx.metadata:
+                self._last_fsm_states = list(ctx.metadata["fsm.agent_states"])
+                self._last_fsm_actions = list(ctx.metadata.get("fsm.agent_actions", []))
+                self._last_fsm_command_states = set(
+                    ctx.metadata.get("fsm.command_states", ["combat"])
+                )
 
         # 构造行动 + 内存事件历史
         for dec in decisions:
