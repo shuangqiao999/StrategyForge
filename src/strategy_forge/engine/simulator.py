@@ -391,6 +391,9 @@ class SimulationEngine:
         alive_id_to_idx = {eid: i for i, eid in enumerate(alive_ids)} if alive_ids else {}
 
         def others_ctx(self_id: str) -> str:
+            if len(alive_agents) > 30:
+                return _build_summary_ctx(self_id, alive_agents, states, alive_id_to_idx,
+                                          self._spatial_state, re_engine)
             lines = []
             idx_self = alive_id_to_idx.get(self_id)
             for a in alive_agents:
@@ -429,6 +432,53 @@ class SimulationEngine:
                         line += f"  距离: {dist:.0f}m"
                 lines.append(line)
             return "\n".join(lines) or "（无其他参与方）"
+
+        def _build_summary_ctx(self_id, alive_agents, states, id_to_idx, spatial_state, re_engine):
+            """N>30: bucket entities by distance + show global averages. Keeps prompts O(1)."""
+            import numpy as _np
+            ml = []
+            idx_self = id_to_idx.get(self_id)
+            metrics_list = re_engine.metrics()
+            buckets = {"close": [], "mid": [], "far": []}
+            for a in alive_agents:
+                if a.entity_id == self_id: continue
+                st = states[a.entity_id]
+                dist = 9999.0
+                if spatial_state is not None and idx_self is not None:
+                    idx_other = id_to_idx.get(a.entity_id)
+                    if idx_other is not None and idx_self < len(spatial_state.positions) and idx_other < len(spatial_state.positions):
+                        dvec = spatial_state.positions[idx_self] - spatial_state.positions[idx_other]
+                        dist = float(_np.linalg.norm(dvec))
+                entry = {"name": st.name, "metrics": dict(st.metrics), "dist": dist}
+                if dist < 50: buckets["close"].append(entry)
+                elif dist < 200: buckets["mid"].append(entry)
+                else: buckets["far"].append(entry)
+            def _s(e, cnt):
+                m = e["metrics"]
+                kv = ", ".join(f"{k}={m.get(k,0):.0f}" for k in metrics_list[:cnt])
+                return f"{e['name']}({kv}, d={e['dist']:.0f}m)"
+            if buckets["close"]:
+                buckets["close"].sort(key=lambda e: e["dist"])
+                ml.append(f"邻近威胁（<50m, {len(buckets['close'])}个）:")
+                for e in buckets["close"][:8]: ml.append(f"  {_s(e, 4)}")
+            if buckets["mid"]:
+                buckets["mid"].sort(key=lambda e: e["dist"])
+                ml.append(f"中等距离（50-200m, {len(buckets['mid'])}个）:")
+                for e in buckets["mid"][:5]: ml.append(f"  {_s(e, 2)}")
+            fc = len(buckets["far"])
+            if fc > 0: ml.append(f"远处（>200m, {fc}个）")
+            all_m = [_np.array(list(states[e.entity_id].metrics.values()), dtype=_np.float64)
+                      for e in alive_agents if e.entity_id != self_id]
+            if all_m:
+                arr = _np.stack(all_m)
+                avgs = _np.mean(arr, axis=0)
+                mins = _np.min(arr, axis=0)
+                maxs = _np.max(arr, axis=0)
+                parts = []
+                for i, m in enumerate(metrics_list):
+                    parts.append(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]")
+                ml.append("全局统计: " + ", ".join(parts))
+            return "\n".join(ml) if ml else "（无其他参与方）"
 
         def env_context() -> str:
             """Build terrain/weather description for the LLM prompt."""
