@@ -55,31 +55,51 @@ class DeductionOrchestrator:
         self._max_actions: int = 3
 
     async def run(self) -> DeductionSession:
+        import time as _time
+
         session_id = self.session.id
         _current_session.set(session_id)
+        _total_start = _time.monotonic()
+        _phase_times: dict[str, float] = {}
+
+        async def _timed_phase(name: str, fn):
+            t0 = _time.monotonic()
+            await fn()
+            dt = _time.monotonic() - t0
+            _phase_times[name] = dt
+            self._log("orchestrator", f"阶段 {name} 耗时 {dt:.1f}s")
+
         try:
             if self._resume_start_round > 0:
                 await self._resume_from_pause()
             else:
-                await self._phase1_ontology()
-                await self._phase1_5_quantify()
-                await self._phase2_graph()
-                await self._phase3_agents()
-            await self._phase4_simulation()
-            await self._phase5_report()
+                for phase_name, phase_fn in [
+                    ("ontology", self._phase1_ontology),
+                    ("quantify", self._phase1_5_quantify),
+                    ("graph", self._phase2_graph),
+                    ("agents", self._phase3_agents),
+                ]:
+                    await _timed_phase(phase_name, phase_fn)
+            await _timed_phase("simulation", self._phase4_simulation)
+            await _timed_phase("report", self._phase5_report)
+
+            _total = _time.monotonic() - _total_start
+            _detail = " | ".join(f"{k}={v:.1f}s" for k, v in _phase_times.items())
+            self._log("orchestrator", f"五阶段完成，总耗时 {_total:.1f}s | {_detail}")
 
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
             self._clear_state_snapshot(session_id)
-            self._log("orchestrator", "全部五阶段推演完成")
         except _PhaseCancelledError:
+            _total = _time.monotonic() - _total_start
+            self._log("orchestrator", f"推演已暂停（运行 {_total:.1f}s），进度已保存")
             self._save_pause_snapshot(session_id)
-            self._log("orchestrator", "推演已暂停，进度已保存")
         except Exception as e:
+            _total = _time.monotonic() - _total_start
             logger.exception("[Deduction] Pipeline failed: %s", e)
             self.store.update(session_id, status=SessionStatus.FAILED.value,
                               error=str(e)[:500])
-            self._log("orchestrator", f"推演失败: {e}")
+            self._log("orchestrator", f"推演失败（运行 {_total:.1f}s）: {e}")
         return self.session
 
     def _check_cancel(self) -> None:
