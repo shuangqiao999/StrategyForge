@@ -629,12 +629,16 @@ async def stream_deduction(session_id: str, request: Request):
                 last_log_id = max(last_log_id, log_entry.get("id", 0))
                 yield f"data: {json.dumps(log_entry, ensure_ascii=False)}\n\n"
 
-            # ── push round-complete event (triggers graph/timeline refresh) ──
+            # ── push round-complete event (triggers graph/timeline/dashboard refresh) ──
             rd = engine.get_round_data(session_id)
             cr = rd.get("round", 0)
             if cr > last_round:
                 last_round = cr
-                yield f"data: {json.dumps({'type': 'round', 'round': cr, 'total': rd.get('total', 0)}, ensure_ascii=False)}\n\n"
+                payload: dict[str, Any] = {"type": "round", "round": cr, "total": rd.get("total", 0)}
+                snap = engine.get_round_snapshot(session_id)
+                if snap:
+                    payload["snapshot"] = snap
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
             # ── push status changes (every transition, not just terminal) ──
             session = engine.get_session(session_id)

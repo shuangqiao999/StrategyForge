@@ -796,6 +796,10 @@ class SimulationEngine:
             except Exception as e:
                 logger.warning("[Simulator] 轮末叙事失败: %s", e)
 
+        # Build dashboard snapshot for frontend
+        sim_round.state_delta["snapshot"] = _build_state_snapshot(
+            states, re_engine.thresholds(), self._event_history, round_number, re_engine)
+
         return sim_round
 
     async def _narrate_round(self, client: Any, round_number: int,
@@ -869,6 +873,53 @@ def _bulk_apply_deltas(
         st = states[eid]
         for m, name in enumerate(metric_names):
             st.metrics[name] = float(metrics_arr[i, m])
+
+
+def _build_state_snapshot(states: dict, thresholds: dict, event_history: list,
+                          round_num: int, re_engine: Any) -> dict:
+    """Build structured snapshot for frontend dashboard panel (no LLM)."""
+    metrics_list = re_engine.metrics() if re_engine else []
+    # Alerts: metrics within 20% of threshold
+    alerts = []
+    for st in states.values():
+        if not hasattr(st, 'name'):
+            continue
+        for metric, threshold in thresholds.items():
+            val = st.metrics.get(metric, 0)
+            if val <= threshold * 1.2:
+                severity = "critical" if val <= threshold else "warning"
+                alerts.append({
+                    "entity": getattr(st, 'name', '?'),
+                    "metric": metric, "value": round(val, 1),
+                    "threshold": threshold, "severity": severity,
+                })
+    alerts.sort(key=lambda a: a["value"] - a["threshold"])
+    # Group stats by domain
+    groups = {}
+    for st in states.values():
+        domain = getattr(st, "domain", "generic")
+        if domain not in groups:
+            groups[domain] = {"names": [], "metrics": {m: [] for m in metrics_list}}
+        groups[domain]["names"].append(getattr(st, 'name', '?'))
+        for m in metrics_list:
+            groups[domain]["metrics"][m].append(st.metrics.get(m, 0))
+    group_stats = {}
+    for domain, data in groups.items():
+        group_stats[domain] = {
+            "count": len(data["names"]),
+            "metrics": {m: round(np.mean(vals), 1) for m, vals in data["metrics"].items() if vals},
+        }
+    # Recent events
+    recent = []
+    for e in event_history[-3:]:
+        recent.append({
+            "agent": e.get("agent_name", "?"),
+            "action": e.get("action", ""),
+            "content": (e.get("content", "") or "")[:80],
+            "round": e.get("round", round_num),
+        })
+    return {"alerts": alerts[:5], "groups": group_stats, "recent": recent,
+            "round": round_num, "entity_count": len(states)}
 
 
 def _parse_action_json(raw: str) -> dict[str, Any]:

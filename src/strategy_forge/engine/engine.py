@@ -142,14 +142,22 @@ class DeductionEngine:
     def get_stream_event(self, session_id: str) -> asyncio.Event:
         return self._ensure_event(session_id)
 
-    def signal_round_complete(self, session_id: str, round_num: int, total_rounds: int) -> None:
+    def signal_round_complete(self, session_id: str, round_num: int, total_rounds: int,
+                              snapshot: dict | None = None) -> None:
         self._round_data[session_id] = {"round": round_num, "total": total_rounds}
+        if snapshot:
+            if not hasattr(self, '_round_snapshots'):
+                self._round_snapshots = {}
+            self._round_snapshots[session_id] = snapshot
         ev = self._stream_events.get(session_id)
         if ev:
             ev.set()
 
     def get_round_data(self, session_id: str) -> dict[str, int]:
         return self._round_data.get(session_id, {})
+
+    def get_round_snapshot(self, session_id: str) -> dict | None:
+        return getattr(self, '_round_snapshots', {}).get(session_id)
 
     def cleanup_events(self, session_id: str) -> None:
         self._stream_events.pop(session_id, None)
@@ -177,7 +185,7 @@ class DeductionEngine:
             session_store=self.session_store,
             logger_fn=lambda phase, msg: self.log(session_id, phase, msg),
             cancel_event=cancel_event,
-            round_callback=lambda rnd, total: self.signal_round_complete(session_id, rnd, total),
+            round_callback=lambda rnd, total, snap=None: self.signal_round_complete(session_id, rnd, total, snap),
             resume_start_round=resume_start_round,
         )
 

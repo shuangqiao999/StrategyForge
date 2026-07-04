@@ -430,7 +430,8 @@ class DeductionOrchestrator:
             self.store.update(self.session.id, current_round=rnd)
             self._log("simulation", f"  第 {rnd} 轮完成: {len(result.actions)} 个动作")
             if self._round_callback:
-                self._round_callback(rnd, total_rounds)
+                snapshot = result.state_delta.get("snapshot") if hasattr(result, "state_delta") else None
+                self._round_callback(rnd, total_rounds, snapshot)
             # Persist token stats incrementally (survives pause/interrupt)
             from strategy_forge.core.token_counter import accumulator
             stats = accumulator.get_session_stats(self.session.id)
