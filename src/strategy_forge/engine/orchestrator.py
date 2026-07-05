@@ -382,23 +382,29 @@ class DeductionOrchestrator:
         re_engine = self._rule_engine
         states: dict[str, Any] = {}
         if re_engine is not None:
-            # Attempt seed data extraction for real-world initial metrics
+            # Seed data extraction (always on for quantified mode, snapshot-reuse on resume)
             seed_metrics: dict[str, dict[str, float]] = {}
-            try:
-                cfg_data = self.store.get(self.session.id) or {}
-                cfg = (cfg_data.get("config_json", {}) or {})
-                if isinstance(cfg, str):
-                    cfg = _json.loads(cfg)
-                if cfg.get("auto_extract_seed"):
+            cfg_data = self.store.get(self.session.id) or {}
+            cfg = (cfg_data.get("config_json", {}) or {})
+            if isinstance(cfg, str):
+                cfg = _json.loads(cfg)
+            seed_metrics = cfg.get("seed_metrics", {})
+            if seed_metrics:
+                self._log("simulation", f"种子数据从快照恢复: {len(seed_metrics)} 个实体")
+            else:
+                try:
                     from strategy_forge.engine.seed_extractor import extract_seed_metrics
                     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                     seed_metrics = await extract_seed_metrics(
                         self.session.source_material, re_engine.metrics(), LLMClient())
                     if seed_metrics:
-                        self._log("simulation",
-                                  f"种子数据提取: {len(seed_metrics)} 个实体")
-            except Exception as e:
-                self._log("simulation", f"种子数据提取失败，使用规则包默认值: {e}")
+                        detail = ", ".join(f"{n}({len(m)}指标)" for n, m in seed_metrics.items())
+                        self._log("simulation", f"种子数据提取: {len(seed_metrics)} 个实体 — {detail}")
+                        cfg["seed_metrics"] = seed_metrics
+                        self.store.update(self.session.id,
+                                          config_json=_json.dumps(cfg, ensure_ascii=False))
+                except Exception as e:
+                    self._log("simulation", f"种子数据提取失败，使用规则包默认值: {e}")
 
             for a in self._agents:
                 init = dict(re_engine.pack["initial_metrics"])
