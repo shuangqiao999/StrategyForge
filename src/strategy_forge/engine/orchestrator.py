@@ -15,6 +15,7 @@ from strategy_forge.core.token_counter import (
 )
 
 from .models import (
+    DeductionAgentProfile,
     DeductionPhase,
     DeductionSession,
     EntityState,
@@ -190,20 +191,43 @@ class DeductionOrchestrator:
         )
         self._pre_goals = cfg.get("pre_goals", [])
 
-        # 4. 从 Kuzu 图重建 Agent 列表
-        self._log("orchestrator", "从图谱重建智能体...")
+        # 4. 从 Kuzu 图恢复 Agent 列表（画像已持久化，免去重新调用 LLM）
+        self._agents = []
         try:
-            from .agent_factory import create_agents_from_graph
-            agents = await create_agents_from_graph(
-                graph=self.graph,
-                source_material=self.session.source_material,
-                log_fn=self._log,
-                preprocessor=self._preprocessor,
-            )
-            self._agents = agents
-            self.session.agent_count = len(agents)
+            stored_agents = self.graph.get_agents()
         except Exception as e:
-            logger.warning("[Orchestrator] 智能体重建失败: %s", e)
+            logger.warning("[Orchestrator] 读取已存智能体失败: %s", e)
+            stored_agents = []
+        if stored_agents:
+            self._log("orchestrator", f"从图谱恢复 {len(stored_agents)} 个智能体（复用已存画像）")
+            for a in stored_agents:
+                try:
+                    goals = _json.loads(a.get("goals") or "[]")
+                except (ValueError, TypeError):
+                    goals = []
+                self._agents.append(DeductionAgentProfile(
+                    entity_id=a.get("id", ""),
+                    name=a.get("name", ""),
+                    persona=a.get("persona", ""),
+                    background=a.get("background", ""),
+                    goals=goals if isinstance(goals, list) else [],
+                ))
+            self.session.agent_count = len(self._agents)
+        else:
+            # 兜底: 图中无 Agent 节点(旧会话/损坏)时才重建, 会重新调用 LLM
+            self._log("orchestrator", "图谱中无已存智能体，重新生成...")
+            try:
+                from .agent_factory import create_agents_from_graph
+                agents = await create_agents_from_graph(
+                    graph=self.graph,
+                    source_material=self.session.source_material,
+                    log_fn=self._log,
+                    preprocessor=self._preprocessor,
+                )
+                self._agents = agents
+                self.session.agent_count = len(agents)
+            except Exception as e:
+                logger.warning("[Orchestrator] 智能体重建失败: %s", e)
 
         # 5. 恢复量化状态 (EntityState metrics / history / pending delays)
         snapshot = self._load_state_snapshot(cfg)
@@ -490,6 +514,12 @@ class DeductionOrchestrator:
             if stats:
                 self.store.update(self.session.id,
                                   token_json=_json.dumps(stats, ensure_ascii=False))
+            # 定期裁剪日志防止表无限增长（保留窗口 >> SSE 补历史窗口 200）
+            if rnd % 5 == 0:
+                try:
+                    self.store.prune_logs(self.session.id)
+                except Exception as e:
+                    logger.debug("[Orchestrator] prune_logs skipped: %s", e)
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "

@@ -174,6 +174,22 @@ class SessionStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def prune_logs(self, session_id: str, keep: int = 500) -> int:
+        """按会话仅保留最近 keep 条日志，删除更早的行以防止表无限增长。
+
+        keep 需 >= SSE 补历史窗口(200)，避免刚连上的前端漏掉日志。返回删除行数。
+        """
+        keep = max(int(keep), 0)
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM deduction_logs WHERE session_id = ? AND id NOT IN "
+                "(SELECT id FROM deduction_logs WHERE session_id = ? "
+                " ORDER BY id DESC LIMIT ?)",
+                (session_id, session_id, keep),
+            )
+            conn.commit()
+            return cur.rowcount if cur.rowcount is not None else 0
+
     def delete(self, session_id: str) -> None:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM deduction_logs WHERE session_id = ?", (session_id,))

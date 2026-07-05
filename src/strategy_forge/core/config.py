@@ -51,6 +51,8 @@ class DeductionConfig:
         self.deduction_max_concurrent = int(os.getenv("FORGE_MAX_CONCURRENT", "2"))
         self.deduction_retrieve_top_k = int(os.getenv("FORGE_RETRIEVE_TOP_K", "5"))
         self.deduction_similarity_threshold = float(os.getenv("FORGE_SIMILARITY_THRESHOLD", "0.4"))
+        # 动态事件表混合检索(向量+BM25)开关，默认开启；开启时靠 RRF 排序而非余弦阈值。
+        self.deduction_event_hybrid = os.getenv("FORGE_EVENT_HYBRID", "1") == "1"
 
     def __getattr__(self, name: str):
         return None

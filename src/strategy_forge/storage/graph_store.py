@@ -43,7 +43,7 @@ class DeductionGraphStore:
             self._conn.execute(
                 "CREATE NODE TABLE IF NOT EXISTS Entity("
                 "id STRING, name STRING, type STRING, description STRING, "
-                "properties STRING, PRIMARY KEY(id))"
+                "PRIMARY KEY(id))"
             )
             self._conn.execute(
                 "CREATE NODE TABLE IF NOT EXISTS Agent("
@@ -83,7 +83,7 @@ class DeductionGraphStore:
             raise RuntimeError(msg)
 
     def upsert_entity(self, entity_id: str, name: str, etype: str,
-                      description: str = "", properties: str = "{}") -> None:
+                      description: str = "") -> None:
         self._check_conn()
         # Kuzu 0.11.3 支持 $param 仅限 MERGE 节点匹配，不支持 MATCH..SET = $param。
         # 因此用参数化 MERGE + 内联转义 SET（已验证无 SQL 注入风险）。
@@ -95,11 +95,10 @@ class DeductionGraphStore:
             safe_name = name.replace("'", "\\'")
             safe_type = etype.replace("'", "\\'")
             safe_desc = description.replace("'", "\\'")
-            safe_props = properties.replace("'", "\\'")
             self._conn.execute(
                 f"MATCH (e:{self.NODE_TABLE} {{id: $id}}) "
                 f"SET e.name = '{safe_name}', e.type = '{safe_type}', "
-                f"e.description = '{safe_desc}', e.properties = '{safe_props}'",
+                f"e.description = '{safe_desc}'",
                 {"id": entity_id},
             )
 
@@ -124,6 +123,17 @@ class DeductionGraphStore:
                 {"id": agent_id, "name": name, "persona": persona,
                  "bg": background, "goals": goals},
             )
+
+    def get_agents(self) -> list[dict[str, Any]]:
+        """读回已持久化的 Agent 节点（用于暂停恢复，免去重新调用 LLM 生成画像）。"""
+        rows = self.query(
+            f"MATCH (a:{self.AGENT_TABLE}) "
+            "RETURN a.id, a.name, a.persona, a.background, a.goals"
+        )
+        return [{
+            "id": r[0] or "", "name": r[1] or "", "persona": r[2] or "",
+            "background": r[3] or "", "goals": r[4] or "[]",
+        } for r in rows]
 
     def add_event(self, event_id: str, description: str, event_type: str,
                   timestamp: str, agent_id: str = "", round_number: int = 0,
@@ -286,32 +296,6 @@ class DeductionGraphStore:
         return seq[-limit:] if limit and len(seq) > limit else seq
 
     # ── 因果链（硬档）：基于 CAUSED 边的确定性归因 ──
-
-    def get_outcome_attribution(self, entity_id: str) -> dict[str, Any]:
-        """对某实体：按来源 agent 汇总 CAUSED 数值（负=致衰、正=助益），排名主因。"""
-        rows = self.query(
-            f"MATCH (a:{self.AGENT_TABLE})-[:ACTED]->(ev:{self.EVENT_TABLE})"
-            f"-[c:CAUSED]->(e:{self.NODE_TABLE} {{id: $id}}) "
-            "RETURN a.name, c.metric, sum(c.amount)",
-            {"id": entity_id},
-        )
-        by_source: dict[str, dict[str, float]] = {}
-        for r in rows:
-            src = r[0] or "?"
-            metric = r[1] or ""
-            amt = float(r[2]) if r[2] is not None else 0.0
-            m = by_source.setdefault(src, {})
-            m[metric] = m.get(metric, 0.0) + amt
-        contributors = []
-        for src, metrics in by_source.items():
-            harm = sum(v for v in metrics.values() if v < 0)
-            benefit = sum(v for v in metrics.values() if v > 0)
-            contributors.append({
-                "source": src, "harm": round(harm, 2), "benefit": round(benefit, 2),
-                "by_metric": {k: round(v, 2) for k, v in metrics.items()},
-            })
-        contributors.sort(key=lambda x: x["harm"])  # 最负(致衰最重)在前
-        return {"entity_id": entity_id, "contributors": contributors}
 
     def get_causal_summary(self, limit: int = 15) -> list[dict[str, Any]]:
         """全局"源→目标 累计指标影响"摘要，按致衰程度排序（供报告确定性归因）。"""

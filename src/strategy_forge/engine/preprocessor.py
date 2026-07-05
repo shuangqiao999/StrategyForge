@@ -96,6 +96,8 @@ class DeductionPreprocessor:
         self._recall_cache: dict[tuple, list[str]] = {}
         self._dynamic_cache: dict[tuple, list[str]] = {}
         self._fts_ready: bool = False
+        self._event_fts_ready: bool = False
+        self._event_fts_dirty: bool = False
         self.embed_cache_hits: int = 0
         self.recall_cache_hits: int = 0
 
@@ -242,6 +244,8 @@ class DeductionPreprocessor:
                 "agent_id": agent_id, "round_number": round_number,
                 "session_id": self.session_id,
             }])
+        # 事件表已变更，标记 FTS 索引需在下次检索前重建（每轮至多一次）
+        self._event_fts_dirty = True
 
     def retrieve_latest_intervention(self) -> dict | None:
         """检索最近的用户干预或不可变目标指令。
@@ -289,12 +293,35 @@ class DeductionPreprocessor:
             pass
         return None
 
+    _EVENT_EXCLUDED_TYPES = frozenset({"immutable_goal", "user_intervention"})
+
+    def _ensure_event_fts(self) -> None:
+        """按需为动态事件表建/重建 content 全文索引（混合检索用）。
+
+        事件增量写入后置 _event_fts_dirty；此处每轮至多重建一次，控制开销。
+        原生 FTS（lancedb 0.33，无需 tantivy）；失败则保持纯向量检索。
+        """
+        if self._event_table is None:
+            return
+        if self._event_fts_ready and not self._event_fts_dirty:
+            return
+        try:
+            self._event_table.create_fts_index("content", replace=True)
+            self._event_fts_ready = True
+            self._event_fts_dirty = False
+            logger.debug("[Preprocessor] Rebuilt event FTS index (hybrid enabled)")
+        except Exception as e:
+            self._event_fts_ready = False
+            logger.debug("[Preprocessor] event FTS skipped (vector-only): %s", e)
+
     def retrieve_dynamic_events(
         self, query_text: str, top_k: int = 3, min_similarity: float = 0.4,
     ) -> list[str]:
         if self._event_table is None or self._dim <= 0:
             return []
-        cache_key = (query_text[:80], top_k, min_similarity)
+        from strategy_forge.core.config import config as _cfg
+        use_hybrid = bool(getattr(_cfg, "deduction_event_hybrid", False))
+        cache_key = (query_text[:80], top_k, min_similarity, use_hybrid)
         cached = self._dynamic_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -302,23 +329,44 @@ class DeductionPreprocessor:
             query_vec = self._sync_embed_single(query_text)
         except Exception:
             return []
+        if use_hybrid:
+            self._ensure_event_fts()
+        hybrid = use_hybrid and self._event_fts_ready and bool(query_text)
         fetch_k = top_k * 3
         where_clause = "event_type NOT IN ('immutable_goal', 'user_intervention')"
         try:
-            q = self._event_table.search(query_vec).metric("cosine")
+            if hybrid:
+                q = (self._event_table.search(query_type="hybrid")
+                     .vector(query_vec).text(query_text))
+            else:
+                q = self._event_table.search(query_vec).metric("cosine")
             try:
                 q = q.where(where_clause)
             except Exception:
                 pass
             raw = q.limit(fetch_k).to_list()
         except Exception:
-            return []
+            # 混合检索若因索引/版本异常失败，兜底回退纯向量
+            if hybrid:
+                try:
+                    raw = (self._event_table.search(query_vec).metric("cosine")
+                           .limit(fetch_k).to_list())
+                    hybrid = False
+                except Exception:
+                    return []
+            else:
+                return []
         if not raw:
             return []
         min_distance = 1.0 - min_similarity
         results: list[str] = []
         for r in raw:
-            if r.get("_distance", 10.0) >= min_distance:
+            # Python 侧强制剔除目标/干预事件，保证即使 hybrid 的 where 未生效也不泄漏
+            if r.get("event_type", "") in self._EVENT_EXCLUDED_TYPES:
+                continue
+            # hybrid: 靠 RRF 融合排序 + top_k 截断，不套用余弦阈值；
+            # 纯向量: 沿用 _distance 相似度门槛过滤。
+            if not hybrid and r.get("_distance", 10.0) >= min_distance:
                 continue
             content = r.get("content", "")
             if content and content not in results:
