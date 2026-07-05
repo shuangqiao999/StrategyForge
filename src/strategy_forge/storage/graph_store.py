@@ -212,6 +212,19 @@ class DeductionGraphStore:
             rows.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
         return rows
 
+    def get_entity_names(self) -> list[str]:
+        """Return all entity names in the graph (for intelligence sorting)."""
+        self._check_conn()
+        result = self._conn.execute(
+            f"MATCH (e:{self.NODE_TABLE}) RETURN e.name"
+        )
+        names: list[str] = []
+        while result.has_next():
+            r = result.get_next()
+            if r[0]:
+                names.append(str(r[0]))
+        return names
+
     def get_entity_neighbors(self, entity_id: str, max_depth: int = 1) -> dict[str, Any]:
         """返回实体的关系邻居。
 

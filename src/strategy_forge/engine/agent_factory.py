@@ -28,6 +28,9 @@ $user_expectations
 - 名称: $name
 - 类型: $type
 - 描述: $description
+- 战略定位: $role
+- 所属组织: $parent_info
+- 下属机构: $sub_info
 
 ## 全书关键片段（LanceDB 语义检索）
 $context
@@ -53,6 +56,9 @@ $user_expectations
 - 名称: $name
 - 类型: $type
 - 描述: $description
+- 战略定位: $role
+- 所属组织: $parent_info
+- 下属机构: $sub_info
 
 ## 原文背景
 $context
@@ -74,6 +80,7 @@ async def create_agents_from_graph(
     preprocessor: DeductionPreprocessor | None = None,
     pre_interventions: list[str] | None = None,
     chat_fn: Any = None,
+    intel_list: list[dict] | None = None,
 ) -> list[DeductionAgentProfile]:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
@@ -127,6 +134,17 @@ async def create_agents_from_graph(
             log_fn("agents", f"实体去重: {len(persons)} → {len(deduped)}")
         persons = deduped
 
+    # Intelligence sorting: filter non-strategic entities
+    if intel_list:
+        intel_map = {e["name"]: e for e in intel_list if e.get("name")}
+        active_names = {e["name"] for e in intel_list if e.get("include_in_simulation")}
+        before = len(persons)
+        persons = [p for p in persons if intel_map.get(p["name"], {}).get("include_in_simulation", True)]
+        if len(persons) < before:
+            log_fn("agents", f"情报过滤: {before} → {len(persons)} 个智能体（排除非战略实体）")
+    else:
+        intel_map = {}
+
     max_agents = min(len(persons), config.deduction_max_agents)
     log_fn("agents", f"从 {len(persons)} 个实体中生成最多 {max_agents} 个智能体")
 
@@ -154,20 +172,30 @@ async def create_agents_from_graph(
                     name=person_name,
                     type=person.get("type", "Person"),
                     description=person.get("description", ""),
+                    role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
+                    parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
+                    sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                     context=full_context[:8000],
                     keywords=", ".join(keywords) if keywords else "无",
                     user_expectations=ue,
                 )
             else:
                 prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
-                    name=person_name, type=person.get("type", "Person"),
+                    name=person_name,
+                    type=person.get("type", "Person"),
                     description=person.get("description", ""),
+                    role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
+                    parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
+                    sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                     context=source_material[:2000], user_expectations=ue,
                 )
         else:
             prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
                 name=person_name, type=person.get("type", "Person"),
                 description=person.get("description", ""),
+                role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
+                parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
+                sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                 context=source_material[:2000], user_expectations=ue,
             )
 

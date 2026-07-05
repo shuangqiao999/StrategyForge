@@ -331,6 +331,22 @@ class DeductionOrchestrator:
                           status=SessionStatus.AGENTS_RUNNING.value,
                           phase=DeductionPhase.AGENTS.value)
 
+        # Phase 2.5: Intelligence sorting — classify entities before agent creation
+        self._intel_list: list[dict] = []
+        try:
+            from strategy_forge.engine.intel_sorter import sort_entities
+            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+            entity_names = list(self.graph.get_entity_names())
+            self._intel_list = await sort_entities(
+                self.session.source_material, entity_names, LLMClient())
+            if self._intel_list:
+                active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
+                passive = len(self._intel_list) - active
+                self._log("graph", f"情报整理: {len(self._intel_list)} 实体 → {active} 核心博弈者 + {passive} 非战略实体")
+        except Exception as e:
+            logger.warning("[Orchestrator] 情报整理失败，使用全部实体: %s", e)
+            self._intel_list = []
+
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")
         self._check_cancel()
@@ -350,6 +366,7 @@ class DeductionOrchestrator:
             log_fn=self._log,
             preprocessor=getattr(self, "_preprocessor", None),
             pre_interventions=pre_goals if pre_goals else None,
+            intel_list=getattr(self, "_intel_list", None) or None,
         )
         self.session.agent_count = len(agents)
         self._agents = agents
