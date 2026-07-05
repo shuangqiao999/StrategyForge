@@ -964,7 +964,7 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "stable",
+        "default_state": "campaign",
         "command_states": [
           "campaign"
         ],
@@ -1206,7 +1206,7 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "stable",
+        "default_state": "intervention",
         "command_states": [
           "intervention"
         ],
@@ -1452,7 +1452,7 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "maintain",
+        "default_state": "develop",
         "command_states": [
           "develop"
         ],
@@ -1668,8 +1668,9 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "research",
+        "default_state": "launch",
         "command_states": [
+          "launch",
           "pivot"
         ],
         "transition_rules": [
@@ -1728,8 +1729,7 @@
     },
     "thresholds": {
       "public_trust": 15,
-      "narrative_dominance": 10,
-      "polarization": 80
+      "narrative_dominance": 10
     },
     "actions": [
       "propaganda",
@@ -1871,7 +1871,7 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "monitor",
+        "default_state": "offensive",
         "command_states": [
           "offensive"
         ],
