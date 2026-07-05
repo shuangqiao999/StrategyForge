@@ -15,125 +15,74 @@ from .models import DeductionReport, DeductionSession, SimulationRound
 
 logger = logging.getLogger(__name__)
 
-_REPORT_PROMPT = """你是一个推演分析专家。基于以下推演数据，生成一份结构化的推演报告。返回 JSON。
+_REPORT_PROMPT = """你是一位资深战略分析师。根据以下推演数据，撰写一份自然语言的推演报告。
 
-## 推演概览
-- 会话标题: $title
-- 推演领域: $domain
-- 智能体数量: $agent_count
-- 模拟轮数: $round_count
-- 图谱实体数: $entity_count, 关系数: $relation_count
-- 不可变目标: $immutable_goals
+报告应像《经济学人》或战略研究机构的风格——流畅叙事，将数据融入行文之中，而非罗列表格或项目符号。
 
-## 智能体总览
+## 推演基础信息
+- 标题: $title · 领域: $domain · 轮次: $round_count
+- 智能体数量: $agent_count · 不可变目标: $immutable_goals
+
+## 智能体概览
 $agent_overview
 
-## 关键事件（最近 20 个）
+## 关键事件序列
 $key_events
 
-## 推演原文背景
-$source_snippet
-
-## 关键关系（知识图谱：实体—关系—实体）
-$key_relations
-
-## 行动时序与因果链（Kuzu 时序行动图：按时间排列的"谁—做了什么"）
-$action_timeline
-
-## 因果归因（确定性·来自数值真值：源 → 目标 累计指标影响，负值=致衰）
-$causal_attribution
-
-## 量化指标轨迹（每轮各实体关键指标变化，含具体数值）
+## 全局态势数据（每实体最终指标值 + 变化轨迹摘要）
 $quantified_context
 
-## 输出 JSON
-```json
-{
-  "summary": "推演总结 (150-300字)",
-  "key_events": [
-    {"round": 1, "description": "事件描述", "significance": "高/中/低"}
-  ],
-  "agent_trajectories": {
-    "agent_id": ["行动1", "行动2"]
-  },
-  "risk_alerts": ["风险预警1", "风险预警2"],
-  "recommendations": ["策略建议1", "策略建议2"],
-  "causal_summary": [
-    "→ 因果链1：A做了什么 → B发生了什么 → 最终导致C（引用具体轮次与数值变化，如+12/-8）",
-    "→ 因果链2：..."
-  ],
-  "stage_narratives": [
-    {
-      "stage": "阶段名称（如试探期/对抗期/决战期）",
-      "round_range": "第X-Y轮",
-      "start_state": "阶段起始状态（含关键指标值）",
-      "key_decisions": "核心决策与行动",
-      "causal_logic": "因果逻辑描述（为什么A导致B）",
-      "end_state": "阶段终点与为下一阶段埋下的伏笔"
-    },
-    ...
-  ],
-  "deviation_analysis": [
-    {
-      "round": 1,
-      "agent": "行为体名称",
-      "decision": "具体决策描述",
-      "deviation_level": "显著/轻微",
-      "reason": "偏离不可变目标的原因分析"
-    }
-  ],
-  "conclusion": "整体结论与启示（100-200字）"
-}
-```
+## 确定性因果归因（数值真值）
+$causal_attribution
 
-- causal_summary: 识别推演中最重要的3-5条因果链，用箭头式表述，**必须引用具体轮次和量化变化值**（如"第3轮宋江决策→民心**+12**→第5轮获得新兵源"）
-- stage_narratives: 将整个推演按局势转折分为2-4个阶段，每阶段描述起因-经过-结果的完整逻辑链
-- deviation_analysis: 识别推演中哪些决策**偏离了不可变目标的方向**，分析原因。若无偏离则返回空数组
-- conclusion: 对推演整体规律的提炼，特别关注不可变目标的达成情况及其偏离原因
+## 输出要求
+返回 JSON，必须包含以下三个字段：
 
-只返回 JSON，不要解释。"""
+1. "narrative": 完整推演报告的自然语言文本（800-2000字）。写作要求：
+   - 用"开头概括、中间叙事、结尾总结"的三段式结构
+   - 数据点用自然语言融入行文（如"北约的防御力量保持强劲，但现金流从85下降至76，反映出持续军援带来的财政压力"），而非"strength=100, cash_flow=76"
+   - 不要出现 JSON 格式的痕迹、不要出现表格、不要出现项目符号列表
+   - 关键数字用中文量词表达（"大幅上升"、"小幅回落至约30"、"降至个位数"）
+   - 如刘震云或周梅森的非虚构叙事风格——事实稠密、判断克制
+
+2. "risk_alerts": 风险预警列表（最多5条字符串）
+
+3. "recommendations": 策略建议列表（最多5条字符串）
+
+只返回 JSON，不要 markdown 标记。"""
 
 
-def _build_quantified_context(
+def _build_quantified_summary(
     rounds: list[SimulationRound],
     states: dict[str, Any] | None,
 ) -> str:
-    """Build structured quantified trajectory text for the LLM prompt."""
+    """Build concise quantified trajectory summary for narrative prompt input.
+
+    Each entity: 1 line of metrics + 1 line of key changes (max ~120 chars).
+    """
     if not states:
         return "（叙事模式，无量化指标数据）"
 
     parts: list[str] = []
-    # Per-entity metric snapshots at key rounds (first, last, and every ~3rd round)
-    sample_rounds = set()
-    if rounds:
-        total = max(r.round_number for r in rounds)
-        sample_rounds = {r.round_number for r in rounds
-                         if r.round_number in (1, total)
-                         or r.round_number % max(1, total // 4) == 0}
     for eid, st in states.items():
         name = getattr(st, "name", eid[:8])
+        metrics_str = ", ".join(
+            f"{k}={v:.0f}" for k, v in st.metrics.items()
+        )
+        # Collect key deltas from last 3 rounds
         history = getattr(st, "history", []) or []
-        # Group history by round for per-round summaries
-        by_round: dict[int, list[dict]] = {}
-        for h in history:
-            rnd = h.get("round", 0)
-            if rnd not in by_round:
-                by_round[rnd] = []
-            by_round[rnd].append(h)
-        # Show key round snapshots
-        snapshots: list[str] = []
-        for rnd in sorted(by_round.keys()):
-            if rnd in sample_rounds or len(snapshots) < 3:
-                deltas = ", ".join(
-                    f"{h.get('metric','?')}{h.get('delta',0):+.1f}"
-                    for h in by_round[rnd][:6]
-                )
-                snapshots.append(f"  R{rnd}: {deltas}")
-        if snapshots:
-            parts.append(f"- {name}:"
-                         f"\n{'  '.join(snapshots[:8])}")
-    if not parts:
-        parts.append("- （无量化轨迹数据）")
+        deltas_by_metric: dict[str, float] = {}
+        for h in history[-30:]:
+            m = h.get("metric", "")
+            d = h.get("delta", 0)
+            if m:
+                deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
+        # Show only metrics with significant change
+        significant = {k: v for k, v in deltas_by_metric.items() if abs(v) > 3}
+        change_str = ", ".join(
+            f"{k}{v:+.0f}" for k, v in list(significant.items())[:6]
+        ) if significant else "无明显变化"
+        parts.append(f"{name}: {metrics_str} | 趋势: {change_str}")
     return "\n".join(parts)
 
 
@@ -247,24 +196,19 @@ async def generate_report(
             pass
 
     client = LLMClient()
-    quantified_context = _build_quantified_context(rounds, states)
+    quantified_context = _build_quantified_summary(rounds, states)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
-    system = "你是推演分析专家，生成结构化推演报告。只输出 JSON。"
+    system = "你是资深战略分析师，撰写自然语言推演报告。只输出 JSON。"
     messages = [Message(role="user", content=Template(_REPORT_PROMPT).substitute(
         title=session.title or "推演会话",
         domain=domain_text,
         immutable_goals=immutable_goals,
         agent_count=session.agent_count,
         round_count=session.current_round,
-        entity_count=session.entity_count,
-        relation_count=session.relation_count,
         agent_overview=agent_overview,
         key_events="\n".join(key_events[-20:]),
-        source_snippet=session.source_material[:1000],
-        key_relations=key_relations,
-        action_timeline=action_timeline,
-        causal_attribution=causal_attribution,
         quantified_context=quantified_context,
+        causal_attribution=causal_attribution,
     ))]
 
     default_report = DeductionReport(
@@ -276,7 +220,7 @@ async def generate_report(
     )
 
     try:
-        response = await client.chat(messages, system=system, temperature=0.3)
+        response = await client.chat(messages, system=system, temperature=0.4)
         content = extract_text(response)
         report_data = _parse_report_json(content)
     except Exception as e:
@@ -287,15 +231,15 @@ async def generate_report(
 
     return DeductionReport(
         session_id=session.id,
-        summary=report_data.get("summary", default_report.summary),
-        key_events=report_data.get("key_events", default_report.key_events),
-        agent_trajectories=report_data.get("agent_trajectories", default_report.agent_trajectories),
+        summary=report_data.get("narrative", "") or report_data.get("summary", default_report.summary),
+        key_events=default_report.key_events,
+        agent_trajectories=default_report.agent_trajectories,
         risk_alerts=report_data.get("risk_alerts", []),
         recommendations=report_data.get("recommendations", []),
         causal_summary=report_data.get("causal_summary", []),
         stage_narratives=report_data.get("stage_narratives", []),
         deviation_analysis=report_data.get("deviation_analysis", []),
-        conclusion=report_data.get("conclusion", ""),
+        conclusion=report_data.get("narrative", "") or report_data.get("conclusion", ""),
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
 

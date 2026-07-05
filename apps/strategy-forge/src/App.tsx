@@ -929,49 +929,48 @@ export default function App() {
               )}
 
               {mainTab === "report" && (
-                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, overflowY: "auto" }}>
+                <div style={{ padding: 16, color: "#cbd5e1", fontSize: 14, overflowY: "auto" }}>
                   {report ? (
                     <>
-                      {/* ── 一、推演设定 ── */}
-                      {report.quantified && report.final_states ? (
-                        <details open style={{ marginBottom: 18 }}>
-                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", cursor: "pointer", borderLeft: "3px solid #3b82f6", paddingLeft: 8, marginBottom: 6 }}>
-                            一、量化最终状态（领域：{report.domain}）
-                          </summary>
-                          {Object.values(report.final_states).map((s, i) => (
-                            <div key={i} style={{ marginBottom: 8, background: "#0f172a", borderRadius: 6, padding: 8, borderLeft: `3px solid ${s.alive ? "#34d399" : "#ef4444"}` }}>
-                              <div style={{ fontWeight: 600 }}>
-                                {s.name}{" "}
-                                {s.alive
-                                  ? <span style={{ fontSize: 11, color: "#34d399" }}>存活</span>
-                                  : <span style={{ fontSize: 11, color: "#f87171" }}>★出局★</span>}
-                              </div>
-                              <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 2 }}>
-                                {Object.entries(s.metrics).map(([k, v]) => `${k}=${Number(v).toFixed(0)}`).join("  ·  ")}
-                              </div>
-                              {s.history && s.history.length > 0 && (
-                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                                  轨迹：{s.history.slice(-6).map((h: any, j: number) => (
-                                    <span key={j} style={{ marginRight: 8 }}>[R{h.round}]{h.metric}{h.delta >= 0 ? "+" : ""}{Number(h.delta).toFixed(1)}</span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </details>
-                      ) : null}
-
-                      {/* ── 推演总结 ── */}
+                      {/* ── 推演叙事报告 ── */}
                       {report.summary && (
+                        <div style={{ marginBottom: 24, background: "#0f172a", borderRadius: 8, padding: 16, borderLeft: "3px solid #3b82f6" }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#60a5fa", marginBottom: 12 }}>📋 推演报告</div>
+                          <div style={{ lineHeight: 2, whiteSpace: "pre-wrap", color: "#e2e8f0" }}>
+                            {report.summary}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── 风险预警 ── */}
+                      {report.risk_alerts && report.risk_alerts.length > 0 && (
                         <details open style={{ marginBottom: 18 }}>
-                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #3b82f6", paddingLeft: 8, marginBottom: 6 }}>
-                            推演总结
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#f87171", cursor: "pointer", borderLeft: "3px solid #ef4444", paddingLeft: 8, marginBottom: 6 }}>
+                            ⚠️ 风险预警（{report.risk_alerts.length} 条）
                           </summary>
-                          <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{report.summary}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {report.risk_alerts.map((r: string, i: number) => (
+                              <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #ef4444", fontSize: 13, lineHeight: 1.7 }}>🔴 {r}</div>
+                            ))}
+                          </div>
                         </details>
                       )}
 
-                      {/* ── 二、关键因果链 ── */}
+                      {/* ── 策略建议 ── */}
+                      {report.recommendations && report.recommendations.length > 0 && (
+                        <details open style={{ marginBottom: 18 }}>
+                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#22c55e", cursor: "pointer", borderLeft: "3px solid #22c55e", paddingLeft: 8, marginBottom: 6 }}>
+                            💡 策略建议（{report.recommendations.length} 条）
+                          </summary>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {report.recommendations.map((r: string, i: number) => (
+                              <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #22c55e", fontSize: 13, lineHeight: 1.7 }}>{r}</div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {/* ── 关键因果链 ── */}
                       {report.causal_summary && report.causal_summary.length > 0 && (
                         <details open style={{ marginBottom: 18 }}>
                           <summary style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", cursor: "pointer", borderLeft: "3px solid #f59e0b", paddingLeft: 8, marginBottom: 6 }}>
