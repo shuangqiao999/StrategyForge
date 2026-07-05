@@ -36,7 +36,7 @@ async def extract_seed_metrics(
     source: str,
     metrics: list[str],
     client: Any,
-    max_chars: int = 6000,
+    max_chars: int = 20000,
 ) -> dict[str, dict[str, float]]:
     """Extract per-entity initial metrics from seed material via LLM.
 
