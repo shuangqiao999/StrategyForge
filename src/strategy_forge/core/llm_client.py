@@ -66,7 +66,7 @@ class DeductionLLMClient:
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0),
+                timeout=httpx.Timeout(300.0),
                 headers=headers,
             )
 
