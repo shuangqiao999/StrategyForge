@@ -651,52 +651,53 @@
         "conditionals": {}
       },
       "finite_state_machine": {
-        "default_state": "idle",
+        "default_state": "active",
         "command_states": [
+          "active",
           "strategy"
         ],
         "transition_rules": [
           {
-            "from": "idle",
-            "to": "expand",
-            "condition": {
-              "cash_flow": [
-                ">",
-                50
-              ],
-              "market_share": [
-                ">",
-                15
-              ]
-            }
-          },
-          {
-            "from": "expand",
+            "from": "active",
             "to": "retrench",
             "condition": {
               "cash_flow": [
                 "<",
-                20
+                12
               ]
             }
           },
           {
             "from": "retrench",
-            "to": "expand",
+            "to": "active",
             "condition": {
               "cash_flow": [
                 ">",
-                60
+                30
               ]
             }
           },
           {
-            "from": "idle",
+            "from": "active",
             "to": "defensive",
             "condition": {
               "brand": [
                 "<",
-                30
+                35
+              ]
+            }
+          },
+          {
+            "from": "defensive",
+            "to": "active",
+            "condition": {
+              "brand": [
+                ">",
+                50
+              ],
+              "cash_flow": [
+                ">",
+                20
               ]
             }
           }
@@ -722,7 +723,8 @@
             "intensity": 0.6,
             "target": ""
           },
-          "strategy": null
+          "strategy": null,
+          "active": null
         }
       }
     }

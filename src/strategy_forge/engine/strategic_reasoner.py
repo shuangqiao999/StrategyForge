@@ -272,12 +272,16 @@ class StrategicReasoner:
         select_hint = ("从可选行动中分配资源给一个或多个动作"
                        if self._enable_multi_action else "从可选行动中选择一个并给出投入力度")
         diversity_hint = "。避免连续3轮以上重复相同策略，结合当前局势变化探索多元行动" if round_number > 3 else ""
+        # Core mission goes FIRST — LLM pays most attention to opening text
+        mission_block = ""
+        if imm != "无":
+            mission_block = f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n\n"
         header = (
-            f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
-            f"请基于你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n\n"
-            f"## 你的人格\n{agent.persona or '（无）'}\n"
-            f"## 你的目标\n{goals}\n"
-            f"## 不可变战略指令（最高优先级）\n{imm}\n"
+            mission_block
+            + f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
+            + f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n\n"
+            + f"## 你的人格\n{agent.persona or '（无）'}\n"
+            + f"## 你的目标\n{goals}\n"
             + (f"## 外部干预指令（最高优先级）\n{user_cmd}\n" if user_cmd else "")
             + f"## 你的当前状态\n{state.to_prompt_context()}\n"
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n"
