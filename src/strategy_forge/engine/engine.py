@@ -38,6 +38,9 @@ class DeductionEngine:
         self._graph_cache: dict[str, DeductionGraphStore] = {}
         self._stream_events: dict[str, asyncio.Event] = {}
         self._round_data: dict[str, dict[str, int]] = {}
+        # 用户强制动作 override（按会话 → {agent: {action_type,intensity,target,remaining}}），
+        # 由 API 写入、运行中的 SimulationEngine 按引用逐轮消费。
+        self._fsm_overrides: dict[str, dict[str, dict]] = {}
 
     _RUNNING_GRAPH_STATUSES = frozenset({
         "ontology_running", "graph_running", "agents_running",
@@ -163,6 +166,19 @@ class DeductionEngine:
         self._stream_events.pop(session_id, None)
         self._round_data.pop(session_id, None)
 
+    # ── 用户强制动作 override ──
+    def get_fsm_override_store(self, session_id: str) -> dict[str, dict]:
+        """返回按会话的 override 字典（按引用共享给运行中的模拟引擎）。"""
+        return self._fsm_overrides.setdefault(session_id, {})
+
+    def set_fsm_override(self, session_id: str, agent: str, action_type: str,
+                         intensity: float = 0.6, target: str = "", rounds: int = 1) -> None:
+        store = self._fsm_overrides.setdefault(session_id, {})
+        store[agent] = {
+            "action_type": action_type, "intensity": float(intensity),
+            "target": target or "", "remaining": max(1, int(rounds)),
+        }
+
     async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)
         if session is None:
@@ -187,6 +203,7 @@ class DeductionEngine:
             cancel_event=cancel_event,
             round_callback=lambda rnd, total, snap=None: self.signal_round_complete(session_id, rnd, total, snap),
             resume_start_round=resume_start_round,
+            fsm_override_store=self.get_fsm_override_store(session_id),
         )
 
         await orchestrator.run()

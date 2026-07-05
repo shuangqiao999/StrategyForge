@@ -70,6 +70,14 @@ class InterventionRequest(BaseModel):
     round_number: int | None = Field(None, description="指定生效轮次")
 
 
+class FsmOverrideRequest(BaseModel):
+    agent: str = Field(..., description="目标智能体名称或实体ID")
+    action_type: str = Field(..., description="强制执行的动作")
+    intensity: float = Field(default=0.6, description="动作强度 0-1")
+    target: str = Field(default="", description="可选目标实体")
+    rounds: int = Field(default=1, description="强制生效的轮数")
+
+
 class PreGoalRequest(BaseModel):
     content: str = Field(default="", description="推演前的愿景/目标")
 
@@ -415,6 +423,28 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
         return {"session_id": session_id, "injected": True, "round_number": round_num}
     except Exception as e:
         raise HTTPException(500, f"干预注入失败: {e}")
+
+
+@router.post("/session/{session_id}/fsm-override")
+async def fsm_override(session_id: str, req: FsmOverrideRequest, request: Request):
+    """按体强制动作：在 FSM 接管时手动覆盖某智能体的下 N 轮动作（跳过 FSM 与 LLM）。"""
+    engine = _get_engine(request)
+    session = engine.get_session(session_id)
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    agent = (req.agent or "").strip()
+    action_type = (req.action_type or "").strip()
+    if not agent or not action_type:
+        raise HTTPException(400, "agent 与 action_type 不能为空")
+    engine.set_fsm_override(session_id, agent, action_type,
+                            intensity=req.intensity, target=(req.target or "").strip(),
+                            rounds=req.rounds)
+    engine.log(session_id, "intervene",
+               f"强制动作: {agent} → {action_type}"
+               + (f"(→{req.target})" if req.target else "")
+               + f" ×{max(1, int(req.rounds))}轮")
+    return {"session_id": session_id, "agent": agent, "action_type": action_type,
+            "rounds": max(1, int(req.rounds))}
 
 
 @router.post("/session/{session_id}/pre-goal")

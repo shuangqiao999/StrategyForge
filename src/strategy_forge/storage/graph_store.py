@@ -54,6 +54,7 @@ class DeductionGraphStore:
                 "CREATE NODE TABLE IF NOT EXISTS Event("
                 "id STRING, description STRING, event_type STRING, "
                 "timestamp STRING, agent_id STRING, round INT64, target_id STRING, "
+                "effect STRING, driver STRING, "
                 "PRIMARY KEY(id))"
             )
             self._conn.execute(
@@ -126,7 +127,7 @@ class DeductionGraphStore:
 
     def add_event(self, event_id: str, description: str, event_type: str,
                   timestamp: str, agent_id: str = "", round_number: int = 0,
-                  target_id: str = "") -> None:
+                  target_id: str = "", effect: str = "", driver: str = "") -> None:
         self._check_conn()
         safe = {
             "id": event_id.replace("'", "\\'"),
@@ -135,6 +136,8 @@ class DeductionGraphStore:
             "ts": timestamp.replace("'", "\\'"),
             "aid": agent_id.replace("'", "\\'"),
             "tid": (target_id or "").replace("'", "\\'"),
+            "eff": (effect or "").replace("'", "\\'")[:200],
+            "drv": (driver or "").replace("'", "\\'")[:16],
         }
         rnd = int(round_number)
         with self._lock:
@@ -142,7 +145,8 @@ class DeductionGraphStore:
                 f"CREATE (ev:{self.EVENT_TABLE} {{id: '{safe['id']}', "
                 f"description: '{safe['desc']}', event_type: '{safe['type']}', "
                 f"timestamp: '{safe['ts']}', agent_id: '{safe['aid']}', "
-                f"round: {rnd}, target_id: '{safe['tid']}'}})"
+                f"round: {rnd}, target_id: '{safe['tid']}', "
+                f"effect: '{safe['eff']}', driver: '{safe['drv']}'}})"
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:
@@ -238,7 +242,7 @@ class DeductionGraphStore:
         """按智能体聚合"行动—事件"时序（读取 Agent-[ACTED]->Event 时序行动图）。"""
         rows = self.query(
             f"MATCH (a:{self.AGENT_TABLE})-[r:ACTED]->(ev:{self.EVENT_TABLE}) "
-            "RETURN a.id, a.name, r.action, r.timestamp, ev.description, ev.event_type "
+            "RETURN a.id, a.name, r.action, r.timestamp, ev.description, ev.event_type, ev.effect, ev.driver "
             "ORDER BY r.timestamp"
         )
         grouped: dict[str, dict[str, Any]] = {}
@@ -250,6 +254,7 @@ class DeductionGraphStore:
                 bucket["actions"].append({
                     "action": r[2] or "", "timestamp": r[3] or "",
                     "description": r[4] or "", "event_type": r[5] or "",
+                    "effect": r[6] or "", "driver": r[7] or "",
                 })
         return list(grouped.values())
 
@@ -257,12 +262,13 @@ class DeductionGraphStore:
         """全局按时间排序的事件序列（供因果链分析）。"""
         rows = self.query(
             f"MATCH (a:{self.AGENT_TABLE})-[r:ACTED]->(ev:{self.EVENT_TABLE}) "
-            "RETURN r.timestamp, a.name, r.action, ev.description, ev.event_type "
+            "RETURN r.timestamp, a.name, r.action, ev.description, ev.event_type, ev.effect, ev.driver "
             "ORDER BY r.timestamp"
         )
         seq = [{
             "timestamp": r[0] or "", "agent_name": r[1] or "", "action": r[2] or "",
             "description": r[3] or "", "event_type": r[4] or "",
+            "effect": r[5] or "", "driver": r[6] or "",
         } for r in rows]
         return seq[-limit:] if limit and len(seq) > limit else seq
 

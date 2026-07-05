@@ -17,6 +17,7 @@ from strategy_forge.core.token_counter import (
 from .models import (
     DeductionPhase,
     DeductionSession,
+    EntityState,
     SessionStatus,
     SimulationRound,
 )
@@ -39,6 +40,7 @@ class DeductionOrchestrator:
         cancel_event: Any = None,
         round_callback: Callable[[int, int], None] | None = None,
         resume_start_round: int = 0,
+        fsm_override_store: dict | None = None,
     ) -> None:
         self.session = session
         self.graph = graph
@@ -47,6 +49,7 @@ class DeductionOrchestrator:
         self._cancel = cancel_event
         self._round_callback = round_callback
         self._resume_start_round = resume_start_round
+        self._fsm_override_store = fsm_override_store if fsm_override_store is not None else {}
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -379,8 +382,33 @@ class DeductionOrchestrator:
         re_engine = self._rule_engine
         states: dict[str, Any] = {}
         if re_engine is not None:
+            # Attempt seed data extraction for real-world initial metrics
+            seed_metrics: dict[str, dict[str, float]] = {}
+            try:
+                cfg_data = self.store.get(self.session.id) or {}
+                cfg = (cfg_data.get("config_json", {}) or {})
+                if isinstance(cfg, str):
+                    cfg = _json.loads(cfg)
+                if cfg.get("auto_extract_seed"):
+                    from strategy_forge.engine.seed_extractor import extract_seed_metrics
+                    from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+                    seed_metrics = await extract_seed_metrics(
+                        self.session.source_material, re_engine.metrics(), LLMClient())
+                    if seed_metrics:
+                        self._log("simulation",
+                                  f"种子数据提取: {len(seed_metrics)} 个实体")
+            except Exception as e:
+                self._log("simulation", f"种子数据提取失败，使用规则包默认值: {e}")
+
             for a in self._agents:
-                states[a.entity_id] = re_engine.init_state(a.entity_id, a.name)
+                init = dict(re_engine.pack["initial_metrics"])
+                overrides = seed_metrics.get(a.name, {})
+                for m, v in overrides.items():
+                    if m in init:
+                        init[m] = float(v)
+                states[a.entity_id] = EntityState(
+                    id=a.entity_id, name=a.name, domain=re_engine.domain,
+                    metrics=init, history=[])
             self._states = states
             self._log("simulation",
                       f"阶段4: 量化并行模拟开始 ({total_rounds} 轮, {len(states)} 个量化实体, "
@@ -414,6 +442,7 @@ class DeductionOrchestrator:
             cancel_event=self._cancel,
             max_concurrent=getattr(self, "_max_concurrent", None),
             algorithm_modules=algorithm_modules,
+            fsm_override_store=self._fsm_override_store,
         )
 
         rounds: list[SimulationRound] = []

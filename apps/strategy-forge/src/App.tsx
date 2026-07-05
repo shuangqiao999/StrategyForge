@@ -33,11 +33,11 @@ interface LogEntry {
   timestamp: string;
 }
 
-interface TimelineAction { action: string; timestamp: string; description: string; event_type: string; }
+interface TimelineAction { action: string; timestamp: string; description: string; event_type: string; effect?: string; driver?: string; }
 interface AgentTimeline { agent_id: string; agent_name: string; actions: TimelineAction[]; }
 interface TimelineData {
   timelines: AgentTimeline[];
-  sequence: Array<{ timestamp: string; agent_name: string; action: string; description: string; event_type: string }>;
+  sequence: Array<{ timestamp: string; agent_name: string; action: string; description: string; event_type: string; effect?: string; driver?: string }>;
 }
 
 interface CausalNode { id: string; kind: string; label: string; desc?: string; }
@@ -142,6 +142,11 @@ export default function App() {
   const [preGoal, setPreGoal] = useState("");
   const [interventionText, setInterventionText] = useState("");
   const [sending, setSending] = useState(false);
+  const [ovAgent, setOvAgent] = useState<string | null>(null);
+  const [ovAction, setOvAction] = useState("");
+  const [ovIntensity, setOvIntensity] = useState(0.6);
+  const [ovTarget, setOvTarget] = useState("");
+  const [ovRounds, setOvRounds] = useState(1);
   const logsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const graphRef = useRef<any>(null);
@@ -538,6 +543,21 @@ export default function App() {
     }
     setSending(false);
   }, [selectedId, interventionText, fetchLogs]);
+
+  const submitFsmOverride = useCallback(async (agent: string) => {
+    if (!selectedId || !agent || !ovAction.trim()) { alert("请填写强制动作"); return; }
+    try {
+      const r = await fetch(`${API_BASE}/session/${selectedId}/fsm-override`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent, action_type: ovAction.trim(), intensity: ovIntensity, target: ovTarget.trim(), rounds: ovRounds }),
+      });
+      if (r.ok) { setOvAgent(null); setOvAction(""); setOvTarget(""); await fetchLogs(selectedId); }
+      else alert("强制失败: " + (await r.text()));
+    } catch (err: any) {
+      alert("强制发送失败: " + (err.message || "未知错误"));
+    }
+  }, [selectedId, ovAction, ovIntensity, ovTarget, ovRounds, fetchLogs]);
 
   // SSE auto-refresh logs, graph, timeline during ALL running phases
   useEffect(() => {
@@ -1167,27 +1187,52 @@ export default function App() {
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 6, borderLeft: "3px solid #3b82f6", paddingLeft: 8 }}>
                           智能体行动时间线
                         </div>
-                        {timeline.timelines.map((t, i) => (
+                        {timeline.timelines.map((t, i) => {
+                          const hasFsm = t.actions.some(a => a.driver === "fsm");
+                          const canOverride = selected?.status === "simulating";
+                          return (
                           <div key={i} style={{ marginBottom: 10, background: "#0f172a", borderRadius: 6, padding: 8 }}>
-                            <div style={{ fontWeight: 600 }}>{t.agent_name}</div>
+                            <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                              <span>{t.agent_name}</span>
+                              {hasFsm && canOverride && (
+                                <button onClick={() => { setOvAgent(ovAgent === t.agent_name ? null : t.agent_name); setOvAction(""); }}
+                                  title="FSM 接管中，可强制指定该角色下一步动作"
+                                  style={{ fontSize: 11, padding: "1px 8px", borderRadius: 6, cursor: "pointer", border: "1px solid #374151", background: "#1e293b", color: "#fbbf24" }}>⚙ 干预</button>
+                              )}
+                            </div>
+                            {ovAgent === t.agent_name && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "6px 0", background: "#1e293b", borderRadius: 6, padding: 6 }}>
+                                <input value={ovAction} onChange={e => setOvAction(e.target.value)} placeholder="强制动作(如 attack)" style={{ flex: 1, minWidth: 100, height: 26, fontSize: 12 }} />
+                                <input value={ovTarget} onChange={e => setOvTarget(e.target.value)} placeholder="目标(可选)" list="ov-ents" style={{ width: 90, height: 26, fontSize: 12 }} />
+                                <input type="number" min={0} max={1} step={0.1} value={ovIntensity} onChange={e => setOvIntensity(Number(e.target.value))} title="强度" style={{ width: 56, height: 26, fontSize: 12 }} />
+                                <input type="number" min={1} max={20} value={ovRounds} onChange={e => setOvRounds(Math.max(1, Number(e.target.value) || 1))} title="轮数" style={{ width: 48, height: 26, fontSize: 12 }} />
+                                <button onClick={() => submitFsmOverride(t.agent_name)} style={{ height: 26, fontSize: 12, padding: "0 10px", borderRadius: 6, cursor: "pointer", border: "none", background: "#3b82f6", color: "#fff" }}>强制</button>
+                                <datalist id="ov-ents">{(graphData?.nodes || []).map(n => <option key={n.id} value={n.name} />)}</datalist>
+                              </div>
+                            )}
                             <ul style={{ margin: "4px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
                               {t.actions.map((a, j) => (
                                 <li key={j}>
                                   <span style={{ color: "#a78bfa" }}>{a.action}</span>
-                                  {a.event_type ? <span style={{ color: "#64748b" }}> ({a.event_type})</span> : null}
+                                  {a.driver === "fsm" ? <span style={{ color: "#64748b", fontSize: 11 }}> [FSM]</span>
+                                    : a.driver === "forced" ? <span style={{ color: "#fbbf24", fontSize: 11 }}> [强制]</span> : null}
                                   {a.description ? <span> — {a.description}</span> : null}
+                                  {a.effect ? <span style={{ marginLeft: 6, fontSize: 11, color: a.effect.includes("-") ? "#f87171" : "#34d399" }}>（{a.effect}）</span> : null}
                                 </li>
                               ))}
                             </ul>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                       {timeline.sequence.length > 0 && (
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6, borderLeft: "3px solid #a78bfa", paddingLeft: 8 }}>事件序列（按时间）</div>
                           <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
                             {timeline.sequence.map((e, i) => (
-                              <li key={i}><span style={{ color: "#94a3b8" }}>{e.agent_name}</span> {e.action}{e.description ? `: ${e.description}` : ""}</li>
+                              <li key={i}><span style={{ color: "#94a3b8" }}>{e.agent_name}</span> {e.action}{e.description ? `: ${e.description}` : ""}
+                                {e.effect ? <span style={{ marginLeft: 6, fontSize: 11, color: e.effect.includes("-") ? "#f87171" : "#34d399" }}>（{e.effect}）</span> : null}
+                              </li>
                             ))}
                           </ul>
                         </div>

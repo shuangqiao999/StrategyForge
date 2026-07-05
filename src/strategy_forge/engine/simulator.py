@@ -104,6 +104,7 @@ class SimulationEngine:
         max_actions: int = 3,
         cancel_event: Any = None,
         algorithm_modules: list | None = None,
+        fsm_override_store: dict | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -128,6 +129,7 @@ class SimulationEngine:
         self._enable_multi_action = enable_multi_action
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
+        self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
         self._spatial_state = None   # cached SpatialState, updated after each module run
         from strategy_forge.core.config import config
 
@@ -198,6 +200,57 @@ class SimulationEngine:
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
+
+    # ── 用户强制 override（按体强制动作，跳过 FSM/LLM）──
+    def _pop_override(self, agent: Any) -> dict | None:
+        """取出并消费该 agent 的强制动作（按名称或 entity_id 匹配）。remaining 归零即删除。"""
+        store = self._fsm_override_store
+        if not store:
+            return None
+        key = None
+        for k in (agent.name, agent.entity_id):
+            if k in store:
+                key = k
+                break
+        if key is None:
+            return None
+        ov = store[key]
+        try:
+            remaining = int(ov.get("remaining", 1))
+        except (TypeError, ValueError):
+            remaining = 1
+        remaining -= 1
+        if remaining <= 0:
+            store.pop(key, None)
+        else:
+            ov["remaining"] = remaining
+        return {
+            "action_type": str(ov.get("action_type", "observe")),
+            "intensity": float(ov.get("intensity", 0.6)),
+            "target": str(ov.get("target", "") or ""),
+            "rationale": f"[用户强制] {ov.get('action_type', 'observe')}"
+                         + (f" → {ov.get('target')}" if ov.get("target") else ""),
+        }
+
+    def _describe_fsm_action(self, agent: Any, state: str, action_type: str) -> str:
+        """FSM 确定性动作的数据差异化描述：突出该体当前最危险的受阈值约束指标。"""
+        st = self._states.get(agent.entity_id) if self._quantified else None
+        thresholds = self._rule_engine.thresholds() if self._rule_engine is not None else {}
+        if st is not None and thresholds:
+            worst_metric, worst_ratio, worst_val, worst_thr = None, None, None, None
+            for m, thr in thresholds.items():
+                try:
+                    thr_f = float(thr)
+                    val = float(st.get_metric(m))
+                except (TypeError, ValueError):
+                    continue
+                ratio = val / thr_f if thr_f > 0 else val
+                if worst_ratio is None or ratio < worst_ratio:
+                    worst_metric, worst_ratio, worst_val, worst_thr = m, ratio, val, thr_f
+            if worst_metric is not None:
+                tag = "告急" if worst_val <= worst_thr * 1.2 else "偏紧"
+                return f"{action_type}（{worst_metric}={worst_val:.0f}{tag}，阈值{worst_thr:.0f}｜{state}）"
+        return f"{action_type}（{state}）"
 
     async def run_round(self, round_number: int) -> SimulationRound:
         if self._quantified:
@@ -610,15 +663,26 @@ class SimulationEngine:
             if self._cancel is not None and self._cancel.is_set():
                 self._log("simulation", f"取消信号：已处理 {i}/{len(ordered)} 代理后停止")
                 return sim_round
+            # ── 用户强制 override：最高优先，跳过 FSM 与 LLM ──
+            ov = self._pop_override(agent)
+            if ov is not None:
+                ov["actor_id"] = agent.entity_id
+                ov["driver"] = "forced"
+                decisions.append(ov)
+                self._log("simulation", f"[用户强制] {agent.name} → {ov.get('action_type')}")
+                continue
             # Check if FSM should drive this agent
             state = fsm_states[i] if fsm_states is not None and i < len(fsm_states) else None
             if state is not None and state not in fsm_command:
                 # FSM deterministic action — skip LLM
                 act = None
                 if fsm_actions is not None and i < len(fsm_actions) and fsm_actions[i]:
-                    act = fsm_actions[i]
+                    act = dict(fsm_actions[i])
                 if act is None:
-                    act = {"action_type": "observe", "intensity": 0.3, "target": "", "rationale": f"[FSM] {state}"}
+                    act = {"action_type": "observe", "intensity": 0.3, "target": ""}
+                # 数据差异化描述：结合当前指标最危险项，避免"[FSM] observe"千篇一律
+                act["rationale"] = self._describe_fsm_action(agent, state, act.get("action_type", "observe"))
+                act["driver"] = "fsm"
                 act["actor_id"] = agent.entity_id
                 decisions.append(act)
                 continue
@@ -761,7 +825,8 @@ class SimulationEngine:
                     _inters = inter_by_actor.get(actor, [])
                     _primary_tid = _inters[0]["target"] if _inters else ""
                     self.graph.add_event(_eid, content[:200], dec["action_type"], _ts, actor,
-                                         round_number=round_number, target_id=_primary_tid)
+                                         round_number=round_number, target_id=_primary_tid,
+                                         effect=delta_txt, driver=dec.get("driver", "llm"))
                     self.graph.add_acted(actor, _eid, dec["action_type"], _ts)
                     _seen_targets: set[str] = set()
                     for _it in _inters:
