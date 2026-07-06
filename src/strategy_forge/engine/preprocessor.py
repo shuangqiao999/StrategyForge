@@ -139,6 +139,27 @@ class DeductionPreprocessor:
         Path(lance_dir).mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(lance_dir)
 
+    def _create_or_open(self, name: str, schema: Any) -> Any:
+        """健壮地获取一张 LanceDB 表：存在则打开，不存在则创建。
+
+        防止重跑/上次崩溃残留导致 table_names() 未列出但 create(mode="create")
+        又报 'already exists' 的冲突：create 失败时回退 open；open 再失败则覆盖重建。
+        """
+        try:
+            if name in self._db.table_names():
+                return self._db.open_table(name)
+        except Exception as e:
+            logger.debug("[Preprocessor] table_names/open probe failed for %s: %s", name, e)
+        try:
+            return self._db.create_table(name, schema=schema, mode="create")
+        except Exception as e:
+            logger.warning("[Preprocessor] create '%s' failed (%s); 尝试打开已存在表", name, e)
+            try:
+                return self._db.open_table(name)
+            except Exception as e2:
+                logger.warning("[Preprocessor] open '%s' 也失败 (%s)，覆盖重建", name, e2)
+                return self._db.create_table(name, schema=schema, mode="overwrite")
+
     def _ensure_table(self, dim: int) -> None:
         if self._table is not None:
             return
@@ -149,11 +170,7 @@ class DeductionPreprocessor:
             pa.field("content", pa.string()),
             pa.field("session_id", pa.string()),
         ])
-        if self.table_name in self._db.table_names():
-            self._table = self._db.open_table(self.table_name)
-        else:
-            self._table = self._db.create_table(self.table_name, schema=schema, mode="create")
-            logger.info("[Preprocessor] Created LanceDB table: %s (dim=%d)", self.table_name, dim)
+        self._table = self._create_or_open(self.table_name, schema)
 
     def _ensure_event_table(self, dim: int) -> None:
         if self._event_table is not None:
@@ -170,13 +187,7 @@ class DeductionPreprocessor:
             pa.field("event_type", pa.string()),
         ])
         self._event_table_name = f"deduction_events_{self.session_id}"
-        if self._event_table_name in self._db.table_names():
-            self._event_table = self._db.open_table(self._event_table_name)
-        else:
-            self._event_table = self._db.create_table(
-                self._event_table_name, schema=schema, mode="create")
-            logger.info("[Preprocessor] Created event table: %s (dim=%d)",
-                       self._event_table_name, dim)
+        self._event_table = self._create_or_open(self._event_table_name, schema)
 
     # ── Sync Embedding (no asyncio) ──
 

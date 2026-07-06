@@ -26,8 +26,14 @@ _REPORT_PROMPT = """你是一位资深战略分析师。根据以下推演数据
 ## 智能体概览
 $agent_overview
 
+## 关键关系网络（图谱按权重）
+$key_relations
+
 ## 关键事件序列
 $key_events
+
+## 行动时序（Agent→事件，跨轮）
+$action_timeline
 
 ## 全局态势数据（每实体各指标的定性档位与趋势，无具体数值）
 $quantified_context
@@ -232,7 +238,9 @@ async def generate_report(
         agent_count=session.agent_count,
         round_count=session.current_round,
         agent_overview=agent_overview,
+        key_relations=key_relations,
         key_events="\n".join(key_events[-20:]),
+        action_timeline=action_timeline,
         quantified_context=quantified_context,
         causal_attribution=causal_attribution,
     ))]
