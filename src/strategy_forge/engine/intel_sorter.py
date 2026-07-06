@@ -5,9 +5,7 @@ before the agent factory creates decision-making profiles.
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -112,12 +110,14 @@ async def sort_entities(
         source=source[:max_source_chars],
     )
 
+    from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
     try:
         resp = await client.chat(
             [Message(role="user", content=prompt)],
             system="你是情报分析师，输出结构化 JSON。只输出 JSON。",
             temperature=0.1,
+            max_tokens=config.deduction_intel_max_tokens,
         )
     except Exception as e:
         logger.warning("[IntelSorter] LLM call failed: %s", e)
@@ -125,6 +125,9 @@ async def sort_entities(
 
     raw = _extract_text(resp)
     data = _parse_json(raw)
+    # 兼容顶层数组：模型偶尔省略 {"entities": ...} 外壳
+    if isinstance(data, list):
+        data = {"entities": data}
     if not isinstance(data, dict):
         logger.warning("[IntelSorter] Failed to parse LLM output as JSON")
         return []
@@ -170,22 +173,5 @@ def _extract_text(resp: Any) -> str:
 
 
 def _parse_json(raw: str) -> Any:
-    raw = raw.strip()
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    cleaned = re.sub(r"```(?:json)?\s*\n?", "", raw)
-    cleaned = re.sub(r"\n?```", "", cleaned).strip()
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    for pat in (r'\{[\s\S]*?\}', r'\[[\s\S]*?\]'):
-        m = re.search(pat, cleaned)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except (json.JSONDecodeError, ValueError):
-                continue
-    return None
+    from ._utils import extract_json
+    return extract_json(raw)

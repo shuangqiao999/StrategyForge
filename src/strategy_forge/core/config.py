@@ -68,6 +68,10 @@ class DeductionConfig:
         self.deduction_sim_recall_chars = int(os.getenv("FORGE_SIM_RECALL_CHARS", "1200"))
         # 注入决策 prompt 的近期事件条数。
         self.deduction_sim_recent_events = int(os.getenv("FORGE_SIM_RECENT_EVENTS", "4"))
+        # 种子/情报 LLM 调用的输出上限（防多实体长 JSON 被服务端默认上限截断；
+        # 需 prompt+max_tokens <= 模型 n_ctx，故值较大时确保上下文窗口足够）。
+        self.deduction_seed_max_tokens = int(os.getenv("FORGE_SEED_MAX_TOKENS", "20000"))
+        self.deduction_intel_max_tokens = int(os.getenv("FORGE_INTEL_MAX_TOKENS", "28000"))
 
     def __getattr__(self, name: str):
         return None
