@@ -201,6 +201,24 @@ class SimulationEngine:
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
 
+    def _augment_recall_query(self, base: str, entity_id: str) -> str:
+        """④ 关系邻居增强召回：把 Kuzu 盟友/对手名拼进动态事件召回 query，聚焦相关事件。
+
+        默认关（FORGE_RECALL_REL_BOOST=0）时直接返回 base，行为与现状逐字一致。
+        """
+        from strategy_forge.core.config import config
+        if not config.deduction_recall_rel_boost:
+            return base
+        rel = self._rel_context.get(entity_id, {}) or {}
+        names: list[str] = []
+        cap = max(0, config.deduction_recall_rel_max)
+        for n in (list(rel.get("allies", [])) + list(rel.get("opponents", []))):
+            if n and n not in names:
+                names.append(n)
+            if len(names) >= cap:
+                break
+        return (base + " " + " ".join(names)).strip() if names else base
+
     # ── 用户强制 override（按体强制动作，跳过 FSM/LLM）──
     def _pop_override(self, agent: Any) -> dict | None:
         """取出并消费该 agent 的强制动作（按名称或 entity_id 匹配）。remaining 归零即删除。"""
@@ -364,6 +382,7 @@ class SimulationEngine:
                     aliases.update(
                         self._preprocessor.result.low_freq_entities.get(agent.name, set()))
                 query = agent.name + " " + " ".join(aliases - {agent.name})
+                query = self._augment_recall_query(query, agent.entity_id)
                 dynamic_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_dynamic_events,
                     query, config.deduction_retrieve_top_k, min_similarity=config.deduction_similarity_threshold,
@@ -603,6 +622,7 @@ class SimulationEngine:
                         aliases = set(pp.result.high_freq_entities.get(agent.name, set()))
                         aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
                     query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
+                    query = self._augment_recall_query(query, agent.entity_id)
                     frags = await asyncio.to_thread(
                         pp.retrieve_dynamic_events, query, _rk,
                         _cfg.deduction_similarity_threshold)

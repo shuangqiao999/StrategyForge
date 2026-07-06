@@ -74,6 +74,10 @@ class DeductionConfig:
         self.deduction_intel_max_tokens = int(os.getenv("FORGE_INTEL_MAX_TOKENS", "28000"))
         # 报告 LLM 输出上限（防长报告被服务端默认上限截断丢整份）。
         self.deduction_report_max_tokens = int(os.getenv("FORGE_REPORT_MAX_TOKENS", "8000"))
+        # 动态事件召回：用 Kuzu 关系邻居(盟友/对手)增强 query，聚焦"与我有关系者"的事件。
+        # 默认关（改变召回排序→影响模拟输出，A/B 验证收益后再翻默认）。
+        self.deduction_recall_rel_boost = os.getenv("FORGE_RECALL_REL_BOOST", "0") == "1"
+        self.deduction_recall_rel_max = int(os.getenv("FORGE_RECALL_REL_MAX", "4"))
 
     def __getattr__(self, name: str):
         return None
