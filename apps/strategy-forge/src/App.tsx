@@ -1030,33 +1030,15 @@ export default function App() {
                         </details>
                       )}
 
-                      {/* ── 五、结论与建议 ── */}
-                      {(report.conclusion || (report.risk_alerts && report.risk_alerts.length > 0) || (report.recommendations && report.recommendations.length > 0)) && (
+                      {/* ── 五、结论（风险/建议已在上方展示，此处不重复） ── */}
+                      {report.conclusion && (
                         <details open style={{ marginBottom: 18 }}>
                           <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #60a5fa", paddingLeft: 8, marginBottom: 6 }}>
-                            结论与建议
+                            结论
                           </summary>
-                          {report.conclusion && (
-                            <div style={{ marginBottom: 12, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
-                              {report.conclusion}
-                            </div>
-                          )}
-                          {report.risk_alerts && report.risk_alerts.length > 0 && (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: "#f87171", marginBottom: 4 }}>风险预警</div>
-                              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                                {report.risk_alerts.map((x, i) => <li key={i}>{x}</li>)}
-                              </ul>
-                            </div>
-                          )}
-                          {report.recommendations && report.recommendations.length > 0 && (
-                            <div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: "#34d399", marginBottom: 4 }}>策略建议</div>
-                              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-                                {report.recommendations.map((x, i) => <li key={i}>{x}</li>)}
-                              </ul>
-                            </div>
-                          )}
+                          <div style={{ marginBottom: 12, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+                            {report.conclusion}
+                          </div>
                         </details>
                       )}
 

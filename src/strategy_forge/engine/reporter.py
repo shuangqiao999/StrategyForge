@@ -1,9 +1,7 @@
 ﻿"""Phase 5: Report Generation — analyze simulation results, produce structured report."""
 from __future__ import annotations
 
-import json
 import logging
-import re
 from collections.abc import Callable
 from string import Template
 from typing import Any
@@ -42,7 +40,7 @@ $quantified_context
 $causal_attribution
 
 ## 输出要求
-返回 JSON，必须包含以下三个字段：
+返回 JSON，必须包含以下四个字段：
 
 1. "narrative": 完整推演报告的自然语言文本（800-2000字）。写作要求：
    - 用"开头概括、中间叙事、结尾总结"的三段式结构
@@ -51,10 +49,15 @@ $causal_attribution
    - 避免战术层面的定量建议；策略判断以方向、力度、态势为主
    - 不要出现 JSON 格式的痕迹、不要出现表格、不要出现项目符号列表
    - 事实稠密、判断克制的非虚构叙事风格
+   - 多方视角平衡：避免单向"某方全面胜出/衰落"的叙事，各方均有优势与制约，给出对手视角
+   - 区分"事实"与"推测"：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实
+   - 避免不符常识的极端断言（如"完全孤立""社会崩溃""彻底失败"）；此类只能作为风险情景谨慎提及，不作为结论
 
 2. "risk_alerts": 风险预警列表（最多5条字符串，描述趋势性风险，不含具体数值）
 
 3. "recommendations": 策略建议列表（最多5条字符串，偏战略方向，不含具体数值）
+
+4. "conclusion": 收束性结论（150-250字）。要求：提炼全局判断与关键变量，**不得照抄 narrative 的句子**，是更高层的凝练总结；同样不含具体数值、区分事实与推测。
 
 只返回 JSON，不要 markdown 标记。"""
 
@@ -122,9 +125,9 @@ async def generate_report(
     pre_goals: list[str] | None = None,
     states: dict[str, Any] | None = None,
 ) -> DeductionReport:
+    from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
-    from strategy_forge.core.config import config
 
     # Collect key events
     key_events: list[str] = []
@@ -254,7 +257,8 @@ async def generate_report(
     )
 
     try:
-        response = await client.chat(messages, system=system, temperature=0.4)
+        response = await client.chat(messages, system=system, temperature=0.4,
+                                     max_tokens=config.deduction_report_max_tokens)
         content = extract_text(response)
         report_data = _parse_report_json(content)
     except Exception as e:
@@ -273,16 +277,12 @@ async def generate_report(
         causal_summary=report_data.get("causal_summary", []),
         stage_narratives=report_data.get("stage_narratives", []),
         deviation_analysis=report_data.get("deviation_analysis", []),
-        conclusion=report_data.get("narrative", "") or report_data.get("conclusion", ""),
+        conclusion=report_data.get("conclusion", ""),
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
 
 
 def _parse_report_json(raw: str) -> dict[str, Any]:
-    match = re.search(r"\{[\s\S]*\}", raw)
-    if not match:
-        return {}
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return {}
+    from ._utils import extract_json
+    data = extract_json(raw)
+    return data if isinstance(data, dict) else {}

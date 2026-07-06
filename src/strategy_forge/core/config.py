@@ -72,6 +72,8 @@ class DeductionConfig:
         # 需 prompt+max_tokens <= 模型 n_ctx，故值较大时确保上下文窗口足够）。
         self.deduction_seed_max_tokens = int(os.getenv("FORGE_SEED_MAX_TOKENS", "20000"))
         self.deduction_intel_max_tokens = int(os.getenv("FORGE_INTEL_MAX_TOKENS", "28000"))
+        # 报告 LLM 输出上限（防长报告被服务端默认上限截断丢整份）。
+        self.deduction_report_max_tokens = int(os.getenv("FORGE_REPORT_MAX_TOKENS", "8000"))
 
     def __getattr__(self, name: str):
         return None
