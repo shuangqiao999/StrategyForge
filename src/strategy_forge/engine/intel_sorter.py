@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from strategy_forge.core.llm_client import LLMConnectionError
+
 logger = logging.getLogger(__name__)
 
 _INTEL_PROMPT = """你是情报分析师。请根据以下种子材料，整理实体关系清单。
@@ -128,6 +130,8 @@ async def sort_entities(
             temperature=0.1,
             max_tokens=config.deduction_intel_max_tokens,
         )
+    except LLMConnectionError:
+        raise
     except Exception as e:
         logger.warning("[IntelSorter] LLM call failed: %s", e)
         return []

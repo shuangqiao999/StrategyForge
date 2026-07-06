@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 
+from strategy_forge.core.llm_client import LLMConnectionError
 from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from ._utils import extract_text
@@ -26,6 +27,11 @@ from .orchestrator import _PhaseCancelledError
 from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
+
+
+class ConnectionFailureError(Exception):
+    """连接故障导致推演中断（含原文，供界面日志展示）。"""
+    pass
 
 
 _ACTION_PROMPT = """你是一个推演模拟中的智能体。根据你的角色设定和当前世界状态，决定你的下一步行动。
@@ -292,11 +298,31 @@ class SimulationEngine:
                 # 取信号量后再查一次取消，便于并发批内尽早短路
                 if self._cancel is not None and self._cancel.is_set():
                     return None
-                return await self._agent_decide(client, agent, round_number)
+                from strategy_forge.core.config import config
+                from strategy_forge.core.llm_client import LLMConnectionError
+                fails = 0
+                max_passes = max(0, config.deduction_llm_retry_passes)
+                while True:
+                    try:
+                        return await self._agent_decide(client, agent, round_number)
+                    except LLMConnectionError as e:
+                        fails += 1
+                        if fails > max_passes:
+                            raise
+                        delay = min(60.0, 5.0 * (2 ** (fails - 1)))
+                        self._log("simulation", f"{agent.name} LLM 连接失败({fails}/{max_passes+1})，{delay:.0f}s 后重试… | {e.endpoint}: {e.cause}")
+                        await asyncio.sleep(delay)
 
         # 并发决策（上限 = FORGE_MAX_CONCURRENT），随后按 ordered 原序回填以保持确定性
         results = await asyncio.gather(
             *(process_agent(agent) for agent in ordered), return_exceptions=True)
+        conn_fails = sum(1 for r in results if isinstance(r, LLMConnectionError))
+        if conn_fails > 0:
+            from strategy_forge.core.config import config
+            ratio = conn_fails / max(1, len(ordered))
+            if ratio >= config.deduction_sim_fail_ratio:
+                first = next((r for r in results if isinstance(r, LLMConnectionError)), None)
+                raise ConnectionFailureError(str(first) if first else f"连接故障：{conn_fails}/{len(ordered)} agent 无法连接 LLM")
         for agent, action in zip(ordered, results, strict=False):
             if isinstance(action, BaseException):
                 self._log("simulation", f"agent {agent.name} 决策失败: {action}")
@@ -649,26 +675,39 @@ class SimulationEngine:
         }
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any] | None:
-            async with sem:
-                # 取信号量后再查取消，便于并发批内尽早短路
-                if self._cancel is not None and self._cancel.is_set():
-                    return None
-                static_text, dynamic_text = await _recall(agent)
-                rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
-                causal = _causal_ctxs.get(agent.entity_id, "")
-                if causal:
-                    rel_ctx = f"上一轮行动效果: {causal}\n{rel_ctx}" if rel_ctx else f"上一轮行动效果: {causal}"
-                d = await self.reasoner.reason_quantified(
-                    agent, states[agent.entity_id], re_engine,
-                    recent_events=recent, other_context=_other_ctxs.get(agent.entity_id, ""),
-                    round_number=round_number, client=client,
-                    static_knowledge=static_text, dynamic_memory=dynamic_text,
-                    relationship_context=rel_ctx,
-                    spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
-                    env_context=_env_ctx,
-                )
-                d["actor_id"] = agent.entity_id
-                return d
+            from strategy_forge.core.config import config as _cr
+            from strategy_forge.core.llm_client import LLMConnectionError
+            fails = 0
+            max_passes = max(0, _cr.deduction_llm_retry_passes)
+            last_err = None
+            while True:
+                try:
+                    async with sem:
+                        if self._cancel is not None and self._cancel.is_set():
+                            return None
+                        static_text, dynamic_text = await _recall(agent)
+                        rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
+                        causal = _causal_ctxs.get(agent.entity_id, "")
+                        if causal:
+                            rel_ctx = f"上一轮行动效果: {causal}\n{rel_ctx}" if rel_ctx else f"上一轮行动效果: {causal}"
+                        d = await self.reasoner.reason_quantified(
+                            agent, states[agent.entity_id], re_engine,
+                            recent_events=recent, other_context=_other_ctxs.get(agent.entity_id, ""),
+                            round_number=round_number, client=client,
+                            static_knowledge=static_text, dynamic_memory=dynamic_text,
+                            relationship_context=rel_ctx,
+                            spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
+                            env_context=_env_ctx,
+                        )
+                        d["actor_id"] = agent.entity_id
+                        return d
+                except LLMConnectionError as e:
+                    fails += 1
+                    if fails > max_passes:
+                        raise
+                    delay = min(60.0, 5.0 * (2 ** (fails - 1)))
+                    self._log("simulation", f"{agent.name} LLM 连接失败({fails}/{max_passes+1})，{delay:.0f}s 后重试… | {e.endpoint}: {e.cause}")
+                    await asyncio.sleep(delay)
 
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
@@ -709,8 +748,15 @@ class SimulationEngine:
         # 第二遍：command 态 agent 并发 LLM 决策（上限 = FORGE_MAX_CONCURRENT），按索引回填保序
         llm_idx = [i for i, p in enumerate(plan) if p is None]
         if llm_idx and not (self._cancel is not None and self._cancel.is_set()):
+            from strategy_forge.core.llm_client import LLMConnectionError
             llm_results = await asyncio.gather(
                 *(decide(ordered[i]) for i in llm_idx), return_exceptions=True)
+            conn_fails = sum(1 for r in llm_results if isinstance(r, LLMConnectionError))
+            if conn_fails > 0:
+                ratio = conn_fails / max(1, len(llm_idx))
+                if ratio >= (_cfg.deduction_sim_fail_ratio if '_cfg' in dir() else 0.75):
+                    first = next((r for r in llm_results if isinstance(r, LLMConnectionError)), None)
+                    raise ConnectionFailureError(str(first) if first else f"连接故障：{conn_fails}/{len(llm_idx)} agent 无法连接 LLM")
             for i, raw in zip(llm_idx, llm_results, strict=False):
                 if isinstance(raw, BaseException):
                     self._log("simulation", f"agent {ordered[i].name} 决策失败: {raw}")

@@ -18,6 +18,7 @@ from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from .models import Ontology
 from .preprocessor import DeductionPreprocessor
+from strategy_forge.core.llm_client import LLMConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,8 @@ async def build_graph(
                         resp = await client.chat(
                             [Message(role="user", content=prompt)], system=system, temperature=0.1)
                         return _extract_text(resp)
+                    except LLMConnectionError:
+                        raise
                     except Exception as e:
                         logger.warning("[Graph] Entity-driven extract failed: %s", e)
                         return None
@@ -228,6 +231,8 @@ async def _extract_from_chunks(
                     [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
                     system=system, temperature=0.1)
                 return _extract_text(resp)
+            except LLMConnectionError:
+                raise
             except Exception as e:
                 logger.warning("[Graph] Chunk extract failed: %s", e)
                 return None

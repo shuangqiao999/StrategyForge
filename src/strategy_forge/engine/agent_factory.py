@@ -10,6 +10,7 @@ from collections.abc import Callable
 from string import Template
 from typing import Any
 
+from strategy_forge.core.llm_client import LLMConnectionError
 from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from ._utils import extract_text
@@ -216,6 +217,8 @@ async def create_agents_from_graph(
                 profile_data = _parse_persona_json(content)
                 if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
                     profile_data = _fallback(person_name)
+            except LLMConnectionError:
+                raise  # 连接故障直接传播
             except Exception as e:
                 logger.warning("[Deduction] Agent persona gen failed for %s: %s", person_name, e)
                 profile_data = _fallback(person_name)
@@ -223,7 +226,10 @@ async def create_agents_from_graph(
 
     # 并发生成人设（上限 = FORGE_MAX_CONCURRENT），随后按原顺序构造+写 Kuzu 以保持确定性
     results = await asyncio.gather(
-        *(gen_one(i, p) for i, p in enumerate(persons[:max_agents])))
+        *(gen_one(i, p) for i, p in enumerate(persons[:max_agents])), return_exceptions=True)
+    conn_fails = [r for r in results if isinstance(r, LLMConnectionError)]
+    if conn_fails:
+        raise conn_fails[0]
 
     for i, r in enumerate(results):
         person, person_name, profile_data = r["person"], r["name"], r["data"]

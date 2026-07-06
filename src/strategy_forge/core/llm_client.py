@@ -45,6 +45,17 @@ class DeductionLLMResponse:
         return getattr(self, key, default)
 
 
+class LLMConnectionError(Exception):
+    """LLM 连接/传输彻底失败（重试耗尽后抛出，含可读上下文）。"""
+
+    def __init__(self, msg: str, endpoint: str = "",
+                 retries: int = 0, cause: str = ""):
+        super().__init__(msg)
+        self.endpoint = endpoint
+        self.retries = retries
+        self.cause = cause
+
+
 class DeductionLLMClient:
     """Lightweight LLM client for StrategyForge deduction engine."""
 
@@ -71,8 +82,10 @@ class DeductionLLMClient:
             mc = max(1, config.deduction_max_concurrent)
             max_conn = config.deduction_http_max_connections or max(100, mc * 2)
             max_keep = config.deduction_http_max_keepalive or max(20, mc)
+            # 超时可配（FORGE_LLM_TIMEOUT），默认仍 300s
+            timeout_val = max(10.0, config.deduction_llm_timeout)
             self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0),
+                timeout=httpx.Timeout(timeout_val),
                 headers=headers,
                 limits=httpx.Limits(max_connections=max_conn,
                                     max_keepalive_connections=max_keep),
@@ -132,6 +145,8 @@ class DeductionLLMClient:
                 logger.warning("[Token] session context not set, skipping accumulation (phase=%s tokens=%d)",
                              _current_phase.get(), stats.total_tokens)
             return DeductionLLMResponse(content, token_stats=stats)
+        except LLMConnectionError:
+            raise  # 连接故障直接传播，不套 except Exception 吞掉
         except Exception as e:
             logger.error("[LLM] Chat request failed: %s", e)
             raise
@@ -164,7 +179,9 @@ class DeductionLLMClient:
                 return resp
             except (httpx.TransportError, httpx.TimeoutException) as e:
                 if attempt >= max_retries:
-                    raise
+                    raise LLMConnectionError(
+                        f"LLM 连接失败：{url}（{type(e).__name__}: {e}，已重试 {max_retries} 次仍失败）",
+                        endpoint=url, retries=max_retries, cause=str(e))
                 delay = self._retry_delay(attempt, base, cap, None)
                 logger.warning("[LLM] 传输错误(%s)，第 %d/%d 次重试，%.1fs 后…",
                                type(e).__name__, attempt + 1, max_retries, delay)
