@@ -47,7 +47,9 @@ class DeductionConfig:
         self.deduction_max_agents = int(os.getenv("FORGE_MAX_AGENTS", "10000"))
         self.deduction_default_rounds = int(os.getenv("FORGE_DEFAULT_ROUNDS", "10"))
         self.deduction_candidate_count = int(os.getenv("FORGE_CANDIDATE_COUNT", "3"))
-        self.deduction_llm_temperature = float(os.getenv("FORGE_LLM_TEMPERATURE", "0.3"))
+        # 模拟决策 LLM 温度（可调；接入 SimulationEngine，设置界面/env 真实生效）。
+        # 结构化阶段(本体/图谱/情报/种子)仍用各自的低温 0.1，不受此值影响。
+        self.deduction_llm_temperature = float(os.getenv("FORGE_LLM_TEMPERATURE", "0.6"))
         self.deduction_max_concurrent = int(os.getenv("FORGE_MAX_CONCURRENT", "2"))
         self.deduction_retrieve_top_k = int(os.getenv("FORGE_RETRIEVE_TOP_K", "5"))
         self.deduction_similarity_threshold = float(os.getenv("FORGE_SIMILARITY_THRESHOLD", "0.4"))

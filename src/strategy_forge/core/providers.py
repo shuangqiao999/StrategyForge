@@ -113,6 +113,30 @@ class ProviderRegistry:
                 self._data = json.loads(self._config_file.read_text("utf-8"))
             except Exception as e:
                 logger.warning("[providers] Failed to load config: %s", e)
+        self._migrate_dead_temperature()
+
+    def _migrate_dead_temperature(self) -> None:
+        """一次性迁移：llm_temperature 曾是"死配置"（从未接入生成调用），旧存的 0.3 只是
+        表单默认而非有意选择。既然现在它真正接入模拟决策温度，为避免决策温度从旧的
+        有效值(0.7)意外跌到 0.3，此处移除旧 0.3 使其回落到新默认(0.6)。仅执行一次
+        （_temp_migrated 标记），此后用户显式设置的任何值（含 0.3）都正常保留。
+        """
+        if self._data.get("_temp_migrated"):
+            return
+        try:
+            legacy = float(self._data.get("llm_temperature", "") or 0.0)
+        except (TypeError, ValueError):
+            legacy = 0.0
+        changed = False
+        if abs(legacy - 0.3) < 1e-9:
+            self._data.pop("llm_temperature", None)
+            changed = True
+        self._data["_temp_migrated"] = True
+        if self._config_file.exists() or changed:
+            try:
+                self.save()
+            except Exception as e:
+                logger.debug("[providers] temp migration save skipped: %s", e)
 
     def save(self) -> None:
         self._config_file.parent.mkdir(parents=True, exist_ok=True)

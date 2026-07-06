@@ -486,6 +486,13 @@ class DeductionOrchestrator:
             self._log("simulation",
                       f"算法模块加载: {', '.join(m.name for m in algorithm_modules)}")
 
+        # 模拟决策温度：接入配置（设置界面/FORGE_LLM_TEMPERATURE 真实生效），钳制到 [0,1.5]
+        from strategy_forge.core.providers import registry as _reg
+        try:
+            _sim_temp = max(0.0, min(1.5, float(_reg.llm_temperature)))
+        except Exception:
+            _sim_temp = 0.6
+
         engine = SimulationEngine(
             agents=self._agents,
             graph=self.graph,
@@ -501,6 +508,7 @@ class DeductionOrchestrator:
             env={"weather": self._weather, "terrain": self._terrain} if (self._weather or self._terrain) else None,
             cancel_event=self._cancel,
             max_concurrent=getattr(self, "_max_concurrent", None),
+            temperature=_sim_temp,
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
         )

@@ -14,7 +14,7 @@ class LLMConfigUpdate(BaseModel):
     llm_api_key: str = ""
     llm_model: str = ""
     provider_slug: str = ""
-    llm_temperature: float = 0.3
+    llm_temperature: float = 0.6
 
 
 class EmbedConfigUpdate(BaseModel):
