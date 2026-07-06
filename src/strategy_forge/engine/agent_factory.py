@@ -163,77 +163,70 @@ async def create_agents_from_graph(
 
     expected_keys = {"persona", "background", "goals"}
 
-    for i, person in enumerate(persons[:max_agents]):
-        person_name = person.get("name", f"Agent-{i}")
+    sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
 
-        # Build persona prompt
+    def _fallback(nm: str) -> dict:
+        return {"persona": f"{nm}是一个参与事件的独立个体",
+                "background": "来自原文背景", "goals": ["参与互动", "表达观点"]}
+
+    def _build_prompt(person: dict, person_name: str, fragments: list[str] | None) -> str:
         ue = "\n".join(f"- {x}" for x in (pre_interventions or [])) or "无特殊期望"
-
-        if preprocessor and preprocessor.result:
-            fragments = preprocessor.retrieve_for_entity(
-                person_name, max(config.deduction_retrieve_top_k, 10),
-                must_contain={person_name},
-            )
-            if fragments:
-                from strategy_forge.core.tokenizer import compress_to_keywords
-                full_context = "\n---\n".join(fragments)
-                keywords = compress_to_keywords(full_context, top_k=10)
-                prompt = Template(_PERSONA_PROMPT).substitute(
-                    name=person_name,
-                    type=person.get("type", "Person"),
-                    description=person.get("description", ""),
-                    role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
-                    parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                    sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
-                    context=full_context[:8000],
-                    keywords=", ".join(keywords) if keywords else "无",
-                    user_expectations=ue,
-                )
-            else:
-                prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
-                    name=person_name,
-                    type=person.get("type", "Person"),
-                    description=person.get("description", ""),
-                    role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
-                    parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                    sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
-                    context=source_material[:2000], user_expectations=ue,
-                )
-        else:
-            prompt = Template(_PERSONA_PROMPT_FALLBACK).substitute(
+        im = intel_map.get(person_name, {})
+        role = im.get("role", "独立博弈者")
+        parent_info = str(im.get("parent") or "无")
+        sub_info = ", ".join(str(s) for s in im.get("sub_entities", [])) or "无"
+        if fragments:
+            from strategy_forge.core.tokenizer import compress_to_keywords
+            full_context = "\n---\n".join(fragments)
+            keywords = compress_to_keywords(full_context, top_k=10)
+            return Template(_PERSONA_PROMPT).substitute(
                 name=person_name, type=person.get("type", "Person"),
-                description=person.get("description", ""),
-                role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
-                parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
-                context=source_material[:2000], user_expectations=ue,
-            )
+                description=person.get("description", ""), role=role,
+                parent_info=parent_info, sub_info=sub_info,
+                context=full_context[:8000],
+                keywords=", ".join(keywords) if keywords else "无",
+                user_expectations=ue)
+        return Template(_PERSONA_PROMPT_FALLBACK).substitute(
+            name=person_name, type=person.get("type", "Person"),
+            description=person.get("description", ""), role=role,
+            parent_info=parent_info, sub_info=sub_info,
+            context=source_material[:2000], user_expectations=ue)
 
+    async def gen_one(i: int, person: dict) -> dict:
+        person_name = person.get("name", f"Agent-{i}")
+        # 召回卸载到线程池，避免阻塞事件循环（与 simulator._recall 一致）
+        fragments = None
+        if preprocessor and preprocessor.result:
+            try:
+                fragments = await asyncio.to_thread(
+                    preprocessor.retrieve_for_entity, person_name,
+                    max(config.deduction_retrieve_top_k, 10), {person_name})
+            except Exception as e:
+                logger.debug("[Deduction] persona retrieve failed for %s: %s", person_name, e)
+        prompt = _build_prompt(person, person_name, fragments)
         system = "You are a JSON-only character profile generator. Output ONLY a valid JSON object. NO markdown, NO explanations."
         messages = [Message(role="user", content=prompt)]
+        async with sem:  # 并发上限 = FORGE_MAX_CONCURRENT
+            try:
+                if chat_fn is not None:
+                    content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
+                else:
+                    response = await client.chat(messages, system=system, temperature=0.7)
+                    content = extract_text(response)
+                profile_data = _parse_persona_json(content)
+                if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
+                    profile_data = _fallback(person_name)
+            except Exception as e:
+                logger.warning("[Deduction] Agent persona gen failed for %s: %s", person_name, e)
+                profile_data = _fallback(person_name)
+        return {"person": person, "name": person_name, "data": profile_data}
 
-        try:
-            if chat_fn is not None:
-                content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
-            else:
-                response = await client.chat(messages, system=system, temperature=0.7)
-                content = extract_text(response)
-            profile_data = _parse_persona_json(content)
-            # Fallback if JSON parsing failed
-            if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
-                profile_data = {
-                    "persona": f"{person_name}是一个参与事件的独立个体",
-                    "background": "来自原文背景",
-                    "goals": ["参与互动", "表达观点"],
-                }
-        except Exception as e:
-            logger.warning("[Deduction] Agent persona gen failed for %s: %s", person_name, e)
-            profile_data = {
-                "persona": f"{person_name}是一个参与事件的独立个体",
-                "background": "来自原文背景",
-                "goals": ["参与互动", "表达观点"],
-            }
+    # 并发生成人设（上限 = FORGE_MAX_CONCURRENT），随后按原顺序构造+写 Kuzu 以保持确定性
+    results = await asyncio.gather(
+        *(gen_one(i, p) for i, p in enumerate(persons[:max_agents])))
 
+    for i, r in enumerate(results):
+        person, person_name, profile_data = r["person"], r["name"], r["data"]
         agent_profile = DeductionAgentProfile(
             entity_id=person.get("id", uuid.uuid4().hex[:8]),
             name=person_name,
