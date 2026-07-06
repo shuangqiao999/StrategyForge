@@ -53,6 +53,13 @@ class DeductionConfig:
         self.deduction_similarity_threshold = float(os.getenv("FORGE_SIMILARITY_THRESHOLD", "0.4"))
         # 动态事件表混合检索(向量+BM25)开关，默认开启；开启时靠 RRF 排序而非余弦阈值。
         self.deduction_event_hybrid = os.getenv("FORGE_EVENT_HYBRID", "1") == "1"
+        # 云端 API 并发容错：429/5xx/传输错误的指数退避重试（面向 vLLM/云端高并发）
+        self.deduction_llm_max_retries = int(os.getenv("FORGE_LLM_MAX_RETRIES", "3"))
+        self.deduction_llm_retry_base = float(os.getenv("FORGE_LLM_RETRY_BASE", "1.0"))
+        self.deduction_llm_retry_cap = float(os.getenv("FORGE_LLM_RETRY_CAP", "30.0"))
+        # httpx 连接池上限（0=按并发自动派生，保证 >= FORGE_MAX_CONCURRENT）
+        self.deduction_http_max_connections = int(os.getenv("FORGE_HTTP_MAX_CONNECTIONS", "0"))
+        self.deduction_http_max_keepalive = int(os.getenv("FORGE_HTTP_MAX_KEEPALIVE", "0"))
 
     def __getattr__(self, name: str):
         return None

@@ -5,7 +5,9 @@ Only implements what the deduction engine actually uses: chat().
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass
 
@@ -65,9 +67,15 @@ class DeductionLLMClient:
             headers = {"Content-Type": "application/json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
+            # 连接池上限：0 表示按并发自动派生，保证 >= FORGE_MAX_CONCURRENT 且留余量
+            mc = max(1, config.deduction_max_concurrent)
+            max_conn = config.deduction_http_max_connections or max(100, mc * 2)
+            max_keep = config.deduction_http_max_keepalive or max(20, mc)
             self._http = httpx.AsyncClient(
                 timeout=httpx.Timeout(300.0),
                 headers=headers,
+                limits=httpx.Limits(max_connections=max_conn,
+                                    max_keepalive_connections=max_keep),
             )
 
     async def chat(
@@ -103,10 +111,7 @@ class DeductionLLMClient:
 
         t0 = time.monotonic()
         try:
-            resp = await self._http.post(
-                f"{self.api_base}/chat/completions", json=payload
-            )
-            resp.raise_for_status()
+            resp = await self._request_with_retry(payload)
             data = resp.json()
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             content = data["choices"][0]["message"]["content"]
@@ -130,6 +135,55 @@ class DeductionLLMClient:
         except Exception as e:
             logger.error("[LLM] Chat request failed: %s", e)
             raise
+
+    # 可重试的状态码：429 限流 + 5xx 服务端错误
+    _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+    async def _request_with_retry(self, payload: dict) -> httpx.Response:
+        """发送 chat 请求，对 429/5xx 与传输类错误做指数退避重试（面向云端高并发）。
+
+        非可重试的 4xx（400/401/403/404 等）立即抛出；重试用 asyncio.sleep（不阻塞其他并发请求）。
+        429 若带 Retry-After 头则优先遵循该延迟。
+        """
+        url = f"{self.api_base}/chat/completions"
+        max_retries = max(0, int(config.deduction_llm_max_retries))
+        base = max(0.0, float(config.deduction_llm_retry_base))
+        cap = max(base, float(config.deduction_llm_retry_cap))
+        attempt = 0
+        while True:
+            try:
+                resp = await self._http.post(url, json=payload)
+                if resp.status_code in self._RETRYABLE_STATUS and attempt < max_retries:
+                    delay = self._retry_delay(attempt, base, cap, resp)
+                    logger.warning("[LLM] %s，第 %d/%d 次重试，%.1fs 后…",
+                                   resp.status_code, attempt + 1, max_retries, delay)
+                    await asyncio.sleep(delay)
+                    attempt += 1
+                    continue
+                resp.raise_for_status()
+                return resp
+            except (httpx.TransportError, httpx.TimeoutException) as e:
+                if attempt >= max_retries:
+                    raise
+                delay = self._retry_delay(attempt, base, cap, None)
+                logger.warning("[LLM] 传输错误(%s)，第 %d/%d 次重试，%.1fs 后…",
+                               type(e).__name__, attempt + 1, max_retries, delay)
+                await asyncio.sleep(delay)
+                attempt += 1
+
+    @staticmethod
+    def _retry_delay(attempt: int, base: float, cap: float,
+                     resp: httpx.Response | None) -> float:
+        # 429 优先遵循 Retry-After（秒）
+        if resp is not None and resp.status_code == 429:
+            ra = resp.headers.get("Retry-After")
+            if ra:
+                try:
+                    return min(float(ra), cap)
+                except (TypeError, ValueError):
+                    pass
+        # 指数退避 + 抖动，封顶 cap
+        return min(base * (2 ** attempt) + random.uniform(0, base), cap)
 
     async def close(self):
         if self._http:

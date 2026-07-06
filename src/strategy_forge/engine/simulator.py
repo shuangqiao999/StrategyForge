@@ -264,16 +264,25 @@ class SimulationEngine:
         ordered = list(self.agents)
         self._rng.shuffle(ordered)
 
+        if self._cancel is not None and self._cancel.is_set():
+            raise _PhaseCancelledError()
+
         sem = asyncio.Semaphore(self._max_concurrent)
 
         async def process_agent(agent: DeductionAgentProfile) -> SimulationAction | None:
             async with sem:
+                # 取信号量后再查一次取消，便于并发批内尽早短路
+                if self._cancel is not None and self._cancel.is_set():
+                    return None
                 return await self._agent_decide(client, agent, round_number)
 
-        for agent in ordered:
-            if self._cancel is not None and self._cancel.is_set():
-                raise _PhaseCancelledError()
-            action = await process_agent(agent)
+        # 并发决策（上限 = FORGE_MAX_CONCURRENT），随后按 ordered 原序回填以保持确定性
+        results = await asyncio.gather(
+            *(process_agent(agent) for agent in ordered), return_exceptions=True)
+        for agent, action in zip(ordered, results, strict=False):
+            if isinstance(action, BaseException):
+                self._log("simulation", f"agent {agent.name} 决策失败: {action}")
+                continue
             if action is not None:
                 sim_round.actions.append(action)
                 self._event_history.append({
@@ -631,8 +640,11 @@ class SimulationEngine:
             for a in alive_agents
         }
 
-        async def decide(agent: DeductionAgentProfile) -> dict[str, Any]:
+        async def decide(agent: DeductionAgentProfile) -> dict[str, Any] | None:
             async with sem:
+                # 取信号量后再查取消，便于并发批内尽早短路
+                if self._cancel is not None and self._cancel.is_set():
+                    return None
                 static_text, dynamic_text = await _recall(agent)
                 rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
                 causal = _causal_ctxs.get(agent.entity_id, "")
@@ -652,23 +664,21 @@ class SimulationEngine:
 
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
-        # 逐代理决策（逐个等待，确保取消信号在代理之间能被及时检测）
         # ── FSM 分流：上一轮的 FSM 状态决定本轮哪些代理走 LLM ──
         fsm_states = getattr(self, "_last_fsm_states", None)
         fsm_actions = getattr(self, "_last_fsm_actions", None)
         fsm_command = getattr(self, "_last_fsm_command_states", {"combat"})
-        decisions: list[dict[str, Any]] = []
 
+        # 第一遍（顺序）：override / FSM 走确定性动作（纯 Python、含状态消费），
+        # command 态标记为 None 待第二遍并发 LLM 决策；plan 与 ordered 索引对齐以保序。
+        plan: list[dict[str, Any] | None] = []
         for i, agent in enumerate(ordered):
-            if self._cancel is not None and self._cancel.is_set():
-                self._log("simulation", f"取消信号：已处理 {i}/{len(ordered)} 代理后停止")
-                return sim_round
             # ── 用户强制 override：最高优先，跳过 FSM 与 LLM ──
             ov = self._pop_override(agent)
             if ov is not None:
                 ov["actor_id"] = agent.entity_id
                 ov["driver"] = "forced"
-                decisions.append(ov)
+                plan.append(ov)
                 self._log("simulation", f"[用户强制] {agent.name} → {ov.get('action_type')}")
                 continue
             # Check if FSM should drive this agent
@@ -684,14 +694,23 @@ class SimulationEngine:
                 act["rationale"] = self._describe_fsm_action(agent, state, act.get("action_type", "observe"))
                 act["driver"] = "fsm"
                 act["actor_id"] = agent.entity_id
-                decisions.append(act)
+                plan.append(act)
                 continue
-            # LLM decision for command-state agents
-            raw = await decide(agent)
-            if isinstance(raw, BaseException):
-                self._log("simulation", f"agent {agent.name} 决策失败: {raw}")
-            else:
-                decisions.append(raw)
+            plan.append(None)  # command 态 → 待并发 LLM 决策
+
+        # 第二遍：command 态 agent 并发 LLM 决策（上限 = FORGE_MAX_CONCURRENT），按索引回填保序
+        llm_idx = [i for i, p in enumerate(plan) if p is None]
+        if llm_idx and not (self._cancel is not None and self._cancel.is_set()):
+            llm_results = await asyncio.gather(
+                *(decide(ordered[i]) for i in llm_idx), return_exceptions=True)
+            for i, raw in zip(llm_idx, llm_results, strict=False):
+                if isinstance(raw, BaseException):
+                    self._log("simulation", f"agent {ordered[i].name} 决策失败: {raw}")
+                else:
+                    plan[i] = raw
+
+        # 按 ordered 原序装配 decisions（跳过 override/FSM 之外未成功的项）
+        decisions: list[dict[str, Any]] = [p for p in plan if p is not None]
         # raw_results kept below for backward compat
         raw_results = decisions
 
