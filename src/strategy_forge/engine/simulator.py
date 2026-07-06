@@ -330,6 +330,7 @@ class SimulationEngine:
     async def _agent_decide(
         self, client: Any, agent: DeductionAgentProfile, round_number: int
     ) -> SimulationAction | None:
+        from strategy_forge.core.config import config
         # ── 近期事件 (最近 5 条) ──
         recent = self._event_history[-5:]
         recent_text = "\n".join(

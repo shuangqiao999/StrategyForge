@@ -184,7 +184,7 @@ async def create_agents_from_graph(
                     description=person.get("description", ""),
                     role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
                     parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                    sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
+                    sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                     context=full_context[:8000],
                     keywords=", ".join(keywords) if keywords else "无",
                     user_expectations=ue,
@@ -196,7 +196,7 @@ async def create_agents_from_graph(
                     description=person.get("description", ""),
                     role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
                     parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                    sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
+                    sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                     context=source_material[:2000], user_expectations=ue,
                 )
         else:
@@ -205,7 +205,7 @@ async def create_agents_from_graph(
                 description=person.get("description", ""),
                 role=intel_map.get(person_name, {}).get("role", "独立博弈者"),
                 parent_info=str(intel_map.get(person_name, {}).get("parent") or "无"),
-                sub_info=", ".join(intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
+                sub_info=", ".join(str(s) for s in intel_map.get(person_name, {}).get("sub_entities", [])) or "无",
                 context=source_material[:2000], user_expectations=ue,
             )
 
