@@ -119,6 +119,16 @@ async def create_agents_from_graph(
                 alias_to_std[std] = std
                 for a in aliases:
                     alias_to_std[a] = std
+        # Fold intel_sorter semantic aliases (中英文名/简称) into the dedup map,
+        # so e.g. "乌军" 与 "乌克兰军队"、"OECD" 与 "经合组织" 归并为同一规范名
+        for e in (intel_list or []):
+            canon = (e.get("name") or "").strip()
+            if not canon:
+                continue
+            for a in e.get("aliases", []):
+                a = (a or "").strip()
+                if a:
+                    alias_to_std[a] = canon
         seen: set[str] = set()
         deduped: list[dict] = []
         for p in persons:

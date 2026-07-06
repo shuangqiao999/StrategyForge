@@ -29,10 +29,10 @@ $agent_overview
 ## 关键事件序列
 $key_events
 
-## 全局态势数据（每实体最终指标值 + 变化轨迹摘要）
+## 全局态势数据（每实体各指标的定性档位与趋势，无具体数值）
 $quantified_context
 
-## 确定性因果归因（数值真值）
+## 确定性因果归因（源→目标 的影响方向与强度，无具体数值）
 $causal_attribution
 
 ## 输出要求
@@ -40,25 +40,49 @@ $causal_attribution
 
 1. "narrative": 完整推演报告的自然语言文本（800-2000字）。写作要求：
    - 用"开头概括、中间叙事、结尾总结"的三段式结构
-   - 数据点用自然语言融入行文（如"北约的防御力量保持强劲，但现金流从85下降至76，反映出持续军援带来的财政压力"），而非"strength=100, cash_flow=76"
+   - 本引擎定位战略推演，聚焦事物走向与趋势判断：用自然语言描述各方态势的方向性变化（如"北约防御力量维持高位、财政持续承压"），准确刻画趋势即可
+   - 严禁输出任何具体数值/评分（不得写"技术领导力89分""信任度跌至个位数""strength=100"之类），也不要凭空编造精确数字
+   - 避免战术层面的定量建议；策略判断以方向、力度、态势为主
    - 不要出现 JSON 格式的痕迹、不要出现表格、不要出现项目符号列表
-   - 关键数字用中文量词表达（"大幅上升"、"小幅回落至约30"、"降至个位数"）
-   - 如刘震云或周梅森的非虚构叙事风格——事实稠密、判断克制
+   - 事实稠密、判断克制的非虚构叙事风格
 
-2. "risk_alerts": 风险预警列表（最多5条字符串）
+2. "risk_alerts": 风险预警列表（最多5条字符串，描述趋势性风险，不含具体数值）
 
-3. "recommendations": 策略建议列表（最多5条字符串）
+3. "recommendations": 策略建议列表（最多5条字符串，偏战略方向，不含具体数值）
 
 只返回 JSON，不要 markdown 标记。"""
+
+
+def _level_label(v: float) -> str:
+    """将指标值映射为定性档位（不输出具体数值，避免过度戏剧化极端值）。"""
+    if v >= 70:
+        return "高位"
+    if v >= 45:
+        return "中位"
+    if v >= 20:
+        return "偏低"
+    return "低位承压"
+
+
+def _trend_label(d: float) -> str:
+    """将累计变化量映射为趋势词。"""
+    if d > 15:
+        return "显著上升"
+    if d > 3:
+        return "上升"
+    if d < -15:
+        return "显著下降"
+    if d < -3:
+        return "下降"
+    return "趋稳"
 
 
 def _build_quantified_summary(
     rounds: list[SimulationRound],
     states: dict[str, Any] | None,
 ) -> str:
-    """Build concise quantified trajectory summary for narrative prompt input.
-
-    Each entity: 1 line of metrics + 1 line of key changes (max ~120 chars).
+    """Build a QUALITATIVE trajectory summary (档位+趋势, 不含具体数值) for the
+    narrative prompt. 战略推演聚焦走向趋势，不向报告注入裸数值以免锚定极端读数。
     """
     if not states:
         return "（叙事模式，无量化指标数据）"
@@ -66,10 +90,7 @@ def _build_quantified_summary(
     parts: list[str] = []
     for eid, st in states.items():
         name = getattr(st, "name", eid[:8])
-        metrics_str = ", ".join(
-            f"{k}={v:.0f}" for k, v in st.metrics.items()
-        )
-        # Collect key deltas from last 3 rounds
+        # 累计各指标近期变化
         history = getattr(st, "history", []) or []
         deltas_by_metric: dict[str, float] = {}
         for h in history[-30:]:
@@ -77,12 +98,12 @@ def _build_quantified_summary(
             d = h.get("delta", 0)
             if m:
                 deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
-        # Show only metrics with significant change
-        significant = {k: v for k, v in deltas_by_metric.items() if abs(v) > 3}
-        change_str = ", ".join(
-            f"{k}{v:+.0f}" for k, v in list(significant.items())[:6]
-        ) if significant else "无明显变化"
-        parts.append(f"{name}: {metrics_str} | 趋势: {change_str}")
+        # 每个指标输出 "指标(档位·趋势)"，不写具体数字
+        segs: list[str] = []
+        for k, v in st.metrics.items():
+            trend = _trend_label(deltas_by_metric.get(k, 0.0))
+            segs.append(f"{k}({_level_label(float(v))}·{trend})")
+        parts.append(f"{name}: {', '.join(segs) if segs else '无指标'}")
     return "\n".join(parts)
 
 
@@ -160,12 +181,17 @@ async def generate_report(
         except Exception as e:
             logger.debug("[Reporter] 行动时序查询失败: %s", e)
 
-    # 确定性因果归因：从 Kuzu CAUSED 边汇总"源→目标 累计指标影响"，校正 LLM 软推断
+    # 确定性因果归因：从 Kuzu CAUSED 边汇总"源→目标 影响方向"，校正 LLM 软推断（定性，不输出数值）
     causal_attribution = "（无确定性因果数据）"
     if graph is not None:
         try:
             summary = graph.get_causal_summary(limit=15)
-            clines = [f"- {s['source']} → {s['target']}: {s['metric']}{s['amount']:+.1f}（累计）"
+
+            def _causal_dir(amt: float) -> str:
+                mag = "强" if abs(amt) >= 10 else ("中" if abs(amt) >= 3 else "弱")
+                return ("助益" if amt > 0 else "致衰") + f"（{mag}）"
+
+            clines = [f"- {s['source']} → {s['target']}: {s['metric']} {_causal_dir(float(s['amount']))}"
                       for s in summary if s.get("metric")]
             if clines:
                 causal_attribution = "\n".join(clines)

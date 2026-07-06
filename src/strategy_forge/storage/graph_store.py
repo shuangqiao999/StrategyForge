@@ -235,6 +235,73 @@ class DeductionGraphStore:
                 names.append(str(r[0]))
         return names
 
+    def merge_alias_nodes(self, canonical: str, aliases: list[str]) -> int:
+        """将别名 Entity 节点并入规范节点：重指其 RELATES 边到规范节点后删除别名节点。
+
+        仅应在建图后、模拟前（Phase 2.5）调用——此时图中只有 RELATES 边，
+        尚无 Event/ACTED/CAUSED/TARGETS，故合并成本低。返回实际合并的别名数。
+        """
+        canonical = (canonical or "").strip()
+        alias_set = {a.strip() for a in aliases
+                     if (a or "").strip() and (a or "").strip() != canonical}
+        if not canonical or not alias_set:
+            return 0
+        self._check_conn()
+
+        def _rows(cypher: str, params: dict) -> list[list[Any]]:
+            res = self._conn.execute(cypher, params)
+            out: list[list[Any]] = []
+            while res.has_next():
+                out.append(res.get_next())
+            return out
+
+        merged = 0
+        with self._lock:
+            crows = _rows(f"MATCH (c:{self.NODE_TABLE} {{name: $n}}) RETURN c.id LIMIT 1",
+                          {"n": canonical})
+            cid = crows[0][0] if crows else None
+            for alias in alias_set:
+                arows = _rows(f"MATCH (a:{self.NODE_TABLE} {{name: $n}}) RETURN a.id LIMIT 1",
+                              {"n": alias})
+                if not arows:
+                    continue
+                aid = arows[0][0]
+                if cid is None:
+                    # 规范节点缺失：将首个别名节点改名为规范名，充当规范节点
+                    self._conn.execute(
+                        f"MATCH (a:{self.NODE_TABLE} {{id: $id}}) SET a.name = $n",
+                        {"id": aid, "n": canonical})
+                    cid = aid
+                    merged += 1
+                    continue
+                if aid == cid:
+                    continue
+                # 重指出边: alias -> y  ==>  canonical -> y
+                for rel, w, yid in _rows(
+                    f"MATCH (a:{self.NODE_TABLE} {{id: $id}})-[r:RELATES]->(y:{self.NODE_TABLE}) "
+                    "RETURN r.relation, r.weight, y.id", {"id": aid}):
+                    if yid == cid:
+                        continue
+                    self._conn.execute(
+                        f"MATCH (c:{self.NODE_TABLE} {{id: $cid}}), (y:{self.NODE_TABLE} {{id: $yid}}) "
+                        "MERGE (c)-[r:RELATES {relation: $rel}]->(y) SET r.weight = $w",
+                        {"cid": cid, "yid": yid, "rel": rel or "", "w": w if w is not None else 1.0})
+                # 重指入边: x -> alias  ==>  x -> canonical
+                for rel, w, xid in _rows(
+                    f"MATCH (x:{self.NODE_TABLE})-[r:RELATES]->(a:{self.NODE_TABLE} {{id: $id}}) "
+                    "RETURN r.relation, r.weight, x.id", {"id": aid}):
+                    if xid == cid:
+                        continue
+                    self._conn.execute(
+                        f"MATCH (x:{self.NODE_TABLE} {{id: $xid}}), (c:{self.NODE_TABLE} {{id: $cid}}) "
+                        "MERGE (x)-[r:RELATES {relation: $rel}]->(c) SET r.weight = $w",
+                        {"xid": xid, "cid": cid, "rel": rel or "", "w": w if w is not None else 1.0})
+                # 删除别名节点及其残余边
+                self._conn.execute(
+                    f"MATCH (a:{self.NODE_TABLE} {{id: $id}}) DETACH DELETE a", {"id": aid})
+                merged += 1
+        return merged
+
     def get_entity_neighbors(self, entity_id: str, max_depth: int = 1) -> dict[str, Any]:
         """返回实体的关系邻居。
 

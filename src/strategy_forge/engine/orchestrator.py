@@ -367,6 +367,19 @@ class DeductionOrchestrator:
                 active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
                 passive = len(self._intel_list) - active
                 self._log("graph", f"情报整理: {len(self._intel_list)} 实体 → {active} 核心博弈者 + {passive} 非战略实体")
+                # 别名合并: 将同一实体的中英文名/简称节点并入规范节点(此时图中仅 RELATES 边)
+                merged_total = 0
+                for e in self._intel_list:
+                    aliases = e.get("aliases") or []
+                    if aliases:
+                        try:
+                            merged_total += self.graph.merge_alias_nodes(e.get("name", ""), aliases)
+                        except Exception as ex:
+                            logger.debug("[Orchestrator] 别名合并失败 %s: %s", e.get("name"), ex)
+                if merged_total:
+                    e_count2 = self.graph.count_entities()
+                    self.store.update(self.session.id, entity_count=e_count2)
+                    self._log("graph", f"别名合并: 并入 {merged_total} 个别名节点，实体数→{e_count2}")
         except Exception as e:
             logger.warning("[Orchestrator] 情报整理失败，使用全部实体: %s", e)
             self._intel_list = []
