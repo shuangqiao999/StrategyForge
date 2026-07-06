@@ -331,8 +331,8 @@ class SimulationEngine:
         self, client: Any, agent: DeductionAgentProfile, round_number: int
     ) -> SimulationAction | None:
         from strategy_forge.core.config import config
-        # ── 近期事件 (最近 5 条) ──
-        recent = self._event_history[-5:]
+        # ── 近期事件 ──
+        recent = self._event_history[-max(1, config.deduction_sim_recent_events):]
         recent_text = "\n".join(
             f"- [{e.get('round', '?')}] {e.get('agent_name', e.get('agent', '?'))}: "
             f"{e.get('content', '')[:80]}"
@@ -429,6 +429,7 @@ class SimulationEngine:
     async def _run_round_quantified(self, round_number: int) -> SimulationRound:
         from datetime import datetime
 
+        from strategy_forge.core.config import config as _cfg
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
 
         sim_round = SimulationRound(round_number=round_number)
@@ -447,28 +448,49 @@ class SimulationEngine:
 
         recent = "\n".join(
             f"- [{e.get('round','?')}] {e.get('agent_name','?')}: {e.get('content','')[:80]}"
-            for e in self._event_history[-5:]
+            for e in self._event_history[-max(1, _cfg.deduction_sim_recent_events):]
         ) or "（无近期事件）"
 
         # Pre-build O(1) entity-id→index map for spatial lookups
         alive_id_to_idx = {eid: i for i, eid in enumerate(alive_ids)} if alive_ids else {}
 
         def others_ctx(self_id: str) -> str:
-            if len(alive_agents) > 30:
-                return _build_summary_ctx(self_id, alive_agents, states, alive_id_to_idx,
-                                          self._spatial_state, re_engine)
-            lines = []
+            # B1: 只渲染 Top-K 最相关他方(盟友/对手>最近>最危急)，其余合并为全局摘要，
+            # 把每 agent prompt 的他方块从 O(N) 降到 O(K)，消除 O(N^2) 与逐轮膨胀。
+            from strategy_forge.core.config import config as _c
+            topk = max(1, int(getattr(_c, "deduction_sim_others_topk", 10)))
+            metrics_list = re_engine.metrics()
             idx_self = alive_id_to_idx.get(self_id)
-            for a in alive_agents:
-                if a.entity_id == self_id:
-                    continue
+            sp = self._spatial_state
+            rel = getattr(self, "_rel_context", {}).get(self_id, {}) or {}
+            important = set(rel.get("allies", []) or []) | set(rel.get("opponents", []) or [])
+
+            def _dist(a) -> float | None:
+                if sp is not None and idx_self is not None:
+                    io = alive_id_to_idx.get(a.entity_id)
+                    if io is not None and idx_self < len(sp.positions) and io < len(sp.positions):
+                        return float(np.linalg.norm(sp.positions[idx_self] - sp.positions[io]))
+                return None
+
+            others = [a for a in alive_agents if a.entity_id != self_id]
+            if not others:
+                return "（无其他参与方）"
+
+            def _salience(a):
+                st = states[a.entity_id]
+                rel_pri = 0 if st.name in important else 1
+                d = _dist(a)
+                mtot = sum(st.metrics.values()) if st.metrics else 0.0
+                return (rel_pri, d if d is not None else 1e9, mtot)
+
+            ranked = sorted(others, key=_salience)
+            shown, rest = ranked[:topk], ranked[topk:]
+
+            def _detail(a) -> str:
                 st = states[a.entity_id]
                 line = st.to_prompt_context()
-                # ── Trend perception: show multi-round metric deltas ──
                 hist = getattr(st, "history", []) or []
-                if len(hist) >= 6:  # at least 2 rounds with ~3 metrics each
-                    trend_parts = []
-                    # Reconstruct per-round metric values from history entries
+                if len(hist) >= 6:
                     by_round: dict[int, dict[str, float]] = {}
                     for entry in hist:
                         if isinstance(entry, dict):
@@ -480,68 +502,31 @@ class SimulationEngine:
                     rounds = sorted(by_round.keys())
                     if len(rounds) >= 2:
                         first, last = by_round[rounds[0]], by_round[rounds[-1]]
-                        for metric in re_engine.metrics():
+                        trend_parts = []
+                        for metric in metrics_list:
                             v0, v1 = first.get(metric, 0), last.get(metric, 0)
                             if v0 > 0 and abs(v1 - v0) > 3.0:
-                                symbol = "↑" if v1 > v0 else "↓"
-                                trend_parts.append(f"{metric}{symbol}{abs(v1-v0):.0f}")
-                    if trend_parts:
-                        line += f"  多轮趋势: {', '.join(trend_parts)}"
-                if self._spatial_state is not None and idx_self is not None:
-                    sp = self._spatial_state
-                    idx_other = alive_id_to_idx.get(a.entity_id)
-                    if idx_other is not None and idx_self < len(sp.positions) and idx_other < len(sp.positions):
-                        dist = float(np.linalg.norm(sp.positions[idx_self] - sp.positions[idx_other]))
-                        line += f"  距离: {dist:.0f}m"
-                lines.append(line)
-            return "\n".join(lines) or "（无其他参与方）"
+                                trend_parts.append(f"{metric}{'↑' if v1 > v0 else '↓'}{abs(v1-v0):.0f}")
+                        if trend_parts:
+                            line += f"  多轮趋势: {', '.join(trend_parts)}"
+                d = _dist(a)
+                if d is not None:
+                    line += f"  距离: {d:.0f}m"
+                return line
 
-        def _build_summary_ctx(self_id, alive_agents, states, id_to_idx, spatial_state, re_engine):
-            """N>30: bucket entities by distance + show global averages. Keeps prompts O(1)."""
-            import numpy as _np
-            ml = []
-            idx_self = id_to_idx.get(self_id)
-            metrics_list = re_engine.metrics()
-            buckets = {"close": [], "mid": [], "far": []}
-            for a in alive_agents:
-                if a.entity_id == self_id: continue
-                st = states[a.entity_id]
-                dist = 9999.0
-                if spatial_state is not None and idx_self is not None:
-                    idx_other = id_to_idx.get(a.entity_id)
-                    if idx_other is not None and idx_self < len(spatial_state.positions) and idx_other < len(spatial_state.positions):
-                        dvec = spatial_state.positions[idx_self] - spatial_state.positions[idx_other]
-                        dist = float(_np.linalg.norm(dvec))
-                entry = {"name": st.name, "metrics": dict(st.metrics), "dist": dist}
-                if dist < 50: buckets["close"].append(entry)
-                elif dist < 200: buckets["mid"].append(entry)
-                else: buckets["far"].append(entry)
-            def _s(e, cnt):
-                m = e["metrics"]
-                kv = ", ".join(f"{k}={m.get(k,0):.0f}" for k in metrics_list[:cnt])
-                return f"{e['name']}({kv}, d={e['dist']:.0f}m)"
-            if buckets["close"]:
-                buckets["close"].sort(key=lambda e: e["dist"])
-                ml.append(f"邻近威胁（<50m, {len(buckets['close'])}个）:")
-                for e in buckets["close"][:8]: ml.append(f"  {_s(e, 4)}")
-            if buckets["mid"]:
-                buckets["mid"].sort(key=lambda e: e["dist"])
-                ml.append(f"中等距离（50-200m, {len(buckets['mid'])}个）:")
-                for e in buckets["mid"][:5]: ml.append(f"  {_s(e, 2)}")
-            fc = len(buckets["far"])
-            if fc > 0: ml.append(f"远处（>200m, {fc}个）")
-            all_m = [_np.array(list(states[e.entity_id].metrics.values()), dtype=_np.float64)
-                      for e in alive_agents if e.entity_id != self_id]
-            if all_m:
-                arr = _np.stack(all_m)
-                avgs = _np.mean(arr, axis=0)
-                mins = _np.min(arr, axis=0)
-                maxs = _np.max(arr, axis=0)
-                parts = []
-                for i, m in enumerate(metrics_list):
-                    parts.append(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]")
-                ml.append("全局统计: " + ", ".join(parts))
-            return "\n".join(ml) if ml else "（无其他参与方）"
+            lines = [_detail(a) for a in shown]
+            if rest:
+                arr = np.stack([
+                    np.array([states[a.entity_id].metrics.get(m, 0.0) for m in metrics_list],
+                             dtype=np.float64) for a in rest]) if metrics_list else None
+                if arr is not None and arr.size:
+                    avgs, mins, maxs = arr.mean(0), arr.min(0), arr.max(0)
+                    stat = ", ".join(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]"
+                                     for i, m in enumerate(metrics_list))
+                    lines.append(f"其余 {len(rest)} 方（全局）: {stat}")
+                else:
+                    lines.append(f"其余 {len(rest)} 方")
+            return "\n".join(lines) or "（无其他参与方）"
 
         def env_context() -> str:
             """Build terrain/weather description for the LLM prompt."""
@@ -589,7 +574,6 @@ class SimulationEngine:
                 lines.append("接触/碰撞中: " + "、".join(in_contact))
             return "\n".join(lines)
 
-        from strategy_forge.core.config import config as _cfg
         sem = asyncio.Semaphore(self._max_concurrent)
 
         # Clear round-level caches at start of round
@@ -599,14 +583,17 @@ class SimulationEngine:
         async def _recall(agent: DeductionAgentProfile) -> tuple[str, str]:
             """量化轮的 LanceDB 语义召回：Path A 原著静态(只读，优化器也启用) + Path B 动态事件。"""
             static_text, dynamic_text = "", ""
+            # B2: 模拟召回片段数与字符预算独立于 graph/agents 的检索深度
+            _rk = max(1, _cfg.deduction_sim_recall_topk)
+            _rc = max(200, _cfg.deduction_sim_recall_chars)
             pp = self._preprocessor
             if pp is not None and getattr(pp, "result", None):
                 try:
                     frags = await asyncio.to_thread(
-                        pp.retrieve_for_entity, agent.name, _cfg.deduction_retrieve_top_k,
+                        pp.retrieve_for_entity, agent.name, _rk,
                         {agent.name} if agent.name else None)
                     if frags:
-                        static_text = "\n---\n".join(f[:300] for f in frags)
+                        static_text = "\n---\n".join(f[:300] for f in frags[:_rk])[:_rc]
                 except Exception as e:
                     logger.debug("[Simulator] 量化静态召回失败 %s: %s", agent.name, e)
             if self._persist_events and pp is not None:
@@ -617,10 +604,10 @@ class SimulationEngine:
                         aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
                     query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
                     frags = await asyncio.to_thread(
-                        pp.retrieve_dynamic_events, query, _cfg.deduction_retrieve_top_k,
+                        pp.retrieve_dynamic_events, query, _rk,
                         _cfg.deduction_similarity_threshold)
                     if frags:
-                        dynamic_text = "\n---\n".join(frags)
+                        dynamic_text = "\n---\n".join(frags[:_rk])[:_rc]
                 except Exception as e:
                     logger.debug("[Simulator] 量化动态召回失败 %s: %s", agent.name, e)
             elif not self._persist_events:

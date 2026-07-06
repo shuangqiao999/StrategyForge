@@ -6,6 +6,7 @@ Supports two modes:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -117,32 +118,48 @@ async def build_graph(
                 alias_map=alias_map_str,
             )
 
-            for i, (std_name, aliases) in enumerate(high_freq.items()):
-                # 混合检索: 向量召回 + 关键词二次过滤
+            # ── Phase 1（顺序·廉价）：混合检索 + 构建每实体抽取 prompt ──
+            from strategy_forge.core.tokenizer import compress_to_keywords
+            hf_items = list(high_freq.items())
+            prompts: list[str | None] = []
+            for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
-                    std_name, config.deduction_retrieve_top_k,
-                    must_contain=aliases,
-                )
+                    std_name, config.deduction_retrieve_top_k, must_contain=aliases)
                 if not fragments:
+                    prompts.append(None)
                     continue
-
                 fused = "\n---\n".join(fragments)
-
-                # Jieba 关键词标签 (不压缩原文，仅作标签)
-                from strategy_forge.core.tokenizer import compress_to_keywords
                 keywords = compress_to_keywords(fused, top_k=10)
                 keyword_tag = f"\n\n## 关键词标签\n{', '.join(keywords)}" if keywords else ""
+                prompts.append(_extract_base.replace("__TEXT__", fused[:6000] + keyword_tag))
 
-                messages = [Message(role="user", content=_extract_base.replace("__TEXT__", fused[:6000] + keyword_tag))]
+            # ── Phase 2（并发·LLM 抽取，上限 = FORGE_MAX_CONCURRENT）──
+            sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
 
+            async def _extract_call(prompt: str) -> str | None:
+                async with sem:
+                    try:
+                        resp = await client.chat(
+                            [Message(role="user", content=prompt)], system=system, temperature=0.1)
+                        return _extract_text(resp)
+                    except Exception as e:
+                        logger.warning("[Graph] Entity-driven extract failed: %s", e)
+                        return None
+
+            idxs = [k for k, p in enumerate(prompts) if p is not None]
+            gathered = await asyncio.gather(*(_extract_call(prompts[k]) for k in idxs))
+            content_by_idx = dict(zip(idxs, gathered, strict=False))
+
+            # ── Phase 3（顺序·写库，保持与原实现一致的确定性顺序）──
+            for i, (std_name, _aliases) in enumerate(hf_items):
+                content = content_by_idx.get(i)
+                if not content:
+                    continue
                 try:
-                    response = await client.chat(messages, system=system, temperature=0.1)
-                    content = _extract_text(response)
                     entities, relations = _parse_extraction(content)
                 except Exception as e:
-                    logger.warning("[Graph] Entity-driven extract '%s' failed: %s", std_name, e)
+                    logger.warning("[Graph] parse '%s' failed: %s", std_name, e)
                     continue
-
                 # 归一化 + 写入 Kuzu (O(1) reverse alias lookup)
                 for ent in entities:
                     name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
@@ -150,7 +167,6 @@ async def build_graph(
                     graph.upsert_entity(ent_id, name, ent.get("type", ""),
                                        ent.get("description", ""))
                     total_entities += 1
-
                 for rel in relations:
                     sid = _make_id(
                         _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
@@ -161,9 +177,8 @@ async def build_graph(
                         evidence=rel.get("evidence", ""),
                     )
                     total_relations += 1
-
-                if (i + 1) % 5 == 0 or i == len(high_freq) - 1:
-                    log_fn("graph", f"  实体 {i+1}/{len(high_freq)}: {total_entities} 实体, {total_relations} 关系")
+                if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
+                    log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: {total_entities} 实体, {total_relations} 关系")
 
         # ── 低频实体 → 语义分块顺带抽取 ──
         if result.chunks and low_freq:
@@ -191,6 +206,7 @@ async def _extract_from_chunks(
     entity_types, relation_types,
     total_entities: int = 0, total_relations: int = 0,
 ) -> None:
+    from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
     system = "你是知识图谱构建专家，从文本中精确抽取实体和关系三元组。只输出 JSON。"
 
@@ -202,31 +218,42 @@ async def _extract_from_chunks(
         alias_map="{}",
     )
 
-    for i, chunk in enumerate(chunks):
-        text = chunk if isinstance(chunk, str) else chunk.content
-        messages = [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))]
+    # 并发抽取（上限 = FORGE_MAX_CONCURRENT），随后按原顺序写库
+    sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
 
+    async def _chunk_call(text: str) -> str | None:
+        async with sem:
+            try:
+                resp = await client.chat(
+                    [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
+                    system=system, temperature=0.1)
+                return _extract_text(resp)
+            except Exception as e:
+                logger.warning("[Graph] Chunk extract failed: %s", e)
+                return None
+
+    texts = [(c if isinstance(c, str) else c.content) for c in chunks]
+    contents = await asyncio.gather(*(_chunk_call(t) for t in texts))
+
+    for i, content in enumerate(contents):
+        if not content:
+            continue
         try:
-            response = await client.chat(messages, system=system, temperature=0.1)
-            content = _extract_text(response)
             entities, relations = _parse_extraction(content)
         except Exception as e:
-            logger.warning("[Graph] Chunk %d extract failed: %s", i, e)
+            logger.warning("[Graph] Chunk %d parse failed: %s", i, e)
             continue
-
         for ent in entities:
             ent_id = _make_id(ent.get("entity", ""), "")
             graph.upsert_entity(ent_id, ent.get("entity", ""), ent.get("type", ""),
                                ent.get("description", ""))
             total_entities += 1
-
         for rel in relations:
             sid = _make_id(rel.get("source", ""), "")
             tid = _make_id(rel.get("target", ""), "")
             graph.upsert_relation(sid, tid, rel.get("relation", ""),
                                  evidence=rel.get("evidence", ""))
             total_relations += 1
-
         log_fn("graph", f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系")
 
 

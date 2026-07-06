@@ -272,27 +272,8 @@ class StrategicReasoner:
         select_hint = ("从可选行动中分配资源给一个或多个动作"
                        if self._enable_multi_action else "从可选行动中选择一个并给出投入力度")
         diversity_hint = "。避免连续3轮以上重复相同策略，结合当前局势变化探索多元行动" if round_number > 3 else ""
-        # Core mission goes FIRST — LLM pays most attention to opening text
-        mission_block = ""
-        if imm != "无":
-            mission_block = f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n\n"
-        header = (
-            mission_block
-            + f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
-            + f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n\n"
-            + f"## 你的人格\n{agent.persona or '（无）'}\n"
-            + f"## 你的目标\n{goals}\n"
-            + (f"## 外部干预指令（最高优先级）\n{user_cmd}\n" if user_cmd else "")
-            + f"## 你的当前状态\n{state.to_prompt_context()}\n"
-            f"## 其他参与方状态\n{other_context or '（暂无）'}\n"
-            + (f"## 关系网络（盟友/对手）\n{relationship_context}\n" if relationship_context else "")
-            + (f"## 原著背景（语义召回）\n{static_knowledge}\n" if static_knowledge else "")
-            + (f"## 历史记忆（语义召回）\n{dynamic_memory}\n" if dynamic_memory else "")
-            + f"## 近期局势\n{recent_events or '（无）'}\n"
-            + (f"## 空间环境\n{spatial_context}\n" if spatial_context else "")
-            + (f"## 地形与天气\n{env_context}\n" if env_context else "")
-            + f"\n## 可选行动\n{self._cached_action_catalog(rule_engine)}\n\n"
-        )
+        # B4: 云端 prompt 缓存友好排序 —— 同一轮所有 agent 相同的"共享前缀"放最前
+        # (不可变目标/可选动作/地形/干预/近期局势)，agent 私有部分居中，输出规范置末。
         if self._enable_multi_action:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
@@ -311,7 +292,38 @@ class StrategicReasoner:
                 '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
                 "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
             )
-        prompt = header + output_spec
+
+        # ── 共享前缀（同轮所有 agent 一致，利于云端前缀缓存）──
+        prefix_parts: list[str] = []
+        if imm != "无":
+            prefix_parts.append(f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n")
+        prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine)}\n")
+        if env_context:
+            prefix_parts.append(f"## 地形与天气\n{env_context}\n")
+        if user_cmd:
+            prefix_parts.append(f"## 外部干预指令（最高优先级）\n{user_cmd}\n")
+        prefix_parts.append(f"## 近期局势\n{recent_events or '（无）'}\n")
+        shared_prefix = "\n".join(prefix_parts) + "\n"
+
+        # ── agent 私有部分 ──
+        agent_parts = [
+            f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
+            f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n",
+            f"## 你的人格\n{agent.persona or '（无）'}\n",
+            f"## 你的目标\n{goals}\n",
+            f"## 你的当前状态\n{state.to_prompt_context()}\n",
+            f"## 其他参与方状态\n{other_context or '（暂无）'}\n",
+        ]
+        if relationship_context:
+            agent_parts.append(f"## 关系网络（盟友/对手）\n{relationship_context}\n")
+        if static_knowledge:
+            agent_parts.append(f"## 原著背景（语义召回）\n{static_knowledge}\n")
+        if dynamic_memory:
+            agent_parts.append(f"## 历史记忆（语义召回）\n{dynamic_memory}\n")
+        if spatial_context:
+            agent_parts.append(f"## 空间环境\n{spatial_context}\n")
+
+        prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"
         llm = client if client is not None else LLMClient()
         try:

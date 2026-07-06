@@ -60,6 +60,14 @@ class DeductionConfig:
         # httpx 连接池上限（0=按并发自动派生，保证 >= FORGE_MAX_CONCURRENT）
         self.deduction_http_max_connections = int(os.getenv("FORGE_HTTP_MAX_CONNECTIONS", "0"))
         self.deduction_http_max_keepalive = int(os.getenv("FORGE_HTTP_MAX_KEEPALIVE", "0"))
+        # 模拟阶段 token 优化（Plan B）：控制每 agent 决策 prompt 的上下文规模。
+        # others_ctx 只渲染 Top-K 最相关他方(其余合并为全局摘要)，砍掉 O(N^2) 与逐轮膨胀。
+        self.deduction_sim_others_topk = int(os.getenv("FORGE_SIM_OTHERS_TOPK", "10"))
+        # 模拟召回(原著/事件)片段上限 + 单块字符预算。
+        self.deduction_sim_recall_topk = int(os.getenv("FORGE_SIM_RECALL_TOPK", "4"))
+        self.deduction_sim_recall_chars = int(os.getenv("FORGE_SIM_RECALL_CHARS", "1200"))
+        # 注入决策 prompt 的近期事件条数。
+        self.deduction_sim_recent_events = int(os.getenv("FORGE_SIM_RECENT_EVENTS", "4"))
 
     def __getattr__(self, name: str):
         return None
