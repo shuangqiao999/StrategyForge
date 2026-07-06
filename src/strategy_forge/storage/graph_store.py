@@ -85,21 +85,13 @@ class DeductionGraphStore:
     def upsert_entity(self, entity_id: str, name: str, etype: str,
                       description: str = "") -> None:
         self._check_conn()
-        # Kuzu 0.11.3 支持 $param 仅限 MERGE 节点匹配，不支持 MATCH..SET = $param。
-        # 因此用参数化 MERGE + 内联转义 SET（已验证无 SQL 注入风险）。
+        # 单条参数化 MERGE+SET（对新建/命中都赋值），一次事务；参数绑定天然防注入。
+        # 注意：参数名避开 DESC 关键字，故用 $description 而非 $desc。
         with self._lock:
             self._conn.execute(
-                f"MERGE (e:{self.NODE_TABLE} {{id: $id}})",
-                {"id": entity_id},
-            )
-            safe_name = name.replace("'", "\\'")
-            safe_type = etype.replace("'", "\\'")
-            safe_desc = description.replace("'", "\\'")
-            self._conn.execute(
-                f"MATCH (e:{self.NODE_TABLE} {{id: $id}}) "
-                f"SET e.name = '{safe_name}', e.type = '{safe_type}', "
-                f"e.description = '{safe_desc}'",
-                {"id": entity_id},
+                f"MERGE (e:{self.NODE_TABLE} {{id: $id}}) "
+                "SET e.name = $name, e.type = $type, e.description = $description",
+                {"id": entity_id, "name": name, "type": etype, "description": description},
             )
 
     def upsert_relation(self, source_id: str, target_id: str,
