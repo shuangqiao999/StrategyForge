@@ -2384,17 +2384,17 @@
             "_logistic_rate": 0.06,
             "_global_mean": 50,
             "_diffusion_rate": 0.015,
-            "_competition_factor": 0.3
+            "_competition_factor": 0.5
           }
         }
       },
-        "physics_engine": {
+      "physics_engine": {
           "collision_elasticity": 0.3,
           "diffusion_rate": 0.04
         },
         "opinion_dynamics": {
           "target_metrics": ["public_trust", "morale", "support_rate"],
-          "epsilon": 0.25,
+          "epsilon": 0.10,
           "graph_type": "complete",
           "weighted": true,
           "norm_range": [0, 100]
@@ -2420,11 +2420,21 @@
             "condition": {
               "strength": [
                 ">",
-                70
+                50
               ],
               "intl_relations": [
                 ">",
-                40
+                30
+              ]
+            }
+          },
+          {
+            "from": "observe",
+            "to": "engage",
+            "condition": {
+              "distance_to_enemy": [
+                "<",
+                200
               ]
             }
           },
