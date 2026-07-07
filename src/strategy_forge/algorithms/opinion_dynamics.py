@@ -30,7 +30,9 @@ class OpinionDynamicsModule(AlgorithmModule):
     def __init__(self) -> None:
         self._target_metrics: list[str] = []
         self._epsilon: float = 0.3  # bounded confidence radius (normalized 0-1)
-        self._use_social_graph: bool = False
+        self._graph_type: str = "spatial"
+        self._weighted: bool = False
+        self._norm_range: tuple[float, float] | None = None
 
     @property
     def name(self) -> str:
@@ -43,7 +45,13 @@ class OpinionDynamicsModule(AlgorithmModule):
     def configure(self, params: dict[str, Any]) -> None:
         self._target_metrics = list(params.get("target_metrics", []))
         self._epsilon = float(params.get("epsilon", 0.3))
-        self._use_social_graph = bool(params.get("use_social_graph", False))
+        self._graph_type = str(params.get("graph_type", "spatial"))
+        self._weighted = bool(params.get("weighted", False))
+        nr = params.get("norm_range", None)
+        if nr is not None and len(nr) == 2:
+            self._norm_range = (float(nr[0]), float(nr[1]))
+        else:
+            self._norm_range = None
 
     def execute(self, ctx: ModuleContext) -> ModuleContext:
         if not self._target_metrics:
@@ -54,10 +62,15 @@ class OpinionDynamicsModule(AlgorithmModule):
             return ctx
 
         # Build adjacency / similarity matrix
-        if self._use_social_graph and "social_graph" in ctx.metadata:
+        if self._graph_type == "social" and "social_graph" in ctx.metadata:
             adj = np.array(ctx.metadata["social_graph"], dtype=np.float64)
+        elif self._graph_type == "complete":
+            adj = np.ones((n, n), dtype=np.float64)
+            np.fill_diagonal(adj, 0.0)
+        elif self._graph_type == "from_metadata" and "relation_graph" in ctx.metadata:
+            adj = np.array(ctx.metadata["relation_graph"], dtype=np.float64)
         else:
-            # Default: spatial-proximity based graph (1 if distance < 2*radius, else 0)
+            # Default "spatial": spatial-proximity based graph
             sp = ctx.spatial
             adj = np.zeros((n, n), dtype=np.float64)
             for i in range(n):
@@ -72,11 +85,21 @@ class OpinionDynamicsModule(AlgorithmModule):
             if metric not in ctx.arrays:
                 continue
             opinions = ctx.arrays[metric].copy()
-            max_val = np.max(opinions) if len(opinions) > 0 else 1.0
-            if max_val <= 0:
-                max_val = 1.0
             # Normalize to [0, 1] for epsilon comparison
-            norm = opinions / max_val
+            if self._norm_range is not None:
+                lo, hi = self._norm_range
+                scale = hi - lo
+                if scale > 0:
+                    norm = (opinions - lo) / scale
+                else:
+                    max_val = np.max(opinions) if len(opinions) > 0 else 1.0
+                    max_val = max(max_val, 1.0)
+                    norm = opinions / max_val
+            else:
+                max_val = np.max(opinions) if len(opinions) > 0 else 1.0
+                if max_val <= 0:
+                    max_val = 1.0
+                norm = opinions / max_val
             new_opinions = opinions.copy()
 
             for i in range(n):
@@ -84,8 +107,16 @@ class OpinionDynamicsModule(AlgorithmModule):
                 mask = (diff <= self._epsilon) & (adj[i] > 0)
                 mask[i] = False  # exclude self
                 if np.any(mask):
-                    neighbors = opinions[mask]
-                    new_opinions[i] = opinions[i] * 0.5 + np.mean(neighbors) * 0.5
+                    if self._weighted and "relation_weights" in ctx.metadata:
+                        w = np.array(ctx.metadata["relation_weights"])[i][mask]
+                        w_sum = w.sum()
+                        if w_sum > 0:
+                            w = w / w_sum
+                            new_opinions[i] = opinions[i] * 0.5 + np.average(opinions[mask], weights=w) * 0.5
+                        else:
+                            new_opinions[i] = opinions[i] * 0.5 + np.mean(opinions[mask]) * 0.5
+                    else:
+                        new_opinions[i] = opinions[i] * 0.5 + np.mean(opinions[mask]) * 0.5
 
             ctx.arrays[metric] = new_opinions
             updated_metrics.append(metric)

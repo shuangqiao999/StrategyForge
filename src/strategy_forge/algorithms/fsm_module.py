@@ -12,8 +12,6 @@ from typing import Any
 
 import numpy as np
 
-import numpy as np
-
 from .base import AlgorithmModule, ModuleContext
 
 
@@ -69,17 +67,38 @@ class FiniteStateMachineModule(AlgorithmModule):
 
         new_states = list(prev_states)
 
+        # Maintain per-entity streak counters for historical conditions
+        streak_counters: dict[str, list[int]] = {}
+        streak_keys: list[str] = []
+
         for rule in self._rules:
             from_state = rule.get("from", "")
             to_state = rule.get("to", "")
             condition = rule.get("condition", {})
             if not from_state or not to_state:
                 continue
+            streak_req = condition.get("streak", 1) if isinstance(condition, dict) else 1
+            # Build a stable streak key for this rule (for persistence across rounds)
+            rule_fprint = f"{from_state}->{to_state}"
+            if rule_fprint not in streak_counters:
+                streak_counters[rule_fprint] = ctx.metadata.get(f"fsm.streak.{rule_fprint}", [0] * n)
+                streak_keys.append(rule_fprint)
+            counters = streak_counters[rule_fprint]
             for i in range(n):
                 if new_states[i] != from_state:
+                    counters[i] = 0
                     continue
                 if self._match_condition(ctx, i, condition):
-                    new_states[i] = to_state
+                    counters[i] += 1
+                    if counters[i] >= streak_req:
+                        new_states[i] = to_state
+                        counters[i] = 0
+                else:
+                    counters[i] = 0
+
+        # Persist streak counters in metadata
+        for rf in streak_keys:
+            ctx.metadata[f"fsm.streak.{rf}"] = streak_counters[rf]
 
         ctx.metadata["fsm.agent_states"] = new_states
         ctx.metadata["fsm.command_states"] = list(self._command_states)
@@ -117,7 +136,9 @@ class FiniteStateMachineModule(AlgorithmModule):
         Supports virtual spatial metrics:
           - distance_to_enemy / distance_to_ally: computed from ctx.spatial + metadata.
         """
-        for metric, (op, threshold) in condition.items():
+        # Strip streak before iterating — it's an int, not a (op, threshold) tuple
+        cond_pairs = [(m, op_th) for m, op_th in condition.items() if m != "streak"]
+        for metric, (op, threshold) in cond_pairs:
             val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
             if val is None:
                 return False
@@ -147,15 +168,29 @@ class FiniteStateMachineModule(AlgorithmModule):
         if idx >= n:
             return None
         if metric in ("distance_to_enemy", "distance_to_ally"):
-            enemy_ids = ctx.metadata.get("fsm.enemy_ids", [])
-            ally_ids = ctx.metadata.get("fsm.ally_ids", [])
+            enemy_ids = ctx.metadata.get("fsm.enemy_ids")
+            ally_ids = ctx.metadata.get("fsm.ally_ids")
+            # Auto-divide when neither is explicitly configured
+            if enemy_ids is None and ally_ids is None:
+                polar = ctx.arrays.get("polarization")
+                if polar is not None and len(polar) == n:
+                    own_pol = float(polar[idx])
+                    others = [j for j in range(n) if j != idx]
+                    enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0]
+                    ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= 3.0]
+                else:
+                    # Fallback: treat all other entities as enemies
+                    enemy_ids = [j for j in range(n) if j != idx]
+                    ally_ids = []
+            # Use explicit values when provided
+            enemy_ids = enemy_ids if enemy_ids is not None else []
+            ally_ids = ally_ids if ally_ids is not None else []
             targets = enemy_ids if "enemy" in metric else ally_ids
             if not targets:
                 return None
             min_dist = float("inf")
             for tidx in targets:
                 if not isinstance(tidx, int) or tidx >= n or tidx == idx:
-                    continue
                     continue
                 d = float(np.linalg.norm(sp.positions[idx] - sp.positions[tidx]))
                 if d < min_dist:

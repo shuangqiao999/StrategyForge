@@ -59,6 +59,8 @@ class PhysicsModule(AlgorithmModule):
             "diffusion_rate": 0.05,
             "diffusion_sigma_scale": 3.0,
             "explosion_sources": [],
+            "max_speed": 500.0,
+            "diffusion_boundary": "absorb",
         }
 
     @property
@@ -73,9 +75,11 @@ class PhysicsModule(AlgorithmModule):
         if "subsystems" in params:
             self._enabled = {k: k in params["subsystems"] for k in self._enabled}
         for k in ("gravity", "damping", "collision_elasticity", "diffusion_rate",
-                   "diffusion_sigma_scale"):
+                   "diffusion_sigma_scale", "max_speed"):
             if k in params:
                 self._params[k] = float(params[k])
+        if "diffusion_boundary" in params:
+            self._params["diffusion_boundary"] = str(params["diffusion_boundary"])
         if "explosion_sources" in params:
             self._params["explosion_sources"] = params["explosion_sources"]
 
@@ -101,10 +105,17 @@ class PhysicsModule(AlgorithmModule):
     def _step_dynamics(self, sp: Any, dt: float) -> None:
         g = self._params["gravity"]
         dam = self._params["damping"]
+        max_speed = float(self._params.get("max_speed", 0))
         dt_clamped = min(dt, 0.5)
         acc = sp.forces / np.maximum(sp.masses.reshape(-1, 1), 0.001)
         acc[:, 2] -= g
         sp.velocities = (sp.velocities + acc * dt_clamped) * dam
+        if max_speed > 0:
+            speeds = np.linalg.norm(sp.velocities, axis=1, keepdims=True)
+            clip_mask = speeds > max_speed
+            if clip_mask.any():
+                sp.velocities[clip_mask.ravel()] = \
+                    sp.velocities[clip_mask.ravel()] / speeds[clip_mask] * max_speed
         sp.positions = sp.positions + sp.velocities * dt_clamped
         sp.forces.fill(0.0)
 
@@ -175,6 +186,7 @@ class PhysicsModule(AlgorithmModule):
             return
         rate = self._params["diffusion_rate"]
         sigma_scale = float(self._params.get("diffusion_sigma_scale", 3.0))
+        boundary = str(self._params.get("diffusion_boundary", "absorb"))
         p = sp.positions
         target_keys = ctx.diffusion_fields if ctx.diffusion_fields else []
         # Spatial hash for large N to avoid O(N²) cost
@@ -205,6 +217,8 @@ class PhysicsModule(AlgorithmModule):
                 w_sum = weights.sum()
                 if w_sum > 1e-9:
                     new_arr[i] += rate * np.sum((arr[j_indices] - arr[i]) * weights) / w_sum
+            if boundary == "reflect":
+                new_arr = np.clip(new_arr, 0.0, None)
             ctx.arrays[key] = new_arr
 
     def _apply_explosions(self, sp: Any, ctx: ModuleContext) -> None:

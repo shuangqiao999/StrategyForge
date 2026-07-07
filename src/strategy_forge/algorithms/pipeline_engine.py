@@ -32,6 +32,7 @@ class PipelineEngine:
         ctx: ModuleContext,
         pipeline_cfg: dict[str, Any] | None = None,
         log_fn: Any = None,
+        strict_mode: bool = False,
     ) -> ModuleContext:
         """Execute modules in pipeline order.
 
@@ -40,6 +41,8 @@ class PipelineEngine:
             pipeline_cfg: rules.json modules.pipeline dict. If None, runs all registered
                           modules in registration order (backward compat).
             log_fn: Optional logging callback (phase, msg).
+            strict_mode: If True, exceptions in module execution propagate instead of being
+                         suppressed as warnings. Useful for debugging.
 
         Returns:
             The (possibly mutated) ModuleContext.
@@ -49,7 +52,6 @@ class PipelineEngine:
 
         order: list[str] = []
         conditionals: dict[str, str] = {}
-        context_mapping: dict[str, dict] = {}
 
         if pipeline_cfg:
             order = pipeline_cfg.get("order", list(self._modules.keys()))
@@ -100,6 +102,8 @@ class PipelineEngine:
                 ctx = mod.execute(ctx)
             except Exception as e:
                 msg = f"模块 {name} 执行异常: {e}"
+                if strict_mode:
+                    raise RuntimeError(f"[Pipeline] {msg}") from e
                 logger.warning("[Pipeline] %s", msg)
                 if log_fn:
                     log_fn("pipeline", msg)
@@ -108,12 +112,26 @@ class PipelineEngine:
 
     @staticmethod
     def _eval_cond(condition: str, ctx: ModuleContext) -> bool:
-        """Evaluate a simple condition string against ctx.metadata.
+        """Evaluate a condition string against ctx.metadata.
 
         Supported: 'key == value', 'key != value', 'key < value', 'key > value'.
+        Compound: 'a > 1 and b < 5', 'x == true or y == true'.
+        Note: 'or' splits first (lower precedence), 'and' splits second.
         """
         if not condition:
             return True
+        # 'or' has lowest precedence
+        if " or " in condition:
+            return any(
+                PipelineEngine._eval_cond(part.strip(), ctx)
+                for part in condition.split(" or ")
+            )
+        # 'and' has higher precedence
+        if " and " in condition:
+            return all(
+                PipelineEngine._eval_cond(part.strip(), ctx)
+                for part in condition.split(" and ")
+            )
         parts = condition.split()
         if len(parts) < 3:
             return True
