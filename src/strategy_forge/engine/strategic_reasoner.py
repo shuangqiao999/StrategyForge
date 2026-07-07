@@ -251,6 +251,7 @@ class StrategicReasoner:
         relationship_context: str = "",
         spatial_context: str = "",
         env_context: str = "",
+        causal_feedback: str = "",
     ) -> dict[str, Any]:
         """量化模式决策。
 
@@ -309,11 +310,15 @@ class StrategicReasoner:
         agent_parts = [
             f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
             f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n",
+        ]
+        if causal_feedback:
+            agent_parts.append(f"{causal_feedback}\n")
+        agent_parts.extend([
             f"## 你的人格\n{agent.persona or '（无）'}\n",
             f"## 你的目标\n{goals}\n",
             f"## 你的当前状态\n{state.to_prompt_context()}\n",
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n",
-        ]
+        ])
         if relationship_context:
             agent_parts.append(f"## 关系网络（盟友/对手）\n{relationship_context}\n")
         if static_knowledge:

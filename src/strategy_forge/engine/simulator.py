@@ -28,6 +28,144 @@ from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
 
+_METRIC_NAME: dict[str, str] = {
+    "strength": "军力", "morale": "士气", "supply": "补给", "fatigue": "疲劳度",
+    "leadership": "领导力", "market_share": "市场份额", "cash_flow": "现金流",
+    "brand": "品牌", "rnd": "研发", "supply_chain": "供应链",
+    "support_rate": "支持率", "economy": "经济", "unity": "团结度",
+    "intl_relations": "国际关系", "legislative_power": "立法权",
+    "population": "人口", "resources": "资源", "pollution": "污染",
+    "biodiversity": "生物多样性", "stability": "稳定性",
+    "employment": "就业", "infrastructure": "基础设施", "finance": "财政",
+    "satisfaction": "满意度", "tech_lead": "技术领先", "chip_stock": "芯片储备",
+    "talent_pool": "人才池", "patent_barrier": "专利壁垒",
+    "commercialization": "商业化", "narrative_dominance": "舆情主导",
+    "public_trust": "公信力", "polarization": "极化度", "media_reach": "媒体触达",
+}
+_mn = _METRIC_NAME.get
+
+
+def _delta_desc(v: float) -> str:
+    """数值 → 定性描述。|v|>15 大幅, |v|>5 默认, |v|<=5 轻微。"""
+    mag = abs(v)
+    if mag > 15:
+        return "大幅"
+    if mag > 5:
+        return ""
+    return "轻微"
+
+
+def _delta_dir(v: float) -> str:
+    return "增长" if v > 0 else "消耗" if v < 0 else "持平"
+
+
+def _build_causal_feedback(
+    actor_id: str, actor_name: str, action: str, target_id: str, target_name: str,
+    my_deltas: dict[str, float], target_deltas: dict[str, float],
+    auto_deltas: dict[str, float], event_history: list[dict],
+    round_number: int, name_to_id: dict[str, str],
+) -> str:
+    """构建多段落叙事化因果反馈：自身效应 / 目标影响 / 连锁反应 / 后续反应。"""
+    parts: list[str] = []
+    # 自身效应
+    if my_deltas:
+        items = []
+        for k, v in my_deltas.items():
+            label = _mn(k, k)
+            desc = _delta_desc(v)
+            items.append(f"{label}{desc}{_delta_dir(v)}({v:+.0f})")
+        if items:
+            parts.append("自身 — " + "，".join(items[:4]))
+    # 目标影响
+    if target_id and target_id != actor_id and target_deltas:
+        items = []
+        for k, v in target_deltas.items():
+            if v < 0:
+                label = _mn(k, k)
+                desc = _delta_desc(v)
+                items.append(f"{label}{desc}{_delta_dir(v)}({v:+.0f})")
+        if items:
+            parts.append(f"对{target_name} — " + "，".join(items[:3]))
+    # 连锁反应（auto effects）
+    if auto_deltas:
+        items = []
+        for k, v in auto_deltas.items():
+            label = _mn(k, k)
+            items.append(f"{label}{_delta_dir(v)}({v:+.0f})")
+        if items:
+            parts.append("连锁反应 — " + "，".join(items[:3]))
+    # 后续反应：从同一轮 event_history 中提取他人对 actor 或 target 的回应
+    reactions = _extract_reactions(actor_name, target_name, event_history, round_number, name_to_id)
+    if reactions:
+        parts.append("后续反应 — " + reactions)
+    if not parts:
+        return f"你的 {action} 已执行（本轮无显著数值变化）"
+    return "## 上轮回顾\n" + "\n".join(f"  • {p}" for p in parts)
+
+
+def _extract_reactions(
+    actor_name: str, target_name: str, event_history: list[dict],
+    round_number: int, name_to_id: dict[str, str],
+) -> str:
+    """从当前轮事件历史中提取他人对 acter/target 的回应。"""
+    reacting: list[str] = []
+    target_events = [e for e in event_history
+                     if e.get("round") == round_number
+                     and e.get("agent_name", "") not in (actor_name, "")]
+    for e in target_events[-6:]:
+        name = e.get("agent_name", "?")
+        content = (e.get("content", "") or "")[:50]
+        if name == target_name:
+            reacting.append(f"{name}{content[:40]}")
+        elif target_name in content:
+            reacting.append(f"{name}回应{target_name}: {content[:35]}")
+    if not reacting:
+        return ""
+    return "；".join(reacting[:4])
+
+
+# ── 信息传播：信任度驱动延迟/失真 ──
+
+def _compute_delay(trust: float, max_delay: int = 4) -> int:
+    """trust ∈ [-5, +5] → delay ∈ [max_delay, 0]（线性）。"""
+    if trust >= 4.0:
+        return 0
+    normalized = max(0.0, (4.0 - trust) / 9.0)
+    return max(0, round(normalized * max_delay))
+
+
+def _compute_distortion(trust: float) -> float:
+    """trust ∈ [-5, +5] → distortion ∈ [0.0, 0.30]。"""
+    if trust >= 4.0:
+        return 0.0
+    normalized = max(0.0, (4.0 - trust) / 9.0)
+    return normalized * 0.30
+
+
+def _distort_event_content(content_raw: str, distortion: float) -> str:
+    """对事件内容施加数值模糊：低失真保留结构改区间、高失真用定性描述。"""
+    if distortion < 0.05 or not content_raw:
+        return content_raw
+    import re as _re
+    parts = _re.findall(r'((?:[\u4e00-\u9fff]|\w)+(?:[+-]\d+(?:\.\d+)?))', content_raw)
+    if not parts or distortion >= 0.25:
+        # 高失真：去掉所有精确数值，用定性词替换
+        return _re.sub(r'[+-]?\d+(?:\.\d+)?', '?', content_raw)
+    result = content_raw
+    for tok in parts:
+        m = _re.match(r'(.*?)([+-]\d+(?:\.\d+)?)', tok)
+        if m:
+            prefix = m.group(1)
+            val = float(m.group(2))
+            spread = abs(val) * distortion
+            lo, hi = round(val - spread), round(val + spread)
+            if lo == hi:
+                replacement = f"{prefix}{val:+.0f}"
+            else:
+                replacement = f"{prefix}约{lo}~{hi}"
+            result = result.replace(tok, replacement, 1)
+    return result
+
 
 class ConnectionFailureError(Exception):
     """连接故障导致推演中断（含原文，供界面日志展示）。"""
@@ -143,6 +281,9 @@ class SimulationEngine:
             max_concurrent if max_concurrent is not None
             else config.deduction_max_concurrent
         )
+
+        # ── 信息传播：每 agent 的知识队列 ──
+        self._agent_knowledge: dict[str, list[dict[str, Any]]] = {}
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
@@ -471,6 +612,51 @@ class SimulationEngine:
         )
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
+
+    def _dispatch_events(self, round_number: int) -> None:
+        """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。"""
+        from uuid import uuid4
+        alive_ids = [a.entity_id for a in self.agents if a.entity_id in self._states]
+        name_to_id = self._name_to_id
+        for evt in self._event_history:
+            if evt.get("round") != round_number:
+                continue
+            actor_id = evt.get("agent", "")
+            actor_name = evt.get("agent_name", "")
+            content = evt.get("content", "")
+            if not actor_id or not content:
+                continue
+            for a_id in alive_ids:
+                if a_id == actor_id:
+                    continue
+                trust = self.reasoner.get_trust(a_id, actor_id)
+                delay = _compute_delay(trust)
+                distortion = _compute_distortion(trust)
+                delivered_content = _distort_event_content(content, distortion)
+                self._agent_knowledge.setdefault(a_id, []).append({
+                    "event_id": str(uuid4()),
+                    "round_occurred": round_number,
+                    "deliver_round": round_number + delay,
+                    "content_raw": content,
+                    "content_delivered": delivered_content,
+                    "actor": actor_name,
+                    "target": next((k for k, v in name_to_id.items() if v == actor_id), ""),
+                    "importance": 0.5,
+                })
+
+    def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
+        """交付该 agent 的已熟事件（deliver_round <= 当前轮），从队列中移除。"""
+        ripe = []
+        remaining = []
+        for k in self._agent_knowledge.get(agent_id, []):
+            if k["deliver_round"] <= current_round:
+                ripe.append(k)
+            else:
+                remaining.append(k)
+        if remaining != self._agent_knowledge.get(agent_id, []):
+            self._agent_knowledge[agent_id] = remaining
+        return ripe
+
     async def _run_round_quantified(self, round_number: int) -> SimulationRound:
         from datetime import datetime
 
@@ -490,11 +676,6 @@ class SimulationEngine:
 
         ordered = list(alive_agents)
         self._rng.shuffle(ordered)
-
-        recent = "\n".join(
-            f"- [{e.get('round','?')}] {e.get('agent_name','?')}: {e.get('content','')[:80]}"
-            for e in self._event_history[-max(1, _cfg.deduction_sim_recent_events):]
-        ) or "（无近期事件）"
 
         # Pre-build O(1) entity-id→index map for spatial lookups
         alive_id_to_idx = {eid: i for i, eid in enumerate(alive_ids)} if alive_ids else {}
@@ -668,11 +849,25 @@ class SimulationEngine:
         _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
         _spatial_ctxs = {a.entity_id: spatial_self_ctx(a.entity_id) for a in alive_agents}
         _env_ctx = env_context()
-        # ── Causal feedback: per-agent last round outcomes ──
+        # ── 增强因果反馈：per-agent 上次行动复盘 ──
         _causal_ctxs = {
-            a.entity_id: "\n".join(getattr(self, "_last_round_outcomes", {}).get(a.entity_id, []))
+            a.entity_id: getattr(self, "_last_round_outcomes", {}).get(a.entity_id, "")
             for a in alive_agents
         }
+        # ── 信息传播：per-agent 近期事件（信任度驱动延迟/失真）──
+        _recent_ctxs: dict[str, str] = {}
+        for a in alive_agents:
+            ripe = self._deliver_ripe_knowledge(a.entity_id, round_number)
+            items: list[str] = []
+            for k in ripe[-8:]:
+                items.append(f"• [{k['round_occurred']}] {k['content_delivered']}")
+            # 补充 agent 自身相关的事件（来自 _event_history）
+            own_events = [e for e in self._event_history[-5:]
+                          if e.get("agent") == a.entity_id or a.name in e.get("content", "")]
+            for e in own_events:
+                text = e.get("content", "")[:80]
+                items.append(f"• [R{e.get('round','?')}] {text}")
+            _recent_ctxs[a.entity_id] = "\n".join(items[-8:]) or "（无近期事件）"
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any] | None:
             from strategy_forge.core.config import config as _cr
@@ -688,14 +883,13 @@ class SimulationEngine:
                         static_text, dynamic_text = await _recall(agent)
                         rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
                         causal = _causal_ctxs.get(agent.entity_id, "")
-                        if causal:
-                            rel_ctx = f"上一轮行动效果: {causal}\n{rel_ctx}" if rel_ctx else f"上一轮行动效果: {causal}"
+                        agent_recent = _recent_ctxs.get(agent.entity_id, "（无近期事件）")
                         d = await self.reasoner.reason_quantified(
                             agent, states[agent.entity_id], re_engine,
-                            recent_events=recent, other_context=_other_ctxs.get(agent.entity_id, ""),
+                            recent_events=agent_recent, other_context=_other_ctxs.get(agent.entity_id, ""),
                             round_number=round_number, client=client,
                             static_knowledge=static_text, dynamic_memory=dynamic_text,
-                            relationship_context=rel_ctx,
+                            relationship_context=rel_ctx, causal_feedback=causal,
                             spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
                             env_context=_env_ctx,
                         )
@@ -797,23 +991,29 @@ class SimulationEngine:
                 if eid in states:
                     states[eid].apply_deltas(d, round_number, ranges)
 
-        # ── 轮后：调度延迟效应 + 保存因果反馈 ──
-        self._last_round_outcomes: dict[str, list[dict]] = {}
+        # ── 轮后：调度延迟效应 + 增强因果反馈 ──
+        self._last_round_outcomes: dict[str, str] = {}
         for dec in decisions:
             actor = dec.get("actor_id")
             if actor not in states:
                 continue
-            # Causal feedback for next round
             my_deltas = deltas.get(actor, {})
-            if my_deltas:
-                summary = ", ".join(f"{k}{v:+.1f}" for k, v in my_deltas.items())
-                target = dec.get("target", "")
-                action = dec.get("action_type", "?")
-                target_name = target if target else "自身"
-                self._last_round_outcomes.setdefault(actor, []).append(
-                    f"你的 {action} 对 {target_name} 造成: {summary}" if target else
-                    f"你的 {action} 自身效应: {summary}"
-                )
+            target_id = dec.get("target", "")
+            target_deltas = deltas.get(target_id, {}) if target_id and target_id in states else {}
+            action = dec.get("action_type", "?")
+            target_name = target_id if target_id else "自身"
+            agent = next((a for a in self.agents if a.entity_id == actor), None)
+            nm = agent.name if agent else actor[:8]
+            auto_d = auto_deltas.get(actor, {})
+            # 增强因果反馈（多段落叙事）
+            feedback = _build_causal_feedback(
+                actor_id=actor, actor_name=nm, action=action,
+                target_id=target_id or "", target_name=target_name,
+                my_deltas=my_deltas, target_deltas=target_deltas,
+                auto_deltas=auto_d, event_history=self._event_history,
+                round_number=round_number, name_to_id=self._name_to_id,
+            )
+            self._last_round_outcomes[actor] = feedback
             # Delay effect scheduling
             for action, sub_intensity, _target in re_engine._iter_subactions(dec):
                 delay_cfg = re_engine.pack.get("delay_effects", {}).get(action)
@@ -919,6 +1119,9 @@ class SimulationEngine:
             })
         if len(self._event_history) > 200:
             self._event_history = self._event_history[-200:]
+
+        # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
+        self._dispatch_events(round_number)
 
         # 轮末快照(供报告/趋势) + 可选叙事解读
         sim_round.state_delta["states"] = {
