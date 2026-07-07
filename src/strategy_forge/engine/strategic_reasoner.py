@@ -144,6 +144,31 @@ class StrategicReasoner:
             if name:
                 self._trust_matrix[source_id][name] = -w
 
+    def adjust_trust(self, source_id: str, target_name: str, delta: float) -> float:
+        """根据交互结果动态调整信任度。返回新信任值。
+
+        delta>0 表示正向互动（合作/援助），delta<0 表示负向（攻击/背叛）。
+        信任度始终钳制在 [-5.0, +5.0] 区间。
+        """
+        if not target_name:
+            return 0.0
+        old = self._trust_matrix[source_id].get(target_name, 0.0)
+        new = max(-5.0, min(5.0, old + delta))
+        self._trust_matrix[source_id][target_name] = new
+        return new
+
+    # ── 动作→声誉映射：用于自动信任更新 ──
+    _TRUST_HOSTILE_ACTIONS = frozenset({
+        "attack", "siege", "maneuver", "price_war", "embargo", "export_control",
+        "talent_war", "poach_talent", "compete", "attack_opponent",
+        "electronic_warfare", "military_offensive", "trade_warfare",
+        "propaganda", "leak_info", "framing_battle",
+    })
+    _TRUST_FRIENDLY_ACTIONS = frozenset({
+        "diplomacy", "partner", "invest", "invest_rnd", "welfare",
+        "diplomatic_engagement", "fact_check", "conserve", "restoration",
+    })
+
     def _trust_summary_for(self, agent_id: str) -> str:
         relations = self._trust_matrix.get(agent_id, {})
         if not relations:

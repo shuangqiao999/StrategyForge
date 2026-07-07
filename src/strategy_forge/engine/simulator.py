@@ -284,6 +284,8 @@ class SimulationEngine:
 
         # ── 信息传播：每 agent 的知识队列 ──
         self._agent_knowledge: dict[str, list[dict[str, Any]]] = {}
+        # ── 谍报：每 agent 对特定目标的信息优势 ──
+        self._intel_bonuses: dict[str, dict[str, float]] = {}  # {source_id: {target_name: bonus}}
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
@@ -633,8 +635,11 @@ class SimulationEngine:
                 # by source entity_id → target name. We need observer's entity_id (a_id)
                 # looking at actor's name.
                 trust = self.reasoner.get_trust(a_id, actor_name)
-                delay = _compute_delay(trust)
-                distortion = _compute_distortion(trust)
+                # Intel bonus: if observer has gathered intel on actor, reduce delay + distortion
+                intel_bonus = (self._intel_bonuses.get(a_id, {}).get(actor_name, 0.0)
+                               + self._intel_bonuses.get(a_id, {}).get(actor_id, 0.0))
+                delay = max(0, _compute_delay(trust + intel_bonus * 2.0) - int(intel_bonus))
+                distortion = _compute_distortion(trust + intel_bonus * 2.0)
                 delivered_content = _distort_event_content(content, distortion)
                 self._agent_knowledge.setdefault(a_id, []).append({
                     "event_id": str(uuid4()),
@@ -645,6 +650,7 @@ class SimulationEngine:
                     "actor": actor_name,
                     "target": next((k for k, v in name_to_id.items() if v == actor_id), ""),
                     "importance": 0.5,
+                    "_base_distortion": distortion,  # for information decay
                 })
 
     def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
@@ -652,6 +658,14 @@ class SimulationEngine:
         ripe = []
         remaining = []
         for k in self._agent_knowledge.get(agent_id, []):
+            # Apply information decay: events older than current_round lose precision
+            age = current_round - k.get("round_occurred", current_round)
+            if age > 1:
+                base_dist = k.get("_base_distortion", 0.0)
+                extra = 0.05 * (age - 1)
+                total_dist = min(0.40, base_dist + extra)
+                k["content_delivered"] = _distort_event_content(
+                    k.get("content_raw", ""), total_dist)
             if k["deliver_round"] <= current_round:
                 ripe.append(k)
             else:
@@ -659,6 +673,28 @@ class SimulationEngine:
         if remaining != self._agent_knowledge.get(agent_id, []):
             self._agent_knowledge[agent_id] = remaining
         return ripe
+
+    def _update_reputation_after_round(self, decisions: list[dict[str, Any]],
+                                        name_to_id: dict[str, str]) -> None:
+        """根据本轮交互自动更新 agent 间的信任度。"""
+        for dec in decisions:
+            actor = dec.get("actor_id", "")
+            action = dec.get("action_type", "")
+            target_id = dec.get("target", "")
+            intensity = float(dec.get("intensity", 0.5))
+            if not actor or not target_id:
+                continue
+            target_name = next((k for k, v in name_to_id.items() if v == target_id), "")
+            if not target_name:
+                continue
+            delta = 0.0
+            if action in self.reasoner._TRUST_HOSTILE_ACTIONS:
+                delta = -2.5 * intensity
+            elif action in self.reasoner._TRUST_FRIENDLY_ACTIONS:
+                delta = +1.5 * intensity
+            if abs(delta) > 0.01:
+                self.reasoner.adjust_trust(actor, target_name, delta)
+                self.reasoner.adjust_trust(target_name, actor, delta * 0.6)
 
     async def _run_round_quantified(self, round_number: int) -> SimulationRound:
         from datetime import datetime
@@ -1024,6 +1060,36 @@ class SimulationEngine:
                     dr = int(delay_cfg.get("delay", 1))
                     eff = {k: v * sub_intensity for k, v in delay_cfg.get("effects", {}).items()}
                     states[actor].schedule_delays(round_number, dr, eff)
+
+        # ── 声誉系统：根据本轮交互自动更新信任度 ──
+        self._update_reputation_after_round(decisions, self._name_to_id)
+
+        # ── 谍报处理：检测 _intel_exposed 标记 → 授予信息优势 ──
+        for dec in decisions:
+            actor = dec.get("actor_id", "")
+            tgts = dec.get("target", "")
+            tgts_list = tgts.split(",") if isinstance(tgts, str) and "," in tgts else [tgts]
+            for tgt in tgts_list:
+                tgt = tgt.strip()
+                if not tgt or tgt not in self._name_to_id:
+                    continue
+                # Check if this interaction triggered _intel_exposed
+                inter = next((it for it in inter_by_actor.get(actor, [])
+                              if it.get("target") == tgt), None)
+                if inter and any(
+                    "_intel_exposed" in d or "intel" in k.lower()
+                    for k, d in inter.get("deltas", {}).items()
+                    if isinstance(d, dict)
+                ):
+                    # Also check via keys
+                    pass
+                if inter:
+                    for k in inter.get("deltas", {}):
+                        if "_intel_exposed" in str(k).lower() or "intel" in str(k).lower():
+                            bonus = self._intel_bonuses.setdefault(actor, {}).get(tgt, 0.0)
+                            self._intel_bonuses.setdefault(actor, {})[tgt] = min(5.0, bonus + 2.0)
+                            self._log("simulation", f"[谍报] {actor} 对 {tgt} 获得信息优势 (+2.0, 总和={bonus+2.0:.1f})")
+                            break
 
         # ── Algorithm module chain (ODE + Physics) ──
         if self._algorithm_modules and self._rule_engine is not None:

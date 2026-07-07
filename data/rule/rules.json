@@ -31,9 +31,15 @@
       "diplomacy",
       "siege",
       "electronic_warfare",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "supply": -8,
+        "fatigue": 4,
+        "leadership": 3
+      },
       "attack": {
         "strength": -15,
         "supply": -12,
@@ -76,6 +82,9 @@
       }
     },
     "target_effects": {
+      "intel_gather": {
+        "_intel_exposed": 1
+      },
       "attack": {
         "strength": -20,
         "morale": -12,
@@ -402,9 +411,15 @@
       "ipo",
       "embargo",
       "poach_talent",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "cash_flow": -10,
+        "rnd": 2,
+        "morale": 1
+      },
       "price_war": {
         "cash_flow": -12,
         "market_share": 10,
@@ -489,7 +504,10 @@
       },
       "ipo": {
         "market_share": -3,
-        "brand": -2
+        "brand": -3
+      },
+      "intel_gather": {
+        "_intel_exposed": 1
       }
     },
     "conditional_effects": {
@@ -781,9 +799,15 @@
       "attack_opponent",
       "propaganda",
       "fact_check",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "economy": -8,
+        "unity": 2,
+        "legislative_power": 1
+      },
       "campaign": {
         "support_rate": 8,
         "economy": -8,
@@ -841,7 +865,10 @@
       },
       "fact_check": {
         "support_rate": 3,
-        "unity": 2
+        "unity": 3
+      },
+      "intel_gather": {
+        "_intel_exposed": 1
       }
     },
     "conditional_effects": {
@@ -1579,9 +1606,15 @@
       "export_control",
       "talent_war",
       "standards_battle",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "chip_stock": -8,
+        "tech_lead": 2,
+        "talent_pool": 1
+      },
       "invest_rd": {
         "chip_stock": -15,
         "tech_lead": 12,
@@ -1616,6 +1649,9 @@
       "standards_battle": {
         "commercialization": -8,
         "patent_barrier": -5
+      },
+      "intel_gather": {
+        "_intel_exposed": 1
       }
     },
     "conditional_effects": {
@@ -1790,9 +1826,15 @@
       "fact_check",
       "leak_info",
       "framing_battle",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "media_reach": -8,
+        "narrative_dominance": 3,
+        "public_trust": -2
+      },
       "propaganda": {
         "narrative_dominance": 10,
         "polarization": 8,
@@ -1828,6 +1870,9 @@
       "framing_battle": {
         "public_trust": -6,
         "narrative_dominance": -4
+      },
+      "intel_gather": {
+        "_intel_exposed": 1
       }
     },
     "conditional_effects": {
@@ -2039,9 +2084,16 @@
       "domestic_propaganda",
       "trade_warfare",
       "defensive_buildup",
-      "observe"
+      "observe",
+      "intel_gather"
     ],
     "self_effects": {
+      "intel_gather": {
+        "cash_flow": -12,
+        "supply": -6,
+        "fatigue": 4,
+        "tech_lead": 2
+      },
       "military_offensive": {
         "strength": -15,
         "supply": -12,
@@ -2128,6 +2180,9 @@
       },
       "diplomatic_engagement": {
         "intl_relations": 3
+      },
+      "intel_gather": {
+        "_intel_exposed": 1
       }
     },
     "conditional_effects": {
