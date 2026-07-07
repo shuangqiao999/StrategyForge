@@ -120,6 +120,8 @@ export default function App() {
   const [timelineView, setTimelineView] = useState<"timeline" | "causal">("timeline");
   const [mainTab, setMainTab] = useState<"graph" | "report" | "logs" | "timeline" | "optimize" | "token" | "dashboard">("graph");
   const [domain, setDomain] = useState("auto");
+  const [rounds, setRounds] = useState(10);
+  const [roundMode, setRoundMode] = useState<"preset" | "custom">("preset");
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
 
   // ── 策略优化器 ──
@@ -362,16 +364,16 @@ export default function App() {
       const r = await fetch(`${API_BASE}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain } }),
+        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, total_rounds: rounds } }),
       });
       if (r.ok) {
         const data = await r.json();
         setSelectedId(data.id);
-        setSessions(prev => [{ id: data.id, title: data.title, status: data.status, phase: "", entity_count: 0, relation_count: 0, agent_count: 0, current_round: 0, total_rounds: 10, created_at: data.created_at }, ...prev]);
+        setSessions(prev => [{ id: data.id, title: data.title, status: data.status, phase: "", entity_count: 0, relation_count: 0, agent_count: 0, current_round: 0, total_rounds: rounds, created_at: data.created_at }, ...prev]);
       }
     } catch { /* ignore */ }
     setCreating(false);
-  }, [title, sourceMaterial, domain]);
+  }, [title, sourceMaterial, domain, rounds]);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -650,6 +652,38 @@ export default function App() {
             value={preGoal}
             onChange={e => setPreGoal(e.target.value)}
           />
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+            <select
+              value={roundMode === "preset" ? String(rounds) : "custom"}
+              onChange={e => {
+                const v = e.target.value;
+                if (v === "custom") { setRoundMode("custom"); return; }
+                setRoundMode("preset");
+                setRounds(parseInt(v));
+              }}
+              title="推演轮数：每轮所有智能体做出一次决策并执行一轮世界演化（ODE/FSM/Physics）"
+              style={{ height: 32, flex: 1, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13 }}
+            >
+              <option value="5">{">"} 5 轮</option>
+              <option value="10">{">"} 10 轮（默认）</option>
+              <option value="15">{">"} 15 轮</option>
+              <option value="20">{">"} 20 轮</option>
+              <option value="30">{">"} 30 轮</option>
+              <option value="50">{">"} 50 轮</option>
+              <option value="100">{">"} 100 轮</option>
+              <option value="custom">✎ 手动输入...</option>
+            </select>
+            {roundMode === "custom" && (
+              <input
+                type="number"
+                min={1} max={100}
+                value={rounds}
+                onChange={e => { const v = parseInt(e.target.value); if (v >= 1 && v <= 100) setRounds(v); }}
+                style={{ width: 70, height: 32, background: "#0f172a", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13, textAlign: "center" }}
+                title="手动输入 1-100 轮"
+              />
+            )}
+          </div>
           <select
             value={domain}
             onChange={e => setDomain(e.target.value)}
@@ -1469,13 +1503,18 @@ export default function App() {
                       {tokenData.rounds && Object.keys(tokenData.rounds).length > 0 && (
                         <div style={{ marginBottom: 20 }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>Token 消耗趋势 (每轮)</div>
-                          {(() => {
-                            const rounds = Object.entries(tokenData.rounds);
-                            if (rounds.length === 0) return null;
-                            const maxTotal = Math.max(...rounds.map(([, r]) => r.total), 1);
-                            const barW = Math.max(12, Math.min(40, 800 / rounds.length));
-                            const svgH = 160; const svgW = rounds.length * (barW + 6) + 40;
-                            const chartH = 120; const padL = 50; const padB = 30;
+                           {(() => {
+                             const rounds = Object.entries(tokenData.rounds);
+                             if (rounds.length === 0) return null;
+                             const maxTotal = Math.max(...rounds.map(([, r]) => r.total), 1);
+                             const barW = Math.max(12, Math.min(40, 800 / rounds.length));
+                             const svgH = 160; const svgW = rounds.length * (barW + 6) + 40;
+                             const chartH = 120; const padL = 50; const padB = 30;
+                             // Dynamic label skipping to avoid overlap
+                             const labelEvery = rounds.length <= 10 ? 1
+                               : rounds.length <= 20 ? 2
+                               : rounds.length <= 50 ? 5
+                               : 10;
                             return (
                               <div style={{ overflowX: "auto" }}>
                                 <svg width={svgW} height={svgH} style={{ display: "block" }}>
@@ -1502,7 +1541,9 @@ export default function App() {
                                         <rect x={x} y={yBase - hPrompt - hCompl} width={barW} height={hPrompt + hCompl} fill="#1e293b" rx={2} />
                                         <rect x={x} y={yBase - hPrompt - hCompl} width={barW} height={hPrompt} fill="#8b5cf6" rx={2} />
                                         <rect x={x} y={yBase - hCompl} width={barW} height={hCompl} fill="#06b6d4" rx={2} />
-                                        <text x={x + barW / 2} y={yBase + 14} textAnchor="middle" fill="#64748b" fontSize={9}>R{rnd}</text>
+                                        {idx % labelEvery === 0 && (
+                                          <text x={x + barW / 2} y={yBase + 14} textAnchor="middle" fill="#64748b" fontSize={9}>R{rnd}</text>
+                                        )}
                                         <title>{`R${rnd}: 入${rdata.prompt.toLocaleString()} 出${rdata.completion.toLocaleString()} 合计${rdata.total.toLocaleString()}`}</title>
                                       </g>
                                     );
