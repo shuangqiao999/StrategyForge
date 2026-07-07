@@ -277,6 +277,7 @@ class StrategicReasoner:
         spatial_context: str = "",
         env_context: str = "",
         causal_feedback: str = "",
+        multi_candidate: bool = False,
     ) -> dict[str, Any]:
         """量化模式决策。
 
@@ -318,6 +319,16 @@ class StrategicReasoner:
                 '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
                 "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
             )
+            if multi_candidate:
+                output_spec += (
+                    '\n\n## 多候选模式（输出3个不同的候选策略）\n'
+                    '{"candidates": ['
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由1"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由2"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由3"}'
+                    ']}\n'
+                    "- 3个候选应包含不同策略方向（如进攻/防守/外交），不是同一方向的微调"
+                )
 
         # ── 共享前缀（同轮所有 agent 一致，利于云端前缀缓存）──
         prefix_parts: list[str] = []
@@ -422,12 +433,44 @@ class StrategicReasoner:
             intensity = max(0.0, min(1.0, float(data.get("intensity", 0.5))))
         except (TypeError, ValueError):
             intensity = 0.5
-        return {
+        result: dict[str, Any] = {
             "action_type": action,
             "target": str(data.get("target", "") or "").strip(),
             "intensity": intensity,
-            "rationale": rationale,
+            "rationale": str(rationale)[:120],
         }
+        # ── 多候选模式：优先使用 candidates ──
+        cands_raw = data.get("candidates")
+        if multi_candidate and isinstance(cands_raw, list) and len(cands_raw) > 0:
+            cands: list[dict[str, Any]] = []
+            for c in cands_raw:
+                if not isinstance(c, dict):
+                    continue
+                act = str(c.get("action_type", "")).strip()
+                if act not in actions:
+                    continue
+                try:
+                    ci = max(0.0, min(1.0, float(c.get("intensity", 0.5))))
+                except (TypeError, ValueError):
+                    ci = 0.5
+                cands.append({
+                    "action_type": act,
+                    "target": str(c.get("target", "") or "").strip(),
+                    "intensity": ci,
+                    "rationale": str(c.get("rationale", ""))[:120],
+                })
+            if cands:
+                first = cands[0]
+                if first["action_type"] == "observe" and len(cands) > 1:
+                    first = cands[1]
+                result = {
+                    "action_type": first["action_type"],
+                    "target": first.get("target", ""),
+                    "intensity": first["intensity"],
+                    "rationale": first.get("rationale", str(rationale)[:120]),
+                    "_candidates": cands,
+                }
+        return result
 
 
 def _parse_candidates(raw: str) -> list[dict[str, Any]]:

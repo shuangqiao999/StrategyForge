@@ -282,10 +282,17 @@ class SimulationEngine:
             else config.deduction_max_concurrent
         )
 
+        # ── 前瞻规划：Rollout 模式 ──
+        self._enable_rollout: bool = False
+        self._baseline_decisions: dict[str, dict[str, Any]] = {}
+
         # ── 信息传播：每 agent 的知识队列 ──
         self._agent_knowledge: dict[str, list[dict[str, Any]]] = {}
         # ── 谍报：每 agent 对特定目标的信息优势 ──
         self._intel_bonuses: dict[str, dict[str, float]] = {}  # {source_id: {target_name: bonus}}
+        # ── 人格动态化：每 agent 的反思轮次追踪 ──
+        self._last_reflection_round: dict[str, int] = {}
+        self._personality_log: list[dict[str, Any]] = []  # [{round, agent, old_extra, new_extra}]
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
@@ -615,6 +622,190 @@ class SimulationEngine:
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
 
+    REFLECT_INTERVAL = 5      # 每5轮触发一次人格反思
+    REFLECT_DELTA_THRESHOLD = 25.0  # 单指标累计变化超过此阈值也触发
+
+    # ── 前瞻规划：Rollout 反应规则 ──
+    _REACTION_RULES: list[tuple[str, str, str]] = [
+        ("strength", "<30", "defend"),
+        ("strength", "<50", "defensive_buildup"),
+        ("morale", "<20", "retreat"),
+        ("supply", "<15", "invest"),
+        ("cash_flow", "<15", "defensive_buildup"),
+        ("morale", ">90", "attack"),
+        ("support_rate", "<20", "campaign"),
+    ]
+
+    async def _rollout_candidates(
+        self, agent: Any, candidates: list[dict[str, Any]],
+        rule_engine: Any, current_states: dict[str, Any],
+        round_number: int, lookahead: int = 3,
+    ) -> list[dict[str, Any]]:
+        """对每个候选动作做 2-3 轮轻量 rollout，返回附 future_score 的候选列表。
+
+        三层误差消除：
+          第一层：其他 agent 使用本轮真实 LLM 决策（_baseline_decisions）
+          第二层：检测被打击方的反应（_REACTION_RULES）
+        """
+        import copy
+        baseline = getattr(self, "_baseline_decisions", {})
+
+        for cand in candidates:
+            cloned_states = {eid: copy.deepcopy(st) for eid, st in current_states.items()}
+            current_actions = dict(baseline)
+            total_score = 0.0
+
+            for r in range(lookahead):
+                decisions = []
+                for a in self.agents:
+                    eid = a.entity_id
+                    if eid not in cloned_states:
+                        continue
+                    if a.entity_id == agent.entity_id:
+                        # 候选方：第一轮执行候选动作，后续观察
+                        decisions.append(cand if r == 0 else {
+                            "actor_id": eid, "action_type": "observe",
+                            "intensity": 0.3, "target": "",
+                        })
+                    else:
+                        act = current_actions.get(eid) or {
+                            "actor_id": eid, "action_type": "observe",
+                            "intensity": 0.3, "target": "",
+                        }
+                        decisions.append(act)
+
+                # 应用效果
+                try:
+                    deltas, _interactions = rule_engine.resolve_round(
+                        cloned_states, decisions, self._name_to_id, self._env,
+                        collect_interactions=False)
+                except Exception:
+                    break
+
+                for eid, d in deltas.items():
+                    if eid in cloned_states:
+                        cloned_states[eid].apply_deltas(d, round_number + r,
+                                                         rule_engine.ranges())
+
+                # 第二层：检测反应
+                for eid, d in deltas.items():
+                    if eid == agent.entity_id or eid not in cloned_states:
+                        continue
+                    st = cloned_states[eid]
+                    for metric, cond, new_action in self._REACTION_RULES:
+                        if metric in st.metrics:
+                            val = st.metrics[metric]
+                            cond_ok = False
+                            if cond.startswith("<"):
+                                cond_ok = val < float(cond[1:])
+                            elif cond.startswith(">"):
+                                cond_ok = val > float(cond[1:])
+                            if cond_ok:
+                                current_actions[eid] = {
+                                    "actor_id": eid, "action_type": new_action,
+                                    "intensity": 0.6, "target": "",
+                                }
+                                break
+
+                # 累积评分：考察 agent 自身的指标健康度
+                if agent.entity_id in cloned_states:
+                    st = cloned_states[agent.entity_id]
+                    for m, v in st.metrics.items():
+                        total_score += v / 100.0  # 简单加权
+
+            cand["_future_score"] = round(total_score / max(lookahead, 1), 2)
+            cand["_rollout_lookahead"] = lookahead
+
+        return candidates
+
+    async def _reflect_and_adapt(self, agent: Any, round_number: int,
+                                   client: Any) -> str | None:
+        """人格动态化：根据近期经历微调 agent 的行为准则。
+
+        仅修改 system_prompt_extra，不覆盖原始 persona/background。
+        返回新 system_prompt_extra 字符串，或 None（无变化）。
+        """
+        from strategy_forge.core.llm_client import Message
+        state = self._states.get(agent.entity_id)
+        if state is None:
+            return None
+        history = getattr(state, "history", []) or []
+        recent_history = history[-20:]  # 最近20条变化记录
+        if not recent_history:
+            return None
+
+        # 计算各指标累计变化
+        delta_summary: list[str] = []
+        deltas_by_metric: dict[str, float] = {}
+        for h in recent_history:
+            m = h.get("metric", "")
+            d = h.get("delta", 0)
+            if m:
+                deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
+        for m, d in deltas_by_metric.items():
+            label = _METRIC_NAME.get(m, m)
+            direction = "↑" if d > 0 else "↓"
+            delta_summary.append(f"{label}{direction}{abs(d):.0f}")
+
+        # 因果反馈摘要
+        causal = getattr(self, "_last_round_outcomes", {}).get(agent.entity_id, "")
+        causal_short = (causal[:200] + "...") if len(causal) > 200 else causal
+
+        # 当前状态快照
+        metrics = getattr(state, "metrics", {})
+        status_summary: list[str] = []
+        for m, v in metrics.items():
+            if v < 30:
+                status_summary.append(f"{_METRIC_NAME.get(m,m)}告急({v:.0f})")
+
+        prompt = (
+            f"你是 {agent.name} 的潜意识。回顾你近期的经历，判断你的性格是否需要微调。\n\n"
+            f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
+            f"## 你现有的行为准则\n{agent.system_prompt_extra or '（无，完全依据核心人格）'}\n\n"
+            f"## 近期指标变化\n{', '.join(delta_summary) if delta_summary else '无显著变化'}\n\n"
+            f"## 风险信号\n{'; '.join(status_summary) if status_summary else '无告急指标'}\n\n"
+            f"## 近期行动复盘\n{causal_short if causal_short else '无'}\n\n"
+            f"## 任务\n"
+            f"根据以上经历，判断是否需要添加一条新的行为准则（或修正旧准则），"
+            f"使你的行为更符合当前的处境。\n"
+            f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
+            f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
+            f"- 仅添加/修正，不删除原有准则。\n"
+            f"- 示例：\"长期补给不足时应优先休整\" \"连胜后保持谨慎避免冒进\" \"与盟友保持紧密协作\"\n"
+            f"\n只输出准则本身或\"无需调整\"，不要解释。"
+        )
+
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
+                temperature=0.3,
+                max_tokens=80,
+            )
+            text = extract_text(resp).strip()
+            if not text or "无需调整" in text or len(text) < 2:
+                return None
+            # 更新 agent 的行为准则
+            old_extra = agent.system_prompt_extra
+            if old_extra and text not in old_extra:
+                agent.system_prompt_extra = f"{old_extra}；{text}"
+            elif not old_extra:
+                agent.system_prompt_extra = text
+            else:
+                return None  # 重复准则，不更新
+            # 记录日志
+            self._personality_log.append({
+                "round": round_number, "agent": agent.name,
+                "old_extra": old_extra, "new_extra": agent.system_prompt_extra,
+            })
+            self._log("simulation",
+                       f"[人格演化] {agent.name} 新增准则: {text} (R{round_number})")
+            return agent.system_prompt_extra
+        except Exception as e:
+            logger.debug("[Simulator] _reflect_and_adapt failed for %s: %s",
+                         agent.name, e)
+            return None
+
     def _dispatch_events(self, round_number: int) -> None:
         """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。"""
         from uuid import uuid4
@@ -931,8 +1122,26 @@ class SimulationEngine:
                             relationship_context=rel_ctx, causal_feedback=causal,
                             spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
                             env_context=_env_ctx,
+                            multi_candidate=getattr(self, "_enable_rollout", False),
                         )
                         d["actor_id"] = agent.entity_id
+
+                        # ── 前瞻规划：如果设定了 enable_rollout，做多候选评分 ──
+                        if getattr(self, "_enable_rollout", False):
+                            import json as _json
+                            candidates_raw = d.get("_candidates", [])
+                            if candidates_raw and len(candidates_raw) > 1:
+                                scored = await self._rollout_candidates(
+                                    agent, candidates_raw, re_engine,
+                                    states, round_number, lookahead=3)
+                                if scored:
+                                    best = max(scored, key=lambda c: c.get("_future_score", 0))
+                                    best["actor_id"] = agent.entity_id
+                                    best["_original"] = d
+                                    best["_rollout_score"] = best.get("_future_score", 0)
+                                    best["driver"] = "llm_rollout"
+                                    return best
+
                         return d
                 except LLMConnectionError as e:
                     fails += 1
@@ -1000,6 +1209,17 @@ class SimulationEngine:
         decisions: list[dict[str, Any]] = [p for p in plan if p is not None]
         # raw_results kept below for backward compat
         raw_results = decisions
+
+        # ── 前瞻规划：保存本轮真实 LLM 决策为下轮的 Rollout 基线 ──
+        if self._enable_rollout:
+            self._baseline_decisions = {}
+            for dec in decisions:
+                self._baseline_decisions[dec.get("actor_id", "")] = {
+                    "actor_id": dec.get("actor_id", ""),
+                    "action_type": dec.get("action_type", "observe"),
+                    "target": dec.get("target", ""),
+                    "intensity": dec.get("intensity", 0.5),
+                }
 
         # ── 轮前：自动效应（条件触发，逐实体结算）+ 延迟效应到期结算 ──
         ranges = re_engine.ranges()
@@ -1191,6 +1411,26 @@ class SimulationEngine:
 
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
+
+        # ── 人格动态化：每 REFLECT_INTERVAL 轮或重大指标变化时触发反思 ──
+        for agent in self.agents:
+            if agent.entity_id not in states:
+                continue
+            last_rf = self._last_reflection_round.get(agent.entity_id, 0)
+            should_reflect = (round_number - last_rf >= self.REFLECT_INTERVAL)
+            if not should_reflect:
+                # 检查是否有指标累计变化超过阈值
+                st = states[agent.entity_id]
+                history = getattr(st, "history", []) or []
+                recent = [h for h in history if h.get("round", 0) > last_rf]
+                cumsum: dict[str, float] = {}
+                for h in recent:
+                    cumsum[h.get("metric", "")] = cumsum.get(h.get("metric", ""), 0) + abs(float(h.get("delta", 0)))
+                if any(v >= self.REFLECT_DELTA_THRESHOLD for v in cumsum.values()):
+                    should_reflect = True
+            if should_reflect:
+                await self._reflect_and_adapt(agent, round_number, client)
+                self._last_reflection_round[agent.entity_id] = round_number
 
         # 轮末快照(供报告/趋势) + 可选叙事解读
         sim_round.state_delta["states"] = {
