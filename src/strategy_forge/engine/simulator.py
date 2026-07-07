@@ -1128,19 +1128,21 @@ class SimulationEngine:
 
                         # ── 前瞻规划：如果设定了 enable_rollout，做多候选评分 ──
                         if getattr(self, "_enable_rollout", False):
-                            import json as _json
-                            candidates_raw = d.get("_candidates", [])
-                            if candidates_raw and len(candidates_raw) > 1:
-                                scored = await self._rollout_candidates(
-                                    agent, candidates_raw, re_engine,
-                                    states, round_number, lookahead=3)
-                                if scored:
-                                    best = max(scored, key=lambda c: c.get("_future_score", 0))
-                                    best["actor_id"] = agent.entity_id
-                                    best["_original"] = d
-                                    best["_rollout_score"] = best.get("_future_score", 0)
-                                    best["driver"] = "llm_rollout"
-                                    return best
+                            try:
+                                candidates_raw = d.get("_candidates", [])
+                                if candidates_raw and len(candidates_raw) > 1:
+                                    scored = await self._rollout_candidates(
+                                        agent, candidates_raw, re_engine,
+                                        states, round_number, lookahead=3)
+                                    if scored:
+                                        best = max(scored, key=lambda c: c.get("_future_score", 0))
+                                        best["actor_id"] = agent.entity_id
+                                        best["_original"] = d
+                                        best["_rollout_score"] = best.get("_future_score", 0)
+                                        best["driver"] = "llm_rollout"
+                                        return best
+                            except Exception:
+                                pass  # rollout 失败 → 安全回退到 LLM 直接决策
 
                         return d
                 except LLMConnectionError as e:
