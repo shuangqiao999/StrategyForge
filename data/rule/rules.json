@@ -237,17 +237,25 @@
           }
         }
       },
-      "physics_engine": {
-        "collision_elasticity": 0.3
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        "physics_engine": {
+          "collision_elasticity": 0.3,
+          "max_speed": 200
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["morale"],
+          "epsilon": 0.25,
+          "graph_type": "spatial",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "patrol",
         "command_states": [
@@ -275,7 +283,8 @@
               "strength": [
                 "<",
                 30
-              ]
+              ],
+              "streak": 2
             }
           },
           {
@@ -333,7 +342,8 @@
               "distance_to_enemy": [
                 "<",
                 30
-              ]
+              ],
+              "streak": 2
             }
           }
         ],
@@ -616,40 +626,51 @@
         "brand": "ode",
         "supply_chain": "ode"
       },
-      "ode_engine": {
-        "equations": {
-          "market_share": "logistic",
-          "cash_flow": "decay",
-          "brand": "logistic",
-          "supply_chain": "supply_consumption"
-        },
-        "params": {
-          "market_share": {
-            "_carrying_capacity": 100,
-            "_logistic_rate": 0.05
+        "ode_engine": {
+          "equations": {
+            "market_share": "logistic",
+            "cash_flow": "cash_flow_dynamics",
+            "brand": "competitive_logistic",
+            "supply_chain": "supply_consumption"
           },
-          "cash_flow": {
-            "_decay_rate": 0.03
-          },
-          "brand": {
-            "_logistic_rate": 0.02
-          },
-          "supply_chain": {
-            "_supply_base_rate": 0.1
+          "params": {
+            "market_share": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.05
+            },
+            "cash_flow": {
+              "_decay_rate": 0.008,
+              "_base_recovery": 2.0,
+              "_scale_protection": 8.0
+            },
+            "brand": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.04,
+              "_competition_factor": 0.3
+            },
+            "supply_chain": {
+              "_supply_base_rate": 0.1
+            }
           }
-        }
-      },
-      "physics_engine": {
-        "diffusion_rate": 0.03
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        },
+        "physics_engine": {
+          "diffusion_rate": 0.03
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["brand", "morale"],
+          "epsilon": 0.2,
+          "graph_type": "complete",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "active",
         "command_states": [
@@ -664,7 +685,8 @@
               "cash_flow": [
                 "<",
                 12
-              ]
+              ],
+              "streak": 2
             }
           },
           {
@@ -940,29 +962,38 @@
         "economy": "ode",
         "unity": "ode"
       },
-      "ode_engine": {
-        "equations": {
-          "support_rate": "logistic",
-          "economy": "logistic",
-          "unity": "decay"
-        },
-        "params": {
-          "support_rate": {
-            "_carrying_capacity": 100
+        "ode_engine": {
+          "equations": {
+            "support_rate": "competitive_logistic",
+            "economy": "logistic",
+            "unity": "decay"
           },
-          "economy": {
-            "_carrying_capacity": 100
+          "params": {
+            "support_rate": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.04,
+              "_competition_factor": 0.25
+            },
+            "economy": {
+              "_carrying_capacity": 100
+            }
           }
-        }
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["support_rate", "unity"],
+          "epsilon": 0.25,
+          "graph_type": "complete",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "campaign",
         "command_states": [
@@ -986,7 +1017,8 @@
               "support_rate": [
                 "<",
                 35
-              ]
+              ],
+              "streak": 2
             }
           },
           {
@@ -1175,36 +1207,39 @@
         "pollution": "ode",
         "biodiversity": "ode"
       },
-      "ode_engine": {
-        "equations": {
-          "population": "logistic",
-          "resources": "resource_depletion",
-          "pollution": "pollution_spread",
-          "biodiversity": "logistic"
-        },
-        "params": {
-          "population": {
-            "_carrying_capacity": 1000
+        "ode_engine": {
+          "equations": {
+            "population": "competitive_logistic",
+            "resources": "resource_depletion",
+            "pollution": "pollution_spread",
+            "biodiversity": "logistic"
           },
-          "biodiversity": {
-            "_carrying_capacity": 100
+          "params": {
+            "population": {
+              "_carrying_capacity": 1000,
+              "_logistic_rate": 0.03,
+              "_competition_factor": 0.4
+            },
+            "biodiversity": {
+              "_carrying_capacity": 100
+            }
           }
-        }
-      },
-      "physics_engine": {
-        "diffusion_fields": [
-          "pollution"
-        ],
-        "diffusion_rate": 0.08
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        },
+        "physics_engine": {
+          "diffusion_fields": [
+            "pollution"
+          ],
+          "diffusion_rate": 0.08,
+          "diffusion_boundary": "reflect"
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "intervention",
         "command_states": [
@@ -1439,18 +1474,25 @@
           }
         }
       },
-      "physics_engine": {
-        "diffusion_rate": 0.1,
-        "gravity": 0.0
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        "physics_engine": {
+          "diffusion_rate": 0.1,
+          "gravity": 0.0
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["satisfaction"],
+          "epsilon": 0.25,
+          "graph_type": "complete",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "develop",
         "command_states": [
@@ -1645,28 +1687,39 @@
         "tech_lead": "ode",
         "talent_pool": "ode"
       },
-      "ode_engine": {
-        "equations": {
-          "tech_lead": "logistic",
-          "talent_pool": "logistic"
-        },
-        "params": {
-          "tech_lead": {
-            "_carrying_capacity": 100
+        "ode_engine": {
+          "equations": {
+            "tech_lead": "competitive_logistic",
+            "talent_pool": "competitive_logistic"
           },
-          "talent_pool": {
-            "_carrying_capacity": 100
+          "params": {
+            "tech_lead": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.06,
+              "_competition_factor": 0.3
+            },
+            "talent_pool": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.04,
+              "_competition_factor": 0.25
+            }
           }
-        }
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["tech_lead"],
+          "epsilon": 0.2,
+          "graph_type": "complete",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "launch",
         "command_states": [
@@ -1695,7 +1748,8 @@
               "tech_lead": [
                 "<",
                 30
-              ]
+              ],
+              "streak": 2
             }
           }
         ],
@@ -1848,28 +1902,39 @@
         "public_trust": "ode",
         "polarization": "ode"
       },
-      "ode_engine": {
-        "equations": {
-          "public_trust": "logistic",
-          "polarization": "logistic"
-        },
-        "params": {
-          "public_trust": {
-            "_carrying_capacity": 100
+        "ode_engine": {
+          "equations": {
+            "public_trust": "competitive_logistic",
+            "polarization": "competitive_logistic"
           },
-          "polarization": {
-            "_carrying_capacity": 100
+          "params": {
+            "public_trust": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.03,
+              "_competition_factor": 0.25
+            },
+            "polarization": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.05,
+              "_competition_factor": 0.3
+            }
           }
-        }
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["public_trust", "narrative_dominance"],
+          "epsilon": 0.3,
+          "graph_type": "complete",
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "offensive",
         "command_states": [
@@ -2268,18 +2333,26 @@
           }
         }
       },
-      "physics_engine": {
-        "collision_elasticity": 0.3,
-        "diffusion_rate": 0.04
-      },
-      "pipeline": {
-        "order": [
-          "finite_state_machine",
-          "ode_engine",
-          "physics_engine"
-        ],
-        "conditionals": {}
-      },
+        "physics_engine": {
+          "collision_elasticity": 0.3,
+          "diffusion_rate": 0.04
+        },
+        "opinion_dynamics": {
+          "target_metrics": ["public_trust", "morale", "support_rate"],
+          "epsilon": 0.25,
+          "graph_type": "complete",
+          "weighted": true,
+          "norm_range": [0, 100]
+        },
+        "pipeline": {
+          "order": [
+            "finite_state_machine",
+            "opinion_dynamics",
+            "ode_engine",
+            "physics_engine"
+          ],
+          "conditionals": {}
+        },
       "finite_state_machine": {
         "default_state": "observe",
         "command_states": [
@@ -2307,7 +2380,8 @@
               "strength": [
                 "<",
                 35
-              ]
+              ],
+              "streak": 2
             }
           },
           {
@@ -2345,7 +2419,8 @@
               "distance_to_enemy": [
                 "<",
                 50
-              ]
+              ],
+              "streak": 2
             }
           }
         ],
