@@ -83,20 +83,38 @@ def _resource_depletion(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.nd
 def _competitive_logistic(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
     """Tech/talent competition: logistic growth + diffusion + crowding.
     
-    - Leaders (>global_mean) lose advantage through knowledge spillover
-    - Laggards (<global_mean) gain from absorption of frontier tech
+    - Leaders (>group_mean) lose advantage through knowledge spillover
+    - Laggards (<group_mean) gain from absorption of frontier tech
     - Crowding effect prevents all entities converging to 100
+    - Supports _competition_groups: int array (n,) partitioning entities into
+      independent competition pools. When absent, all entities compete in one global pool.
     """
     K = float(ctx.get("_carrying_capacity", 100))
     rate = float(ctx.get("_logistic_rate", 0.06))
-    global_mean = float(ctx.get("_global_mean", 50))
     diffusion_rate = float(ctx.get("_diffusion_rate", 0.015))
     comp = float(ctx.get("_competition_factor", 0.3))
-    growth = rate * values * (1.0 - values / K)
-    actual_mean = np.mean(values)
-    diffusion = diffusion_rate * (actual_mean - values)
-    crowding = comp * values * np.abs(values - actual_mean) / K
-    return growth + diffusion - crowding
+    groups = ctx.get("_competition_groups", None)
+
+    if groups is None:
+        global_mean = float(ctx.get("_global_mean", np.mean(values)))
+        growth = rate * values * (1.0 - values / K)
+        diffusion = diffusion_rate * (global_mean - values)
+        crowding = comp * values * np.abs(values - global_mean) / K
+        return growth + diffusion - crowding
+
+    result = np.zeros_like(values)
+    for gid in np.unique(groups):
+        mask = groups == gid
+        gv = values[mask]
+        if len(gv) == 0:
+            continue
+        gK = float(ctx.get("_carrying_capacity", K))
+        actual_mean = np.mean(gv)
+        growth = rate * gv * (1.0 - gv / gK)
+        diffusion = diffusion_rate * (actual_mean - gv)
+        crowding = comp * gv * np.abs(gv - actual_mean) / gK
+        result[mask] = growth + diffusion - crowding
+    return result
 
 
 def _cash_flow_dynamics(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
@@ -146,7 +164,9 @@ class ODEModule(AlgorithmModule):
 
     def configure(self, params: dict[str, Any]) -> None:
         self._ode_defs: dict[str, str] = params.get("equations", {})
-        self._sub_steps: int = int(params.get("sub_steps", 4))
+        self._sub_steps: int = int(params.get("sub_steps", 8))
+        if self._sub_steps < 4:
+            logger.warning("[ODE] sub_steps=%d 较低，刚性方程可能精度不足", self._sub_steps)
 
     def execute(self, ctx: ModuleContext) -> ModuleContext:
         if not ctx.arrays:
@@ -171,23 +191,32 @@ class ODEModule(AlgorithmModule):
         # Warn about missing dependency metrics (once per round)
         self._check_deps(ctx, keys)
 
+        # Pre-compute slice intervals and views dict for reuse across integration steps
+        _slices: list[tuple[int, int]] = []
+        _start = 0
+        for _k in keys:
+            _slices.append((_start, _start + n))
+            _start += n
+        _views: dict[str, np.ndarray] = {}
+
         def ode_system(_t: float, y: np.ndarray) -> np.ndarray:
-            # Rebuild per-metric views into a local copy (avoids mutating ctx.arrays during integration steps)
-            views: dict[str, np.ndarray] = {}
-            start = 0
-            for k in keys:
-                views[k] = y[start:start + n]
-                start += n
+            _views.clear()
+            for _idx, _k in enumerate(keys):
+                s, e = _slices[_idx]
+                _views[_k] = y[s:e]
             # Merge scalar ODE params from ctx.metadata as actual scalars
             ode_params = ctx.metadata.get("ode_params", {})
             for k, v in ode_params.items():
-                views[k] = float(v)
+                _views[k] = float(v)
+            competition_groups = ctx.metadata.get("_competition_groups", None)
+            if competition_groups is not None:
+                _views["_competition_groups"] = competition_groups
             deriv_parts: list[np.ndarray] = []
             for k in keys:
                 eq_name = self._ode_defs.get(k, "")
                 eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
                 if eq_fn is not None:
-                    deriv_parts.append(eq_fn(views[k], views))
+                    deriv_parts.append(eq_fn(_views[k], _views))
                 else:
                     deriv_parts.append(np.zeros(n, dtype=np.float64))
             return np.concatenate(deriv_parts)
@@ -207,33 +236,44 @@ class ODEModule(AlgorithmModule):
                     ctx.arrays[k] = final[start:start + n]
                     start += n
             else:
-                logger.warning("[ODE] RK45 integration failed: %s — restoring pre-integration state", sol.message)
+                logger.warning("[ODE] RK45 integration failed: %s | equations=%s — restoring pre-integration state",
+                              sol.message, self._ode_defs)
                 ctx.arrays = arrays_snapshot
         except Exception as e:
-            logger.warning("[ODE] scipy solve_ivp failed: %s — restoring pre-integration state", e)
+            logger.warning("[ODE] scipy solve_ivp failed: %s | equations=%s — restoring pre-integration state",
+                          e, self._ode_defs)
             ctx.arrays = arrays_snapshot
         return ctx
 
     def _execute_euler(self, ctx: ModuleContext) -> ModuleContext:
-        """Simple Euler integration — no scipy dependency."""
+        """Euler integration with frozen-state multi-step and snapshot recovery."""
         keys = list(ctx.arrays.keys())
         self._check_deps(ctx, keys)
-        # Build augmented context with scalar ODE params
-        ode_params = ctx.metadata.get("ode_params", {})
-        augmented = dict(ctx.arrays)
-        for k, v in ode_params.items():
-            augmented[k] = float(v)
-        sub_dt = ctx.dt / max(self._sub_steps, 1)
-        for _ in range(self._sub_steps):
-            for key in keys:
-                eq_name = self._ode_defs.get(key, "")
-                eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
-                if eq_fn is not None:
-                    dy = eq_fn(ctx.arrays[key], augmented)
-                else:
-                    dy = np.zeros_like(ctx.arrays[key])
-                ctx.arrays[key] = ctx.arrays[key] + dy * sub_dt
-        return ctx
+        arrays_snapshot = {k: v.copy() for k, v in ctx.arrays.items()}
+        try:
+            sub_dt = ctx.dt / max(self._sub_steps, 1)
+            for _ in range(self._sub_steps):
+                augmented = dict(ctx.arrays)
+                ode_params = ctx.metadata.get("ode_params", {})
+                for k, v in ode_params.items():
+                    augmented[k] = float(v)
+                competition_groups = ctx.metadata.get("_competition_groups", None)
+                if competition_groups is not None:
+                    augmented["_competition_groups"] = competition_groups
+                # Phase 1: compute all derivatives from frozen state
+                dydt: dict[str, np.ndarray] = {}
+                for key in keys:
+                    eq_name = self._ode_defs.get(key, "")
+                    eq_fn = ODE_PRESETS.get(eq_name) if eq_name else None
+                    dydt[key] = eq_fn(ctx.arrays[key], augmented) if eq_fn else np.zeros_like(ctx.arrays[key])
+                # Phase 2: apply all derivatives simultaneously
+                for key in keys:
+                    ctx.arrays[key] = ctx.arrays[key] + dydt[key] * sub_dt
+            return ctx
+        except Exception as e:
+            logger.warning("[ODE] Euler 积分失败: %s | equations=%s — 恢复至积分前状态", e, self._ode_defs)
+            ctx.arrays = arrays_snapshot
+            return ctx
 
     def _check_deps(self, ctx: ModuleContext, keys: list[str]) -> None:
         """Log warnings when a preset's required metric is missing from ctx.arrays."""
