@@ -159,7 +159,7 @@ class StrategicReasoner:
 
     # ── 动作→声誉映射：用于自动信任更新 ──
     _TRUST_HOSTILE_ACTIONS = frozenset({
-        "attack", "siege", "maneuver", "price_war", "embargo", "export_control",
+        "attack", "siege", "price_war", "embargo", "export_control",
         "talent_war", "poach_talent", "compete", "attack_opponent",
         "electronic_warfare", "military_offensive", "trade_warfare",
         "propaganda", "leak_info", "framing_battle",
