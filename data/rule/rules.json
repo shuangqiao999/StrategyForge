@@ -252,7 +252,7 @@
         },
         "opinion_dynamics": {
           "target_metrics": ["morale"],
-          "epsilon": 0.25,
+          "epsilon": 0.12,
           "graph_type": "spatial",
           "norm_range": [0, 100]
         },
@@ -691,11 +691,10 @@
         },
       "finite_state_machine": {
         "default_state": "active",
-        "command_states": [
-          "active",
-          "strategy"
-        ],
-        "transition_rules": [
+          "command_states": [
+            "active"
+          ],
+          "transition_rules": [
           {
             "from": "active",
             "to": "retrench",
@@ -742,30 +741,19 @@
             }
           }
         ],
-        "action_map": {
-          "idle": {
-            "action_type": "observe",
-            "intensity": 0.3,
-            "target": ""
-          },
-          "expand": {
-            "action_type": "expand",
-            "intensity": 0.5,
-            "target": ""
-          },
-          "retrench": {
-            "action_type": "observe",
-            "intensity": 0.4,
-            "target": ""
-          },
-          "defensive": {
-            "action_type": "marketing",
-            "intensity": 0.6,
-            "target": ""
-          },
-          "strategy": null,
-          "active": null
-        }
+          "action_map": {
+            "retrench": {
+              "action_type": "observe",
+              "intensity": 0.4,
+              "target": ""
+            },
+            "defensive": {
+              "action_type": "marketing",
+              "intensity": 0.6,
+              "target": ""
+            },
+            "active": null
+          }
       }
     }
   },
@@ -1002,13 +990,17 @@
               "_competition_factor": 0.25
             },
             "economy": {
-              "_carrying_capacity": 100
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.03
+            },
+            "unity": {
+              "_decay_rate": 0.015
             }
           }
         },
         "opinion_dynamics": {
           "target_metrics": ["support_rate", "unity"],
-          "epsilon": 0.25,
+          "epsilon": 0.12,
           "graph_type": "complete",
           "norm_range": [0, 100]
         },
@@ -1016,13 +1008,12 @@
           "order": [
             "finite_state_machine",
             "opinion_dynamics",
-            "ode_engine",
-            "physics_engine"
+            "ode_engine"
           ],
           "conditionals": {}
         },
-      "finite_state_machine": {
-        "default_state": "campaign",
+        "finite_state_machine": {
+          "default_state": "campaign",
         "command_states": [
           "campaign"
         ],
@@ -1059,6 +1050,20 @@
               "economy": [
                 ">",
                 40
+              ]
+            }
+          },
+          {
+            "from": "campaign",
+            "to": "stable",
+            "condition": {
+              "support_rate": [
+                ">",
+                55
+              ],
+              "economy": [
+                ">",
+                50
               ]
             }
           }
@@ -1248,7 +1253,14 @@
               "_competition_factor": 0.4
             },
             "biodiversity": {
-              "_carrying_capacity": 100
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.02
+            },
+            "resources": {
+              "_decay_rate": 0.005
+            },
+            "pollution": {
+              "_diffusion_rate": 0.05
             }
           }
         },
@@ -1304,6 +1316,16 @@
               "resources": [
                 ">",
                 70
+              ]
+            }
+          },
+          {
+            "from": "expansion",
+            "to": "stable",
+            "condition": {
+              "resources": [
+                "<",
+                40
               ]
             }
           }
@@ -1493,12 +1515,14 @@
           "finance": "logistic"
         },
         "params": {
-          "population": {
-            "_carrying_capacity": 200
-          },
-          "finance": {
-            "_carrying_capacity": 200
-          }
+            "population": {
+              "_carrying_capacity": 200,
+              "_logistic_rate": 0.04
+            },
+            "finance": {
+              "_carrying_capacity": 200,
+              "_logistic_rate": 0.03
+            }
         }
       },
         "physics_engine": {
@@ -1751,17 +1775,15 @@
           "order": [
             "finite_state_machine",
             "opinion_dynamics",
-            "ode_engine",
-            "physics_engine"
+            "ode_engine"
           ],
           "conditionals": {}
         },
-      "finite_state_machine": {
-        "default_state": "launch",
-        "command_states": [
-          "launch",
-          "pivot"
-        ],
+        "finite_state_machine": {
+          "default_state": "launch",
+          "command_states": [
+            "launch"
+          ],
         "transition_rules": [
           {
             "from": "research",
@@ -1789,15 +1811,14 @@
             }
           }
         ],
-        "action_map": {
-          "research": {
-            "action_type": "invest_rd",
-            "intensity": 0.5,
-            "target": ""
-          },
-          "launch": null,
-          "pivot": null
-        }
+          "action_map": {
+            "research": {
+              "action_type": "invest_rd",
+              "intensity": 0.5,
+              "target": ""
+            },
+            "launch": null
+          }
       }
     }
   },
@@ -1967,7 +1988,7 @@
         },
         "opinion_dynamics": {
           "target_metrics": ["public_trust", "narrative_dominance"],
-          "epsilon": 0.3,
+          "epsilon": 0.15,
           "graph_type": "complete",
           "norm_range": [0, 100]
         },
@@ -1975,8 +1996,7 @@
           "order": [
             "finite_state_machine",
             "opinion_dynamics",
-            "ode_engine",
-            "physics_engine"
+            "ode_engine"
           ],
           "conditionals": {}
         },
