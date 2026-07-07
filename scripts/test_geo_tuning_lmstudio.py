@@ -184,11 +184,10 @@ async def test_geo_strategy_10rounds():
               not observe_only,
               f"observe={state_counts.get('observe',0)}/{len(agents)}")
 
-    # 2. opinion_dynamics: 士气有差异化趋势（非全员完全一致）
+    # 2. opinion_dynamics: 士气必须有实质性分化（>=5，避免HK模型过度收敛）
     morale_vals = [st.metrics.get("morale", 0) for st in states.values()]
     morale_range = max(morale_vals) - min(morale_vals) if morale_vals else 0
-    # With epsilon=0.10 and mostly non-hostile interactions, acceptable differentiation
-    check("士气有分布（未完全坍缩为单点）", morale_range >= 2.0,
+    check("士气保持分化（范围>=5）", morale_range >= 5,
           f"range={morale_range:.1f} (vals: {', '.join(f'{v:.0f}' for v in sorted(morale_vals))})")
 
     # 3. competitive_factor: tech_lead 分化
@@ -197,20 +196,20 @@ async def test_geo_strategy_10rounds():
     check("tech_lead产生分化（范围>=10）", tech_range >= 10,
           f"range={tech_range:.1f} (vals: {', '.join(f'{v:.0f}' for v in sorted(tech_vals))})")
 
-    # 4. 关键指标有差异（不要求逼近淘汰线——10轮战略博弈不宜出现淘汰）
-    # 验证各指标的标准差显示分化
-    import statistics
-    key_variation = False
-    for m in ["cash_flow", "supply", "strength", "fatigue"]:
-        vals = [st.metrics.get(m, 0) for st in states.values() if m in st.metrics]
-        if len(vals) >= 2:
-            stdev = statistics.stdev(vals) if len(vals) > 1 else 0
-            if stdev > 10:  # Significant differentiation
-                key_variation = True
+    # 4. 不再"全员安全"——至少有一个实体指标逼近淘汰线（2x阈值）
+    any_warning = False
+    for a in agents:
+        st = states[a.entity_id]
+        for m, th in thresholds.items():
+            if st.metrics.get(m, 0) <= th * 2.0:
+                any_warning = True
                 break
-    check("关键指标有显著分化（std>10）", key_variation,
-          f"cash_flow std={statistics.stdev([st.metrics.get('cash_flow',0) for st in states.values()]) if len(states)>1 else 0:.0f} "
-          f"fatigue std={statistics.stdev([st.metrics.get('fatigue',0) for st in states.values()]) if len(states)>1 else 0:.0f}")
+    # Count entities with at least one warning-level metric
+    warned_entities = sum(1 for a in agents
+                          if any(states[a.entity_id].metrics.get(m, 0) <= th * 2.0
+                                 for m, th in thresholds.items()))
+    check("至少一个实体逼近淘汰线（<=2x阈值）", any_warning,
+          f"warned entities: {warned_entities}/{len(agents)}")
 
     # 5. 有LLM决策（说明有agent进入了engage状态）
     check("有LLM决策产生", llm_actions > 0, f"LLM={llm_actions}")

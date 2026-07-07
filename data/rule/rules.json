@@ -2394,7 +2394,7 @@
         },
         "opinion_dynamics": {
           "target_metrics": ["public_trust", "morale", "support_rate"],
-          "epsilon": 0.10,
+          "epsilon": 0.07,
           "graph_type": "complete",
           "weighted": true,
           "norm_range": [0, 100]
