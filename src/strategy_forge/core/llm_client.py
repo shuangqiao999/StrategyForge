@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -72,6 +73,12 @@ class DeductionLLMClient:
         self.api_key = api_key or resolved.get("api_key", "")
         self.model = model or resolved.get("model", "")
         self._http: httpx.AsyncClient | None = None
+        # 超时种子值在构造时确定（不依赖 _ensure_client），便于测试与环境注入
+        fallback_t = max(10.0, config.deduction_llm_timeout)
+        self._conn_timeout = max(10.0, config.deduction_llm_connect_timeout
+                                 if os.getenv("FORGE_LLM_CONNECT_TIMEOUT") else fallback_t)
+        self._gen_timeout = max(10.0, config.deduction_llm_generation_timeout
+                                if os.getenv("FORGE_LLM_GENERATION_TIMEOUT") else fallback_t)
 
     async def _ensure_client(self):
         if self._http is None:
@@ -82,10 +89,12 @@ class DeductionLLMClient:
             mc = max(1, config.deduction_max_concurrent)
             max_conn = config.deduction_http_max_connections or max(100, mc * 2)
             max_keep = config.deduction_http_max_keepalive or max(20, mc)
-            # 超时可配（FORGE_LLM_TIMEOUT），默认仍 300s
-            timeout_val = max(10.0, config.deduction_llm_timeout)
+            # [A] 双层超时：连接(短)/生成(长) 在 __init__ 已算好
             self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout_val),
+                timeout=httpx.Timeout(connect=self._conn_timeout,
+                                      read=self._gen_timeout,
+                                      write=self._gen_timeout,
+                                      pool=self._conn_timeout),
                 headers=headers,
                 limits=httpx.Limits(max_connections=max_conn,
                                     max_keepalive_connections=max_keep),
@@ -178,13 +187,36 @@ class DeductionLLMClient:
                 resp.raise_for_status()
                 return resp
             except (httpx.TransportError, httpx.TimeoutException) as e:
+                is_conn = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout))
+                is_gen = isinstance(e, (httpx.ReadTimeout, httpx.WriteTimeout))
                 if attempt >= max_retries:
+                    if is_conn:
+                        raise LLMConnectionError(
+                            f"LLM 无法连接：{url}（{type(e).__name__}: {e}，"
+                            f"已重试 {max_retries} 次仍无法建立连接。请检查服务端是否正在运行、URL 是否正确）",
+                            endpoint=url, retries=max_retries, cause=str(e)) from e
+                    if is_gen:
+                        raise LLMConnectionError(
+                            f"LLM 响应超时：{url}（{type(e).__name__}: {e}，"
+                            f"已等待 {self._gen_timeout:.0f}s 无数据，已重试 {max_retries} 次。"
+                            f"当前生成超时={self._gen_timeout:.0f}s，"
+                            f"可通过 FORGE_LLM_GENERATION_TIMEOUT 增大（如 3600/7200））",
+                            endpoint=url, retries=max_retries, cause=str(e)) from e
                     raise LLMConnectionError(
-                        f"LLM 连接失败：{url}（{type(e).__name__}: {e}，已重试 {max_retries} 次仍失败）",
-                        endpoint=url, retries=max_retries, cause=str(e))
+                        f"LLM 请求失败：{url}（{type(e).__name__}: {e}，"
+                        f"已重试 {max_retries} 次仍失败）",
+                        endpoint=url, retries=max_retries, cause=str(e)) from e
+                # [C] 生成超时：递增 read 超时，让重试有更大的等待窗口
+                if is_gen:
+                    escalated = min(7200.0, self._gen_timeout * (1.5 ** (attempt + 1)))
+                    self._http.timeout = httpx.Timeout(
+                        connect=self._conn_timeout, read=escalated,
+                        write=escalated, pool=self._conn_timeout)
                 delay = self._retry_delay(attempt, base, cap, None)
-                logger.warning("[LLM] 传输错误(%s)，第 %d/%d 次重试，%.1fs 后…",
-                               type(e).__name__, attempt + 1, max_retries, delay)
+                att_name = type(e).__name__
+                logger.warning("[LLM] %s(%s)，第 %d/%d 次重试，%.1fs 后…",
+                               "网络错误" if is_conn else ("超时" if is_gen else "传输错误"),
+                               att_name, attempt + 1, max_retries, delay)
                 await asyncio.sleep(delay)
                 attempt += 1
 

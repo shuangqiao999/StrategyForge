@@ -62,8 +62,12 @@ class DeductionConfig:
         # httpx 连接池上限（0=按并发自动派生，保证 >= FORGE_MAX_CONCURRENT）
         self.deduction_http_max_connections = int(os.getenv("FORGE_HTTP_MAX_CONNECTIONS", "0"))
         self.deduction_http_max_keepalive = int(os.getenv("FORGE_HTTP_MAX_KEEPALIVE", "0"))
-        # LLM 请求超时（秒，最小 10，默认 300）
+        # LLM 请求超时（秒，最小 10，默认 300）。
+        # 如需精细控制可用下层变量覆盖；本值为向后兼容兜底（未设 connect/gen 时统一生效）。
         self.deduction_llm_timeout = float(os.getenv("FORGE_LLM_TIMEOUT", "300.0"))
+        # 连接/握手超时（短，快速判定不可达）；生成超时（长，允许大上下文 prefill / 122B 慢速生成）
+        self.deduction_llm_connect_timeout = float(os.getenv("FORGE_LLM_CONNECT_TIMEOUT", "60.0"))
+        self.deduction_llm_generation_timeout = float(os.getenv("FORGE_LLM_GENERATION_TIMEOUT", "1800.0"))
         # 连接故障时在模拟阶段额外重试的次数（每次重试前等长退避）, 0=不额外重试
         self.deduction_llm_retry_passes = int(os.getenv("FORGE_LLM_RETRY_PASSES", "3"))
         # 触发模拟中断的故障 agent 比例（0–1），默认 0.75 即 3/4 agent 故障时中断
