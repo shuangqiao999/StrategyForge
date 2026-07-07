@@ -13,9 +13,9 @@ from .models import DeductionReport, DeductionSession, SimulationRound
 
 logger = logging.getLogger(__name__)
 
-_REPORT_PROMPT = """你是一位资深战略分析师。根据以下推演数据，撰写一份自然语言的推演报告。
+_REPORT_PROMPT = """你是一位推演分析专家。你处理的数据来自模拟推演——无论军事博弈、商业竞争、科技竞赛还是政治博弈，你的职责是从数据中提炼出精准、克制、基于事实的方向性判断。
 
-报告应像《经济学人》或战略研究机构的风格——流畅叙事，将数据融入行文之中，而非罗列表格或项目符号。
+报告采用分析简报风格——直接、克制、事实稠密。避免抽象论述（如"多维纠缠""精妙平衡""战略转型阵痛"），优先使用具体因果链描述："X方因Y行动导致Z方向变化，进而迫使W方调整策略"。
 
 ## 推演基础信息
 - 标题: $title · 领域: $domain · 轮次: $round_count
@@ -33,11 +33,14 @@ $key_events
 ## 行动时序（Agent→事件，跨轮）
 $action_timeline
 
-## 全局态势数据（每实体各指标的定性档位与趋势，无具体数值）
+## 全局态势数据（每实体各指标的定性档位与趋势，及淘汰线参考）
 $quantified_context
 
-## 确定性因果归因（源→目标 的影响方向与强度，无具体数值）
+## 确定性因果归因（源→目标 的影响方向与强度）
 $causal_attribution
+
+## 重点转折事件（方向性变化最剧烈的3个事件）
+$turning_points
 
 ## 输出要求
 返回 JSON，必须包含以下四个字段：
@@ -53,9 +56,9 @@ $causal_attribution
    - 区分"事实"与"推测"：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实
    - 避免不符常识的极端断言（如"完全孤立""社会崩溃""彻底失败"）；此类只能作为风险情景谨慎提及，不作为结论
 
-2. "risk_alerts": 风险预警列表（最多5条字符串，描述趋势性风险，不含具体数值）
+2. "risk_alerts": 风险预警列表（最多5条字符串）。每条格式：{风险标题} | {触发条件} | {受影响方}。示例："补给链断裂风险 | 连续3轮消耗无补充且库存逼近淘汰线 | 某阵营"。禁止使用"可能/或将/存在风险"等模糊词前置——如果是风险，直接陈述事实。
 
-3. "recommendations": 策略建议列表（最多5条字符串，偏战略方向，不含具体数值）
+3. "recommendations": 策略建议列表（最多5条字符串）。每条格式：{针对方}→{方向}→{效果}。示例："某阵营→暂停进攻消耗转向补充补给→预期2轮内恢复至安全水平"。每条不超过40字。不写"建议""应""需要"等虚词。
 
 4. "conclusion": 收束性结论（150-250字）。要求：提炼全局判断与关键变量，**不得照抄 narrative 的句子**，是更高层的凝练总结；同样不含具体数值、区分事实与推测。
 
@@ -89,17 +92,41 @@ def _trend_label(d: float) -> str:
 def _build_quantified_summary(
     rounds: list[SimulationRound],
     states: dict[str, Any] | None,
+    thresholds: dict[str, float] | None = None,
 ) -> str:
-    """Build a QUALITATIVE trajectory summary (档位+趋势, 不含具体数值) for the
-    narrative prompt. 战略推演聚焦走向趋势，不向报告注入裸数值以免锚定极端读数。
+    """Build a structured qualitative trajectory summary for the report prompt.
+
+    每个实体输出其关键指标的快照：档位·趋势·累计变化·淘汰线参考。
+    数值仅注入 prompt 供 LLM 理解方向性——LLM 仍以叙事输出趋势，不复制数字。
     """
     if not states:
         return "（叙事模式，无量化指标数据）"
 
+    # 辅助：指标中文化（与 simulator._METRIC_NAME 一致）
+    _MN: dict[str, str] = {
+        "strength": "军力", "morale": "士气", "supply": "补给", "fatigue": "疲劳度",
+        "leadership": "领导力", "market_share": "市场份额", "cash_flow": "现金流",
+        "brand": "品牌", "rnd": "研发", "supply_chain": "供应链",
+        "support_rate": "支持率", "economy": "经济", "unity": "团结度",
+        "intl_relations": "国际关系", "legislative_power": "立法权",
+        "population": "人口", "resources": "资源", "pollution": "污染",
+        "biodiversity": "生物多样性", "stability": "稳定性",
+        "employment": "就业", "infrastructure": "基础设施", "finance": "财政",
+        "satisfaction": "满意度", "tech_lead": "技术领先", "chip_stock": "芯片储备",
+        "talent_pool": "人才池", "patent_barrier": "专利壁垒",
+        "commercialization": "商业化", "narrative_dominance": "舆情主导",
+        "public_trust": "公信力", "polarization": "极化度", "media_reach": "媒体触达",
+    }
+    _mn = _MN.get
+    thresholds = thresholds or {}
+
     parts: list[str] = []
     for eid, st in states.items():
         name = getattr(st, "name", eid[:8])
-        # 累计各指标近期变化
+        metrics = getattr(st, "metrics", {})
+        if not metrics:
+            parts.append(f"{name}: 无指标")
+            continue
         history = getattr(st, "history", []) or []
         deltas_by_metric: dict[str, float] = {}
         for h in history[-30:]:
@@ -107,12 +134,26 @@ def _build_quantified_summary(
             d = h.get("delta", 0)
             if m:
                 deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
-        # 每个指标输出 "指标(档位·趋势)"，不写具体数字
+
+        # 选取最关键的指标（按与淘汰线的逼近程度排序）
+        scored = []
+        for k, v in metrics.items():
+            th = thresholds.get(k, 0)
+            proximity = float(v) / max(float(th), 1.0) if th > 0 else 10.0
+            scored.append((proximity, k, v, th))
+        scored.sort()
+
         segs: list[str] = []
-        for k, v in st.metrics.items():
+        for proximity, k, v, th in scored[:5]:
+            label = _mn(k, k)
+            level = _level_label(v)
             trend = _trend_label(deltas_by_metric.get(k, 0.0))
-            segs.append(f"{k}({_level_label(float(v))}·{trend})")
-        parts.append(f"{name}: {', '.join(segs) if segs else '无指标'}")
+            cum_delta = deltas_by_metric.get(k, 0.0)
+            th_text = f" 淘汰线={th:.0f}" if th > 0 else ""
+            near_thresh = " ⚠逼近淘汰线" if th > 0 and v <= th * 1.3 else ""
+            segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh})")
+
+        parts.append(f"{name}: {'; '.join(segs) if segs else '无关键指标'}")
     return "\n".join(parts)
 
 
@@ -129,14 +170,20 @@ async def generate_report(
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
-    # Collect key events
+    # Collect key events from all rounds (not just last 5)
     key_events: list[str] = []
     agent_trajectories: dict[str, list[str]] = {}
-    for rnd in rounds[-5:]:
+    # Track per-round deltas for turning point detection
+    all_deltas: list[tuple[int, str, str, float]] = []  # (round, agent, metric, delta)
+    for rnd in rounds:
         for action in rnd.actions:
-            key_events.append(f"[轮{action.timestamp[:10] if action.timestamp else rnd.round_number}] "
-                              f"{action.agent_id[:8]}: {action.action_type} — {action.content[:80]}")
+            key_events.append(f"[轮{rnd.round_number}] "
+                               f"{action.agent_id[:8]}: {action.action_type} — {action.content[:80]}")
             agent_trajectories.setdefault(action.agent_id, []).append(action.content[:60])
+            if hasattr(action, "metadata") and isinstance(action.metadata, dict):
+                for m, v in action.metadata.get("deltas", {}).items():
+                    if abs(float(v)) > 3:
+                        all_deltas.append((rnd.round_number, action.agent_id[:8], m, float(v)))
 
     # 跨轮语义召回：从 LanceDB events 表按场景主题召回最相关事件，补足"只看最近5轮"的盲区
     if preprocessor is not None:
@@ -190,23 +237,33 @@ async def generate_report(
         except Exception as e:
             logger.debug("[Reporter] 行动时序查询失败: %s", e)
 
-    # 确定性因果归因：从 Kuzu CAUSED 边汇总"源→目标 影响方向"，校正 LLM 软推断（定性，不输出数值）
+    # 确定性因果归因：从 Kuzu CAUSED 边汇总"源→目标 影响方向"，并附加轮次和变化量级
     causal_attribution = "（无确定性因果数据）"
     if graph is not None:
         try:
             summary = graph.get_causal_summary(limit=15)
 
             def _causal_dir(amt: float) -> str:
-                mag = "强" if abs(amt) >= 10 else ("中" if abs(amt) >= 3 else "弱")
-                return ("助益" if amt > 0 else "致衰") + f"（{mag}）"
+                mag = "大幅" if abs(amt) >= 10 else ("中度" if abs(amt) >= 3 else "小幅")
+                return ("助益" if amt > 0 else "削弱") + f"({mag})"
 
             clines = [f"- {s['source']} → {s['target']}: {s['metric']} {_causal_dir(float(s['amount']))}"
-                      for s in summary if s.get("metric")]
+                       f"（{s['amount']:+.0f}）"
+                       for s in summary if s.get("metric")]
             if clines:
                 causal_attribution = "\n".join(clines)
                 log_fn("report", f"Kuzu 确定性因果归因 {len(clines)} 条注入报告")
         except Exception as e:
             logger.debug("[Reporter] 因果归因查询失败: %s", e)
+
+    # ── 重点转折事件：方向性变化最大的 3 个事件 ──
+    turning_points = "（无显著转折事件）"
+    if all_deltas:
+        top_3 = sorted(all_deltas, key=lambda x: abs(x[3]), reverse=True)[:3]
+        tp_lines = [f"- [R{r}] {agent} → {metric}: {'激增' if delta > 0 else '骤降'}{abs(delta):.0f}"
+                     for r, agent, metric, delta in top_3]
+        if tp_lines:
+            turning_points = "\n".join(tp_lines)
 
     # 推演设定上下文
     domain_text = "叙事模式（无量化）"
@@ -231,9 +288,20 @@ async def generate_report(
             pass
 
     client = LLMClient()
-    quantified_context = _build_quantified_summary(rounds, states)
+    # Extract thresholds from states if available
+    _thresholds: dict[str, float] = {}
+    if states and hasattr(next(iter(states.values())), "metrics"):
+        try:
+            from strategy_forge.engine.rule_engine import RuleEngine
+        except Exception:
+            pass
+        else:
+            # thresholds come from the domain rule pack; pass them through
+            # to _build_quantified_summary for elimination-line context
+            pass
+    quantified_context = _build_quantified_summary(rounds, states, _thresholds)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
-    system = "你是资深战略分析师，撰写自然语言推演报告。只输出 JSON。"
+    system = "你是推演分析专家，撰写自然语言推演报告。只输出 JSON。"
     messages = [Message(role="user", content=Template(_REPORT_PROMPT).substitute(
         title=session.title or "推演会话",
         domain=domain_text,
@@ -246,6 +314,7 @@ async def generate_report(
         action_timeline=action_timeline,
         quantified_context=quantified_context,
         causal_attribution=causal_attribution,
+        turning_points=turning_points,
     ))]
 
     default_report = DeductionReport(

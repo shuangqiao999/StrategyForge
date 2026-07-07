@@ -1237,7 +1237,7 @@ class SimulationEngine:
                            f"目标:{dec.get('target') or '—'}")
             lines.append(f"{nm} {act_txt}，数值变化: {chg}")
         prompt = (
-            f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的战局叙事（100 字以内）。\n\n"
+            f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的战局叙事（200 字以内）。\n\n"
             "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n只输出叙事段落，不要解释或列表。"
         )
         resp = await client.chat([Message(role="user", content=prompt)],
