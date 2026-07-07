@@ -629,7 +629,10 @@ class SimulationEngine:
             for a_id in alive_ids:
                 if a_id == actor_id:
                     continue
-                trust = self.reasoner.get_trust(a_id, actor_id)
+                # Trust lookup: matrix is indexed by [entity_id][name]; seed_trust stores
+                # by source entity_id → target name. We need observer's entity_id (a_id)
+                # looking at actor's name.
+                trust = self.reasoner.get_trust(a_id, actor_name)
                 delay = _compute_delay(trust)
                 distortion = _compute_distortion(trust)
                 delivered_content = _distort_event_content(content, distortion)
