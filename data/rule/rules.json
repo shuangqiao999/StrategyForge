@@ -972,16 +972,20 @@
     },
     "modules": {
       "metric_ownership": {
-        "_doc": "ODE handles gradual political/econ drift; rule_engine handles discrete campaign/legislate/reform actions",
+        "_doc": "ODE handles gradual political/econ/intl drift; rule_engine handles discrete campaign/legislate/reform actions",
         "support_rate": "ode",
         "economy": "ode",
-        "unity": "ode"
+        "unity": "ode",
+        "legislative_power": "ode",
+        "intl_relations": "ode"
       },
         "ode_engine": {
           "equations": {
             "support_rate": "competitive_logistic",
             "economy": "logistic",
-            "unity": "decay"
+            "unity": "decay",
+            "legislative_power": "logistic",
+            "intl_relations": "competitive_logistic"
           },
           "params": {
             "support_rate": {
@@ -995,6 +999,15 @@
             },
             "unity": {
               "_decay_rate": 0.015
+            },
+            "legislative_power": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.02
+            },
+            "intl_relations": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.03,
+              "_competition_factor": 0.2
             }
           }
         },
@@ -1244,7 +1257,7 @@
             "population": "competitive_logistic",
             "resources": "resource_depletion",
             "pollution": "pollution_spread",
-            "biodiversity": "logistic"
+            "biodiversity": "competitive_logistic"
           },
           "params": {
             "population": {
@@ -1254,7 +1267,8 @@
             },
             "biodiversity": {
               "_carrying_capacity": 100,
-              "_logistic_rate": 0.02
+              "_logistic_rate": 0.02,
+              "_competition_factor": 0.3
             },
             "resources": {
               "_decay_rate": 0.005
@@ -1505,14 +1519,18 @@
     },
     "modules": {
       "metric_ownership": {
-        "_doc": "ODE handles population/finance gradual trends; rule_engine handles discrete build/industry/welfare actions",
+        "_doc": "ODE handles population/finance/employment/infrastructure gradual trends; rule_engine handles discrete build/industry/welfare actions",
         "population": "ode",
-        "finance": "ode"
+        "finance": "ode",
+        "employment": "ode",
+        "infrastructure": "ode"
       },
       "ode_engine": {
         "equations": {
           "population": "logistic",
-          "finance": "logistic"
+          "finance": "logistic",
+          "employment": "competitive_logistic",
+          "infrastructure": "logistic"
         },
         "params": {
             "population": {
@@ -1522,6 +1540,15 @@
             "finance": {
               "_carrying_capacity": 200,
               "_logistic_rate": 0.03
+            },
+            "employment": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.04,
+              "_competition_factor": 0.3
+            },
+            "infrastructure": {
+              "_carrying_capacity": 100,
+              "_logistic_rate": 0.02
             }
         }
       },
