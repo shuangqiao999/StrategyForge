@@ -86,6 +86,20 @@ const PHASE_LABELS: Record<string, string> = {
 };
 const RUNNING_SET = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
 
+const METRIC_LABELS: Record<string, string> = {
+  strength: "军力", morale: "士气", supply: "补给", fatigue: "疲劳度", leadership: "领导力",
+  market_share: "市场份额", cash_flow: "现金流", brand: "品牌", rnd: "研发",
+  supply_chain: "供应链", support_rate: "支持率", economy: "经济", unity: "团结度",
+  intl_relations: "国际关系", legislative_power: "立法权",
+  population: "人口", resources: "资源", pollution: "污染", biodiversity: "生物多样性",
+  stability: "稳定性", employment: "就业", infrastructure: "基础设施", finance: "财政",
+  satisfaction: "满意度", tech_lead: "技术领先", chip_stock: "芯片储备",
+  talent_pool: "人才池", patent_barrier: "专利壁垒", commercialization: "商业化",
+  narrative_dominance: "舆情主导", public_trust: "公信力", polarization: "极化度",
+  media_reach: "媒体触达",
+};
+const fmtMetric = (m: string) => METRIC_LABELS[m] || m;
+
 const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
   <label style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, cursor: "pointer" }}>
     <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
@@ -1101,87 +1115,149 @@ export default function App() {
                 </div>
               )}
 
-              {mainTab === "dashboard" && (
+               {mainTab === "dashboard" && (
                 <div style={{ padding: 16, color: "#cbd5e1", fontSize: 13, overflowY: "auto" }}>
                   {snapshot ? (
                     <>
-                      {/* ── 文本态势简报 ── */}
-                      <div style={{ marginBottom: 16, background: "#0f172a", borderRadius: 8, padding: 12, borderLeft: "3px solid #3b82f6" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", marginBottom: 8 }}>
+                      {/* ── 自然语言态势简报 ── */}
+                      <div style={{ marginBottom: 16, background: "#0f172a", borderRadius: 8, padding: 14, borderLeft: "3px solid #3b82f6", lineHeight: 1.7 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", marginBottom: 10 }}>
                           📊 第 {snapshot.round || "?"} 轮态势简报
+                          {snapshot.entity_count != null && (
+                            <span style={{ fontSize: 12, fontWeight: 400, color: "#64748b", marginLeft: 12 }}>
+                              共 {snapshot.entity_count} 个实体存活
+                            </span>
+                          )}
                         </div>
-                        {snapshot.alerts && snapshot.alerts.length > 0 && (
-                          <div style={{ marginBottom: 8 }}>
-                            {snapshot.alerts.map((a: any, i: number) => (
-                              <div key={i} style={{ color: a.severity === "critical" ? "#f87171" : "#f59e0b", fontSize: 13, marginBottom: 2 }}>
-                                {a.severity === "critical" ? "🔴" : "🟡"} {a.entity}: {a.metric}={a.value} (阈值={a.threshold})
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {snapshot.recent && snapshot.recent.map((r: any, i: number) => (
-                          <div key={i} style={{ color: "#94a3b8", fontSize: 12, marginBottom: 1 }}>
-                            [{r.round}] {r.agent}: {r.action} → {r.content}
-                          </div>
-                        ))}
+                        {(() => {
+                          const groups = snapshot.groups as Record<string, { count: number; metrics: Record<string, number> }> | undefined;
+                          const entities = snapshot.entities as Array<{ name: string; metrics: Record<string, number>; alive: boolean }> | undefined;
+                          const alerts = snapshot.alerts as Array<{ entity: string; metric: string; value: number; threshold: number; severity: string }> | undefined;
+                          const recent = snapshot.recent as Array<{ agent: string; action: string; content: string; round: number }> | undefined;
+                          return (
+                            <>
+                              {/* 总体概况 */}
+                              {groups && Object.keys(groups).length > 0 && (() => {
+                                const domainNames = Object.keys(groups);
+                                if (domainNames.length === 1 && domainNames[0] === "generic") return null;
+                                const sortedMetrics = Object.keys(Object.values(groups)[0].metrics || {});
+                                const topMetrics = sortedMetrics.slice(0, 4);
+                                return (
+                                  <div style={{ marginBottom: 10, fontSize: 13, color: "#cbd5e1" }}>
+                                    阵营概况：{domainNames.map((d, i) => (
+                                      <span key={d}>{i > 0 && "、"}<span style={{ color: ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b"][i % 4] }}>{d}</span>（{groups[d].count}个实体）</span>
+                                    ))}。
+                                    {topMetrics.map(m => {
+                                      const ranked = domainNames.map(d => ({ d, v: groups[d].metrics?.[m] || 0 })).sort((a, b) => b.v - a.v);
+                                      if (ranked.length < 2 || ranked[0].v === ranked[1].v) return null;
+                                      return <span key={m}>{fmtMetric(m)}：<span style={{ color: "#60a5fa" }}>{ranked[0].d}</span>（{ranked[0].v}分）领先，<span style={{ color: "#94a3b8" }}>{ranked[ranked.length - 1].d}</span>（{ranked[ranked.length - 1].v}分）落后。{" "}</span>;
+                                    })}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* 风险预警 */}
+                              {alerts && alerts.length > 0 && (
+                                <div style={{ marginBottom: 8 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#f59e0b", marginBottom: 4 }}>⚠️ 风险预警</div>
+                                  {alerts.map((a, i) => {
+                                    const gap = a.value - a.threshold;
+                                    const pct = Math.round((a.value / Math.max(a.threshold, 1)) * 100);
+                                    const desc = a.severity === "critical"
+                                      ? `仅剩 ${a.value} 分，已跌破淘汰线（${a.threshold}），面临出局风险`
+                                      : `降至 ${a.value} 分（安全线 ${a.threshold}），若不改善将进一步恶化`;
+                                    return (
+                                      <div key={i} style={{ color: a.severity === "critical" ? "#f87171" : "#f59e0b", fontSize: 12, marginBottom: 3 }}>
+                                        {a.severity === "critical" ? "🔴" : "🟡"} {a.entity} {fmtMetric(a.metric)} — {desc}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* 近期动态 */}
+                              {recent && recent.length > 0 && (
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#a78bfa", marginBottom: 4 }}>📋 近期动态</div>
+                                  {recent.map((r, i) => (
+                                    <div key={i} style={{ fontSize: 12, color: "#94a3b8", marginBottom: 2, paddingLeft: 8, borderLeft: "2px solid #334155" }}>
+                                      <span style={{ color: "#cbd5e1" }}>{r.agent}</span>
+                                      <span style={{ color: "#64748b" }}> → {r.action}{r.content ? `（"${r.content.slice(0, 60)}${r.content.length > 60 ? "..." : ""}"）` : ""}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
 
-                      {/* ── 阵营对比柱状图 ── */}
-                      {snapshot.groups && Object.keys(snapshot.groups).length > 0 && (
-                        <div style={{ marginBottom: 16 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>阵营对比</div>
-                          {(() => {
-                            const groups = snapshot.groups as Record<string, any>;
-                            const allMetrics = new Set<string>();
-                            Object.values(groups).forEach(g => Object.keys(g.metrics || {}).forEach((m: string) => allMetrics.add(m)));
-                            const metricList = Array.from(allMetrics).slice(0, 8);
-                            const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a78bfa", "#06b6d4"];
-                            const barH = 18; const gap = 4; const chartW = 500; const padR = 60; const padL = 100;
-                            const svgH = metricList.length * (barH * 5 + gap) + 30;
-                            const maxVal = Math.max(...Object.values(groups).flatMap((g: any) => Object.values(g.metrics || {}) as number[]), 0) || 100;
-                            return (
-                              <svg width={chartW + padL + padR} height={svgH} style={{ background: "#0f172a", borderRadius: 8 }}>
-                                {metricList.map((metric, mi) => {
-                                  const yBase = mi * (barH * 5 + gap) + 20;
-                                  return (
-                                    <g key={metric}>
-                                      <text x={padL - 8} y={yBase + barH * 2 + 4} textAnchor="end" fill="#94a3b8" fontSize={11}>{metric}</text>
-                                      {Object.entries(groups).map(([domain, gdata], di) => {
-                                        const val = (gdata as any).metrics?.[metric] || 0;
-                                        const w = Math.max(1, (val / maxVal) * chartW);
-                                        return (
-                                          <g key={domain}>
-                                            <rect x={padL} y={yBase + di * (barH + 2)} width={w} height={barH} fill={colors[di % colors.length]} rx={2} />
-                                            <text x={padL + w + 4} y={yBase + di * (barH + 2) + barH - 4} fill="#e2e8f0" fontSize={10}>{val}</text>
-                                          </g>
-                                        );
-                                      })}
-                                    </g>
-                                  );
-                                })}
-                                {/* Legend */}
-                                {Object.keys(groups).map((domain, di) => (
-                                  <g key={'leg-' + domain}>
-                                    <rect x={padL + di * 120} y={svgH - 20} width={10} height={10} fill={colors[di % colors.length]} rx={1} />
-                                    <text x={padL + di * 120 + 14} y={svgH - 10} fill="#94a3b8" fontSize={10}>{domain}({(groups[domain] as any).count || 0})</text>
-                                  </g>
-                                ))}
-                              </svg>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {/* ── 实体数量 ── */}
-                      {snapshot.entity_count != null && (
-                        <div style={{ fontSize: 12, color: "#64748b" }}>
-                          {snapshot.entity_count} 个存活实体
-                        </div>
-                      )}
+                      {/* ── 实体指标一览表 ── */}
+                      {snapshot.entities && snapshot.entities.length > 0 && (() => {
+                        const entities = snapshot.entities as Array<{ name: string; metrics: Record<string, number>; alive: boolean }>;
+                        const allKeys = new Set<string>();
+                        entities.forEach(e => Object.keys(e.metrics).forEach(k => allKeys.add(k)));
+                        const keys = Array.from(allKeys).slice(0, 6);
+                        const thresholds = (snapshot as any)._thresholds as Record<string, number> | undefined;
+                        const getStatus = (e: typeof entities[0]) => {
+                          if (!thresholds || !e.alive) return { dot: "#ef4444", text: "已淘汰" };
+                          const critical = keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0));
+                          if (critical) return { dot: "#ef4444", text: "危急" };
+                          const warning = keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 1.5);
+                          if (warning) return { dot: "#f59e0b", text: "警戒" };
+                          return { dot: "#22c55e", text: "安全" };
+                        };
+                        return (
+                          <div style={{ marginBottom: 16 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #22c55e", paddingLeft: 8 }}>实体态势一览</div>
+                            <div style={{ background: "#0f172a", borderRadius: 8, overflow: "hidden" }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ borderBottom: "1px solid #1e293b" }}>
+                                    <th style={{ padding: "8px 10px", textAlign: "left", color: "#64748b", fontWeight: 600 }}>实体</th>
+                                    {keys.map(k => <th key={k} style={{ padding: "8px 6px", textAlign: "center", color: "#64748b", fontWeight: 500, fontSize: 11 }}>{fmtMetric(k)}</th>)}
+                                    <th style={{ padding: "8px 10px", textAlign: "center", color: "#64748b", fontWeight: 600, fontSize: 11 }}>状态</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {entities.map(e => {
+                                    const st = getStatus(e);
+                                    return (
+                                      <tr key={e.name} style={{ borderBottom: "1px solid #1e293b" }}>
+                                        <td style={{ padding: "7px 10px", color: e.alive ? "#e2e8f0" : "#475569", fontWeight: 500 }}>{e.name}</td>
+                                        {keys.map(k => {
+                                          const val = e.metrics[k];
+                                          const th = thresholds?.[k];
+                                          const warn = th != null && val != null && val <= th * 1.5;
+                                          const crit = th != null && val != null && val <= th;
+                                          return (
+                                            <td key={k} style={{ padding: "7px 4px", textAlign: "center", color: crit ? "#f87171" : warn ? "#f59e0b" : "#94a3b8", fontWeight: crit ? 700 : 400 }}>
+                                              {val != null ? val : "-"}
+                                            </td>
+                                          );
+                                        })}
+                                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot, display: "inline-block", flexShrink: 0 }} />
+                                            <span style={{ color: st.dot }}>{st.text}</span>
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </>
                   ) : (
                     <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
-                      {selected?.status ? (["simulating", "reporting", "complete"].includes(selected.status) ? "等待轮次数据..." : "推演启动后将显示实时态势") : "请先选择会话并启动推演"}
+                      {selected?.status === "complete" ? "✅ 推演已完成，请查看「报告」Tab"
+                        : selected?.status ? (["simulating", "reporting"].includes(selected.status) ? "⏳ 等待首轮推演数据..."
+                        : "推演启动后将显示实时态势")
+                        : "📌 请选择会话并启动推演"}
                     </div>
                   )}
                 </div>

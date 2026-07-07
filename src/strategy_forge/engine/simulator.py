@@ -1057,7 +1057,14 @@ def _build_state_snapshot(states: dict, thresholds: dict, event_history: list,
             "round": e.get("round", round_num),
         })
     return {"alerts": alerts[:5], "groups": group_stats, "recent": recent,
-            "round": round_num, "entity_count": len(states)}
+            "round": round_num, "entity_count": len(states),
+            "_thresholds": thresholds,
+            "entities": [{k: v for k, v in {
+                "name": getattr(st, 'name', '?'),
+                "metrics": {m: round(st.metrics.get(m, 0), 1) for m in metrics_list},
+                "alive": re_engine.is_alive(st) if re_engine else True,
+            }.items() if v is not None and (k != "metrics" or isinstance(v, dict) and len(v) > 0)}
+            for st in states.values() if hasattr(st, 'name')]}
 
 
 def _parse_action_json(raw: str) -> dict[str, Any]:
