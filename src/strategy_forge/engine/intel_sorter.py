@@ -164,10 +164,11 @@ async def sort_entities(
         })
 
     demoted = _apply_safety_net(result)
+    restored = _apply_type_fallback(result)
     active = sum(1 for e in result if e["include_in_simulation"])
     excluded = [e["name"] for e in result if not e["include_in_simulation"]]
-    logger.info("[IntelSorter] 总计 %d 实体 | 活跃 %d | 排除 %d | 安全网降级 %d",
-                len(result), active, len(excluded), demoted)
+    logger.info("[IntelSorter] 总计 %d 实体 | 活跃 %d | 排除 %d | 安全网降级 %d | 反向修正 %d",
+                len(result), active, len(excluded), demoted, restored)
     if excluded:
         logger.info("[IntelSorter] 排除实体: %s", excluded[:15])
     return result
@@ -210,6 +211,14 @@ _DYAD_WORDS_EN = frozenset({
 })
 
 _ALL_DYAD = _DYAD_WORDS | _DYAD_WORDS_EN
+
+# ── 战略实体类型白名单：这些类型的实体不应被 LLM 误判为非战略 ──
+_STRATEGIC_ENTITY_TYPES = frozenset({
+    "国家", "Organization", "Nation", "Country", "State", "联盟",
+    "Alliance", "政党", "Political Party", "企业", "Company",
+    "Corporation", "武装组织", "Armed Group", "Military", "军队",
+    "政府", "Government", "国际组织", "International Organization",
+})
 
 
 def _any_name_matches(e: dict, keywords: tuple[str, ...], mode: str) -> bool:
@@ -267,6 +276,22 @@ def _apply_safety_net(result: list[dict[str, Any]]) -> int:
             demoted += _demote(e, "职务头衔非实体")
 
     return demoted
+
+
+def _apply_type_fallback(result: list[dict[str, Any]]) -> int:
+    """类型白名单反向修正：对误判为非战略的战略实体类型，强制恢复 include_in_simulation=true。
+
+    LLM 可能在分类时过于保守（尤其是 9B 模型），将明确的国家/组织/军队实体
+    标记为 false。此函数仅对类型白名单匹配的实体做恢复，不修改 role 字段
+    （保留 LLM 对角色/职责的判断），不干预其他类型。
+    """
+    restored = 0
+    for e in result:
+        etype = str(e.get("type", "")).strip()
+        if etype in _STRATEGIC_ENTITY_TYPES and not e["include_in_simulation"]:
+            e["include_in_simulation"] = True
+            restored += 1
+    return restored
 
 
 def _extract_text(resp: Any) -> str:
