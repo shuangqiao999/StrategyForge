@@ -55,6 +55,7 @@ $turning_points
    - 多方视角平衡：避免单向"某方全面胜出/衰落"的叙事，各方均有优势与制约，给出对手视角
    - 区分"事实"与"推测"：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实
    - 避免不符常识的极端断言（如"完全孤立""社会崩溃""彻底失败"）；此类只能作为风险情景谨慎提及，不作为结论
+   - 禁止以"第X轮推演中"或类似日志风格句式作为报告开头。报告首句应直接进入分析正文，描述当前推演场景下的核心态势。
 
 2. "risk_alerts": 风险预警列表（最多5条字符串）。每条格式：{风险标题} | {触发条件} | {受影响方}。示例："补给链断裂风险 | 连续3轮消耗无补充且库存逼近淘汰线 | 某阵营"。禁止使用"可能/或将/存在风险"等模糊词前置——如果是风险，直接陈述事实。
 
@@ -175,10 +176,18 @@ async def generate_report(
     agent_trajectories: dict[str, list[str]] = {}
     # Track per-round deltas for turning point detection
     all_deltas: list[tuple[int, str, str, float]] = []  # (round, agent, metric, delta)
+
+    def _agent_name(aid: str) -> str:
+        if states and aid in states:
+            st = states[aid]
+            return getattr(st, "name", "") or aid[:8]
+        return aid[:8]
+
     for rnd in rounds:
         for action in rnd.actions:
             key_events.append(f"[轮{rnd.round_number}] "
-                               f"{action.agent_id[:8]}: {action.action_type} — {action.content[:80]}")
+                               f"{_agent_name(action.agent_id)}: "
+                               f"{action.action_type} — {action.content[:80]}")
             agent_trajectories.setdefault(action.agent_id, []).append(action.content[:60])
             if hasattr(action, "metadata") and isinstance(action.metadata, dict):
                 for m, v in action.metadata.get("deltas", {}).items():
