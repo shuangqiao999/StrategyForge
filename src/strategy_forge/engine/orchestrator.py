@@ -63,13 +63,13 @@ class DeductionOrchestrator:
 
         session_id = self.session.id
         _current_session.set(session_id)
-        _total_start = _time.monotonic()
+        _total_start = _time.time()
         _phase_times: dict[str, float] = {}
 
         async def _timed_phase(name: str, fn):
-            t0 = _time.monotonic()
+            t0 = _time.time()
             await fn()
-            dt = _time.monotonic() - t0
+            dt = _time.time() - t0
             _phase_times[name] = dt
             self._log("orchestrator", f"阶段 {name} 耗时 {dt:.1f}s")
 
@@ -87,19 +87,22 @@ class DeductionOrchestrator:
             await _timed_phase("simulation", self._phase4_simulation)
             await _timed_phase("report", self._phase5_report)
 
-            _total = _time.monotonic() - _total_start
+            _total = _time.time() - _total_start
+            _sum_phases = sum(_phase_times.values())
             _detail = " | ".join(f"{k}={v:.1f}s" for k, v in _phase_times.items())
+            if abs(_total - _sum_phases) > 5.0:
+                _detail += f" | 阶段合计={_sum_phases:.1f}s"
             self._log("orchestrator", f"五阶段完成，总耗时 {_total:.1f}s | {_detail}")
 
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
             self._clear_state_snapshot(session_id)
         except _PhaseCancelledError:
-            _total = _time.monotonic() - _total_start
+            _total = _time.time() - _total_start
             self._log("orchestrator", f"推演已暂停（运行 {_total:.1f}s），进度已保存")
             self._save_pause_snapshot(session_id)
         except Exception as e:
-            _total = _time.monotonic() - _total_start
+            _total = _time.time() - _total_start
             logger.exception("[Deduction] Pipeline failed: %s", e)
             self.store.update(session_id, status=SessionStatus.FAILED.value,
                               error=str(e)[:500])
