@@ -357,6 +357,45 @@ class SimulationEngine:
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
 
+        # ── 补全：无图谱关系的 agent 用 polarization / 默认划分敌友 ──
+        for a in self.agents:
+            if self._rel_context.get(a.entity_id, {}).get("summary"):
+                continue  # 已有图谱关系，跳过
+            state = self._states.get(a.entity_id)
+            if state is None:
+                continue
+            polar = state.metrics.get("polarization", 0)
+            allies: list[str] = []
+            foes: list[str] = []
+            for other in self.agents:
+                if other.entity_id == a.entity_id:
+                    continue
+                other_st = self._states.get(other.entity_id)
+                if other_st is None:
+                    continue
+                other_polar = other_st.metrics.get("polarization", 0)
+                # polarization 同向 → 盟友，反向 → 对手
+                if abs(polar) < 0.5 and abs(other_polar) < 0.5:
+                    continue  # 双方都是中性，不分配
+                if (polar > 0 and other_polar > 0) or (polar < 0 and other_polar < 0):
+                    allies.append(other.name)
+                elif (polar * other_polar) < 0:
+                    foes.append(other.name)
+            if allies or foes:
+                parts = []
+                if allies:
+                    parts.append("盟友: " + "、".join(allies[:6]))
+                if foes:
+                    parts.append("对手: " + "、".join(foes[:6]))
+                self._rel_context[a.entity_id] = {
+                    "allies": allies, "opponents": foes,
+                    "summary": "；".join(parts)}
+                self.reasoner.seed_trust(a.entity_id, allies, foes)
+        post_seeded = sum(1 for v in self._rel_context.values() if v["summary"])
+        if post_seeded > seeded:
+            self._log("simulation",
+                       f"极化补全：{post_seeded - seeded} 个智能体通过 polarization 自动划分敌友")
+
     def _augment_recall_query(self, base: str, entity_id: str) -> str:
         """④ 关系邻居增强召回：把 Kuzu 盟友/对手名拼进动态事件召回 query，聚焦相关事件。
 

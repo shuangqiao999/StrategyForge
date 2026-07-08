@@ -148,9 +148,30 @@ async def create_agents_from_graph(
     # Intelligence sorting: filter non-strategic entities
     if intel_list:
         intel_map = {e["name"]: e for e in intel_list if e.get("name")}
+        # Build reverse alias mapping from IntelSorter for cross-name matching
+        _intel_reverse: dict[str, str] = {}
+        for e in intel_list:
+            canon = e.get("name", "")
+            if not canon:
+                continue
+            _intel_reverse[canon] = canon
+            for a in e.get("aliases", []):
+                _intel_reverse[str(a).strip()] = canon
         active_names = {e["name"] for e in intel_list if e.get("include_in_simulation")}
         before = len(persons)
-        persons = [p for p in persons if intel_map.get(p["name"], {}).get("include_in_simulation", True)]
+        # Filter: cross-match graph entity names against IntelSorter canonical names via aliases
+        filtered: list[dict] = []
+        for p in persons:
+            pname = p.get("name", "")
+            # Resolve to canonical name via reverse alias map
+            canon = _intel_reverse.get(pname, pname)
+            # Check if canonical name is in active_names or not in intel_map at all
+            # (entities NOT in intel_map are treated as include_in_simulation=True: strategic by default)
+            intel_entry = intel_map.get(canon) or intel_map.get(pname)
+            if intel_entry and not intel_entry.get("include_in_simulation", True):
+                continue  # explicitly marked as non-strategic
+            filtered.append(p)
+        persons = filtered
         if len(persons) < before:
             log_fn("agents", f"情报过滤: {before} → {len(persons)} 个智能体（排除非战略实体）")
     else:

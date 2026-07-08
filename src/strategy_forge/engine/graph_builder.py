@@ -153,7 +153,7 @@ async def build_graph(
             gathered = await asyncio.gather(*(_extract_call(prompts[k]) for k in idxs))
             content_by_idx = dict(zip(idxs, gathered, strict=False))
 
-            # ── Phase 3（顺序·写库，保持与原实现一致的确定性顺序）──
+            # ── Phase 3（顺序·写库，每5批触发一次增量去重）──
             for i, (std_name, _aliases) in enumerate(hf_items):
                 content = content_by_idx.get(i)
                 if not content:
@@ -180,7 +180,12 @@ async def build_graph(
                         evidence=rel.get("evidence", ""),
                     )
                     total_relations += 1
+                # 每 5 批触发一次增量去重，防止中间态实体爆炸
                 if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
+                    try:
+                        graph.merge_alias_nodes(std_name, _aliases)
+                    except Exception:
+                        pass  # 增量去重非致命，失败不影响后续
                     log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: {total_entities} 实体, {total_relations} 关系")
 
         # ── 低频实体 → 语义分块顺带抽取 ──
