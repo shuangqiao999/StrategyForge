@@ -164,8 +164,8 @@ class ProviderRegistry:
 
     def _resolve(self, prefix: str, provider_slug: str) -> dict[str, str]:
         pd = PROVIDER_CATALOG.get(provider_slug)
-        base = self._data.get(f"{prefix}_base_url", "") or (self._data.get("embedding_api_base", "") if prefix == "embed" else "") or os.getenv(f"FORGE_{prefix.upper()}_BASE", "") or (pd.default_llm_base_url if pd else "")
-        key = self._data.get(f"{prefix}_api_key", "") or (self._data.get("embedding_api_key", "") if prefix == "embed" else "") or os.getenv(f"FORGE_{prefix.upper()}_KEY", "")
+        base = self._data.get(f"{prefix}_base_url", "") or os.getenv(f"FORGE_{prefix.upper()}_BASE", "") or (pd.default_llm_base_url if pd else "")
+        key = self._data.get(f"{prefix}_api_key", "") or os.getenv(f"FORGE_{prefix.upper()}_KEY", "")
         model = self._data.get(f"{prefix}_model", "") or os.getenv(f"FORGE_{prefix.upper()}_MODEL", "") or (pd.default_llm_model if pd else "") if prefix == "llm" else self._data.get("embedding_model_name", "") or os.getenv("FORGE_EMBED_MODEL", "") or (pd.default_embed_model if pd else "")
         return {"api_base": base.rstrip("/") if base else "", "api_key": key, "model": model}
 
@@ -175,10 +175,6 @@ class ProviderRegistry:
     def resolve_for_embedding(self) -> dict[str, str]:
         r = self._resolve("embed", self.embed_provider_slug)
         r["model_name"] = r.pop("model")
-        if not r["api_base"] and self.llm_base_url:
-            r["api_base"] = self.llm_base_url
-        if not r["api_key"]:
-            r["api_key"] = self.llm_api_key
         return r
 
     @property

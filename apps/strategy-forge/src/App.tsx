@@ -286,7 +286,7 @@ export default function App() {
       });
       await fetch(`${API_BASE}/config/embedding`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ embedding_api_base: cfgEmbedBase || cfgLLMBase, embedding_api_key: cfgEmbedKey || cfgLLMKey, embedding_model_name: cfgEmbedModel, provider_slug: cfgEmbedProvider || cfgLLMProvider }),
+        body: JSON.stringify({ embedding_api_base: cfgEmbedBase, embedding_api_key: cfgEmbedKey, embedding_model_name: cfgEmbedModel, provider_slug: cfgEmbedProvider }),
       });
       await fetchConfig();
       setShowSettings(false);
@@ -1737,15 +1737,15 @@ export default function App() {
               <>
                 <label style={lbl}>服务商</label>
                 <select value={cfgEmbedProvider} onChange={e => { setCfgEmbedProvider(e.target.value); const p = cfgProviders.find(x => x.slug === e.target.value); if (p?.default_llm_base_url) { setCfgEmbedBase(p.default_llm_base_url); } }} style={{ ...inp, background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6 }}>
-                  <option value="">与 LLM 相同</option>
+                  <option value="">独立配置...</option>
                   {cfgProviders.map(p => <option key={p.slug} value={p.slug}>{p.name}{p.default_embed_model ? ` (${p.default_embed_model})` : ""}{p.note ? ` — ${p.note}` : ""}</option>)}
                 </select>
 
                 <label style={lbl}>嵌入 API 地址</label>
-                <input style={inp} value={cfgEmbedBase} onChange={e => setCfgEmbedBase(e.target.value)} placeholder={cfgLLMBase || "http://127.0.0.1:1234/v1"} />
+                <input style={inp} value={cfgEmbedBase} onChange={e => setCfgEmbedBase(e.target.value)} placeholder="http://127.0.0.1:1234/v1" />
 
                 <label style={lbl}>嵌入 API Key</label>
-                <input style={inp} type="password" value={cfgEmbedKey} onChange={e => setCfgEmbedKey(e.target.value)} placeholder="与 LLM 相同 (留空)" />
+                <input style={inp} type="password" value={cfgEmbedKey} onChange={e => setCfgEmbedKey(e.target.value)} placeholder="嵌入服务 API Key" />
 
                 <label style={lbl}>嵌入模型名称</label>
                 <input style={inp} value={cfgEmbedModel} onChange={e => setCfgEmbedModel(e.target.value)} placeholder="text-embedding-3-small" />
