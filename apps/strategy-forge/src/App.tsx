@@ -623,7 +623,7 @@ export default function App() {
         } else if (d.type === "error") {
           // ignore
         } else {
-          setLogs(prev => [...prev.slice(-200), { phase: d.phase || "", message: d.message || "", timestamp: d.timestamp || "" }]);
+                setLogs(prev => [...prev, { phase: d.phase || "", message: d.message || "", timestamp: d.timestamp || "" }]);
           if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
         }
       } catch { /* ignore */ }

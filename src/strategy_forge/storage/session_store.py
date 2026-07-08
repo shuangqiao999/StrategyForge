@@ -165,13 +165,20 @@ class SessionStore:
             )
             conn.commit()
 
-    def get_logs(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
+    def get_logs(self, session_id: str, limit: int = -1) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT id, phase, message, timestamp FROM deduction_logs "
-                "WHERE session_id = ? ORDER BY id ASC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
+            if limit <= 0:
+                rows = conn.execute(
+                    "SELECT id, phase, message, timestamp FROM deduction_logs "
+                    "WHERE session_id = ? ORDER BY id ASC",
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, phase, message, timestamp FROM deduction_logs "
+                    "WHERE session_id = ? ORDER BY id ASC LIMIT ?",
+                    (session_id, limit),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def prune_logs(self, session_id: str, keep: int = 500) -> int:

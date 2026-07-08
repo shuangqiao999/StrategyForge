@@ -538,12 +538,6 @@ class DeductionOrchestrator:
             if stats:
                 self.store.update(self.session.id,
                                   token_json=_json.dumps(stats, ensure_ascii=False))
-            # 定期裁剪日志防止表无限增长（保留窗口 >> SSE 补历史窗口 200）
-            if rnd % 5 == 0:
-                try:
-                    self.store.prune_logs(self.session.id)
-                except Exception as e:
-                    logger.debug("[Orchestrator] prune_logs skipped: %s", e)
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "
