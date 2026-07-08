@@ -79,11 +79,11 @@ async def update_embed(body: EmbedConfigUpdate):
 
 # ── Model listing + test ──
 def _real_key_or(req_key: str) -> str:
-    """脱敏串(含 * / •)、空、或 'local' 时回退使用 registry 中存储的真实 Key，
-    避免把脱敏 Key 当真实 Key 塞进 HTTP 头(非 ASCII 字符会导致编码错误)。"""
+    """脱敏串(含 * / •)、空、或 'local' 时直接返回空字符串。
+    本地服务无需 key，云端服务需用户显式输入。不再回退到存储值。"""
     k = (req_key or "").strip()
     if not k or k.lower() == "local" or "*" in k or "•" in k:
-        return registry.llm_api_key or ""
+        return ""
     return k
 
 

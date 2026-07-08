@@ -156,7 +156,7 @@ class ProviderRegistry:
 
     @property
     def embed_provider_slug(self) -> str:
-        return self._data.get("embed_provider", "") or self.llm_provider_slug
+        return self._data.get("embed_provider", "") or os.getenv("FORGE_EMBED_PROVIDER", "")
 
     @embed_provider_slug.setter
     def embed_provider_slug(self, v: str) -> None:
@@ -223,9 +223,11 @@ class ProviderRegistry:
     @staticmethod
     async def list_models(base_url: str, api_key: str) -> dict:
         if not base_url: return {"error": "未配置 API 地址", "models": []}
+        headers: dict[str, str] = {}
+        if api_key: headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=30.0) as c:
-                r = await c.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {api_key or 'local'}"})
+                r = await c.get(f"{base_url.rstrip('/')}/models", headers=headers)
                 r.raise_for_status()
                 return {"models": sorted(m.get("id","") for m in r.json().get("data",[]) if m.get("id"))}
         except Exception as e:
@@ -234,9 +236,11 @@ class ProviderRegistry:
     @staticmethod
     async def test_connection(base_url: str, api_key: str) -> dict:
         if not base_url: return {"ok": False, "status": 0, "error": "未配置 API 地址"}
+        headers: dict[str, str] = {}
+        if api_key: headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=10.0) as c:
-                r = await c.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {api_key or 'local'}"})
+                r = await c.get(f"{base_url.rstrip('/')}/models", headers=headers)
                 return {"ok": r.status_code < 500, "status": r.status_code}
         except Exception as e:
             return {"ok": False, "status": 0, "error": str(e)}

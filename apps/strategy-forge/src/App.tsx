@@ -241,7 +241,7 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/config/list-models`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_type: "openai", base_url: base, api_key: key || "local" }),
+        body: JSON.stringify({ api_type: "openai", base_url: base, api_key: key }),
       });
       const data = await r.json();
       const all: string[] = data.models || [];
@@ -270,7 +270,7 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/config/test-connection`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_type: "openai", base_url: cfgLLMBase, api_key: cfgLLMKey || "local" }),
+        body: JSON.stringify({ api_type: "openai", base_url: cfgLLMBase, api_key: cfgLLMKey }),
       });
       const data = await r.json();
       setCfgLLMTest(data.ok ? "ok" : "fail");
