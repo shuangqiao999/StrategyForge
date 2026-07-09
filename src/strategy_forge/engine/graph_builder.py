@@ -121,7 +121,8 @@ async def build_graph(
 
             # ── Phase 1（顺序·廉价）：混合检索 + 构建每实体抽取 prompt ──
             from strategy_forge.core.tokenizer import compress_to_keywords
-            hf_items = list(high_freq.items())
+            hf_items = sorted(high_freq.items(), key=lambda x: -len(x[1]))[:25]  # top-25 高频
+            log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (top-25)")
             prompts: list[str | None] = []
             for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
@@ -132,7 +133,7 @@ async def build_graph(
                 fused = "\n---\n".join(fragments)
                 keywords = compress_to_keywords(fused, top_k=10)
                 keyword_tag = f"\n\n## 关键词标签\n{', '.join(keywords)}" if keywords else ""
-                prompts.append(_extract_base.replace("__TEXT__", fused[:6000] + keyword_tag))
+                prompts.append(_extract_base.replace("__TEXT__", fused[:3000] + keyword_tag))
 
             # ── Phase 2（并发·LLM 抽取，上限 = FORGE_MAX_CONCURRENT）──
             sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
@@ -180,8 +181,8 @@ async def build_graph(
                         evidence=rel.get("evidence", ""),
                     )
                     total_relations += 1
-                # 每 5 批触发一次增量去重，防止中间态实体爆炸
-                if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
+                # 每 15 批触发一次增量去重，防止中间态实体爆炸
+                if (i + 1) % 15 == 0 or i == len(hf_items) - 1:
                     try:
                         graph.merge_alias_nodes(std_name, _aliases)
                     except Exception:
