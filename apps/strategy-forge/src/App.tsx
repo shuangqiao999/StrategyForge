@@ -178,7 +178,7 @@ export default function App() {
 
   // ── Settings ──
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"llm" | "embed">("llm");
+  const [settingsTab, setSettingsTab] = useState<"llm" | "embed" | "engine">("llm");
   const [cfgLLMBase, setCfgLLMBase] = useState("");
   const [cfgLLMKey, setCfgLLMKey] = useState("");
   const [cfgLLMModel, setCfgLLMModel] = useState("");
@@ -197,6 +197,22 @@ export default function App() {
   const [cfgLLMTest, setCfgLLMTest] = useState<"" | "testing" | "ok" | "fail">("");
   const [cfgProviders, setCfgProviders] = useState<Array<{slug:string;name:string;default_llm_base_url:string;default_llm_model:string;default_embed_model:string;note:string}>>([]);
 
+  // ── 引擎配置 ──
+  const [cfgDefaultRounds, setCfgDefaultRounds] = useState(10);
+  const [cfgMaxAgents, setCfgMaxAgents] = useState(10000);
+  const [cfgCandidateCount, setCfgCandidateCount] = useState(3);
+  const [cfgMaxConcurrent, setCfgMaxConcurrent] = useState(2);
+  const [cfgRetrieveTopK, setCfgRetrieveTopK] = useState(5);
+  const [cfgSimilarity, setCfgSimilarity] = useState(0.4);
+  const [cfgSafetyNet, setCfgSafetyNet] = useState(true);
+  const [cfgRecallBoost, setCfgRecallBoost] = useState(true);
+  const [cfgEventHybrid, setCfgEventHybrid] = useState(true);
+  const [cfgLLMTimeout, setCfgLLMTimeout] = useState(300);
+  const [cfgConnectTimeout, setCfgConnectTimeout] = useState(60);
+  const [cfgGenTimeout, setCfgGenTimeout] = useState(1800);
+  const [cfgRetryPasses, setCfgRetryPasses] = useState(3);
+  const [cfgFailThreshold, setCfgFailThreshold] = useState(0.75);
+
   // ── 模型类型甄别：嵌入模型关键词 ──
   const EMBED_MODEL_KW = ["embed", "embedding", "bge", "e5", "gte", "stella", "nomic", "jina"];
 
@@ -206,10 +222,21 @@ export default function App() {
         fetch(`${API_BASE}/config/llm`).then(r => r.ok ? r.json() : null),
         fetch(`${API_BASE}/config/embedding`).then(r => r.ok ? r.json() : null),
         fetch(`${API_BASE}/config/providers`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE}/config/engine`).then(r => r.ok ? r.json() : null),
       ]);
       if (lr) { setCfgLLMBase(lr.llm_base_url || ""); setCfgLLMKey(lr.llm_api_key || ""); setCfgLLMModel(lr.llm_model || ""); setCfgLLMProvider(lr.provider_slug || ""); setCfgLLMTemp(lr.llm_temperature || 0.3); }
       if (er) { setCfgEmbedBase(er.embedding_api_base || ""); setCfgEmbedKey(er.embedding_api_key || ""); setCfgEmbedModel(er.embedding_model_name || ""); setCfgEmbedProvider(er.provider_slug || ""); }
       if (pr) { setCfgProviders(pr.providers || []); }
+      const eng = await fetch(`${API_BASE}/config/engine`).then(r => r.ok ? r.json() : null);
+      if (eng) {
+        setCfgDefaultRounds(eng.default_rounds ?? 10); setCfgMaxAgents(eng.max_agents ?? 10000);
+        setCfgCandidateCount(eng.candidate_count ?? 3); setCfgMaxConcurrent(eng.max_concurrent ?? 2);
+        setCfgRetrieveTopK(eng.retrieve_top_k ?? 5); setCfgSimilarity(eng.similarity_threshold ?? 0.4);
+        setCfgSafetyNet(eng.intel_safety_net ?? true); setCfgRecallBoost(eng.recall_rel_boost ?? true);
+        setCfgEventHybrid(eng.event_hybrid ?? true); setCfgLLMTimeout(eng.llm_timeout ?? 300);
+        setCfgConnectTimeout(eng.connect_timeout ?? 60); setCfgGenTimeout(eng.generation_timeout ?? 1800);
+        setCfgRetryPasses(eng.retry_passes ?? 3); setCfgFailThreshold(eng.sim_fail_threshold ?? 0.75);
+      }
       return !!(pr && (pr.providers || []).length);
     } catch { return false; }
   }, []);
@@ -288,11 +315,25 @@ export default function App() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ embedding_api_base: cfgEmbedBase, embedding_api_key: cfgEmbedKey, embedding_model_name: cfgEmbedModel, provider_slug: cfgEmbedProvider }),
       });
+      await fetch(`${API_BASE}/config/engine`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          default_rounds: cfgDefaultRounds, max_agents: cfgMaxAgents, candidate_count: cfgCandidateCount,
+          llm_temperature: cfgLLMTemp, max_concurrent: cfgMaxConcurrent,
+          retrieve_top_k: cfgRetrieveTopK, similarity_threshold: cfgSimilarity,
+          intel_safety_net: cfgSafetyNet, recall_rel_boost: cfgRecallBoost, event_hybrid: cfgEventHybrid,
+          llm_timeout: cfgLLMTimeout, connect_timeout: cfgConnectTimeout, generation_timeout: cfgGenTimeout,
+          retry_passes: cfgRetryPasses, sim_fail_threshold: cfgFailThreshold,
+        }),
+      });
       await fetchConfig();
       setShowSettings(false);
     } catch { /* ignore */ }
     setCfgSaving(false);
-  }, [cfgLLMBase, cfgLLMKey, cfgLLMModel, cfgLLMProvider, cfgLLMTemp, cfgEmbedBase, cfgEmbedKey, cfgEmbedModel, cfgEmbedProvider, fetchConfig]);
+  }, [cfgLLMBase, cfgLLMKey, cfgLLMModel, cfgLLMProvider, cfgLLMTemp, cfgEmbedBase, cfgEmbedKey, cfgEmbedModel, cfgEmbedProvider,
+      cfgDefaultRounds, cfgMaxAgents, cfgCandidateCount, cfgMaxConcurrent, cfgRetrieveTopK, cfgSimilarity,
+      cfgSafetyNet, cfgRecallBoost, cfgEventHybrid, cfgLLMTimeout, cfgConnectTimeout, cfgGenTimeout,
+      cfgRetryPasses, cfgFailThreshold, fetchConfig]);
 
   const fetchSessions = useCallback(async (): Promise<boolean> => {
     try {
@@ -1702,6 +1743,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
               <button onClick={() => setSettingsTab("llm")} style={{ flex: 1, padding: "6px 0", borderRadius: 6, border: "1px solid #334155", background: settingsTab === "llm" ? "#3b82f6" : "#0f172a", color: settingsTab === "llm" ? "#fff" : "#94a3b8", cursor: "pointer", fontSize: 13 }}>LLM 对话模型</button>
               <button onClick={() => setSettingsTab("embed")} style={{ flex: 1, padding: "6px 0", borderRadius: 6, border: "1px solid #334155", background: settingsTab === "embed" ? "#3b82f6" : "#0f172a", color: settingsTab === "embed" ? "#fff" : "#94a3b8", cursor: "pointer", fontSize: 13 }}>嵌入模型</button>
+              <button onClick={() => setSettingsTab("engine")} style={{ flex: 1, padding: "6px 0", borderRadius: 6, border: "1px solid #334155", background: settingsTab === "engine" ? "#3b82f6" : "#0f172a", color: settingsTab === "engine" ? "#fff" : "#94a3b8", cursor: "pointer", fontSize: 13 }}>引擎</button>
             </div>
 
             {settingsTab === "llm" ? (
@@ -1775,6 +1817,46 @@ export default function App() {
               </div>
             )}
             {settingsTab === "embed" && cfgEmbedModelError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{cfgEmbedModelError}</div>}
+
+            {/* ── 引擎配置 Tab ── */}
+            {settingsTab === "engine" && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>推演控制</div>
+                <label style={lbl}>默认轮数 <span style={{ color: "#64748b" }}>— 创建会话时的预设推演轮数</span></label>
+                <input style={inp} type="number" min={1} max={100} value={cfgDefaultRounds} onChange={e => setCfgDefaultRounds(Math.max(1, Number(e.target.value) || 1))} />
+                <label style={lbl}>最大智能体 <span style={{ color: "#64748b" }}>— 单次推演智能体数量上限</span></label>
+                <input style={inp} type="number" min={1} max={50000} value={cfgMaxAgents} onChange={e => setCfgMaxAgents(Math.max(1, Number(e.target.value) || 1))} />
+                <label style={lbl}>候选策略数 <span style={{ color: "#64748b" }}>— LLM 每条决策生成的候选策略数</span></label>
+                <input style={inp} type="number" min={1} max={10} value={cfgCandidateCount} onChange={e => setCfgCandidateCount(Math.max(1, Number(e.target.value) || 1))} />
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginTop: 12, marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>LLM 行为</div>
+                <label style={lbl}>决策温度: {cfgLLMTemp.toFixed(1)} <span style={{ color: "#64748b" }}>— 越高决策越随机</span></label>
+                <input type="range" min={0} max={1} step={0.1} value={cfgLLMTemp} onChange={e => setCfgLLMTemp(parseFloat(e.target.value))} style={{ width: "100%" }} />
+                <label style={lbl}>并发上限 <span style={{ color: "#64748b" }}>— 同时进行的 LLM 请求数</span></label>
+                <input style={inp} type="number" min={1} max={16} value={cfgMaxConcurrent} onChange={e => setCfgMaxConcurrent(Math.max(1, Number(e.target.value) || 1))} />
+                <label style={lbl}>重试次数 <span style={{ color: "#64748b" }}>— 连接失败额外重试次数</span></label>
+                <input style={inp} type="number" min={0} max={10} value={cfgRetryPasses} onChange={e => setCfgRetryPasses(Math.max(0, Number(e.target.value) || 0))} />
+                <label style={lbl}>故障中断比: {cfgFailThreshold.toFixed(2)} <span style={{ color: "#64748b" }}>— agent 故障超此比例则中断推演</span></label>
+                <input type="range" min={0} max={1} step={0.05} value={cfgFailThreshold} onChange={e => setCfgFailThreshold(parseFloat(e.target.value))} style={{ width: "100%" }} />
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginTop: 12, marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>检索</div>
+                <label style={lbl}>Top-K <span style={{ color: "#64748b" }}>— 语义检索返回片段数</span></label>
+                <input style={inp} type="number" min={1} max={30} value={cfgRetrieveTopK} onChange={e => setCfgRetrieveTopK(Math.max(1, Number(e.target.value) || 1))} />
+                <label style={lbl}>相似度阈值: {cfgSimilarity.toFixed(2)} <span style={{ color: "#64748b" }}>— 检索匹配最低相似度</span></label>
+                <input type="range" min={0} max={1} step={0.05} value={cfgSimilarity} onChange={e => setCfgSimilarity(parseFloat(e.target.value))} style={{ width: "100%" }} />
+                <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>混合检索 <span style={{ color: "#64748b" }}>— LanceDB 向量+全文混合</span><Toggle checked={cfgEventHybrid} onChange={setCfgEventHybrid} /></label>
+                <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>关系增强 <span style={{ color: "#64748b" }}>— Kuzu 邻居增强检索</span><Toggle checked={cfgRecallBoost} onChange={setCfgRecallBoost} /></label>
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginTop: 12, marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>超时</div>
+                <label style={lbl}>连接超时(秒) <span style={{ color: "#64748b" }}>— HTTP 连接握手超时</span></label>
+                <input style={inp} type="number" min={5} max={300} value={cfgConnectTimeout} onChange={e => setCfgConnectTimeout(Math.max(5, Number(e.target.value) || 5))} />
+                <label style={lbl}>生成超时(秒) <span style={{ color: "#64748b" }}>— 单次 LLM 生成响应超时</span></label>
+                <input style={inp} type="number" min={30} max={7200} value={cfgGenTimeout} onChange={e => setCfgGenTimeout(Math.max(30, Number(e.target.value) || 30))} />
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginTop: 12, marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>实体</div>
+                <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>安全网 <span style={{ color: "#64748b" }}>— 过滤非独立决策实体(部门/职务)</span><Toggle checked={cfgSafetyNet} onChange={setCfgSafetyNet} /></label>
+              </>
+            )}
 
             <button onClick={saveConfig} disabled={cfgSaving} style={{ ...btn, width: "100%", background: "#3b82f6", color: "#fff", height: 36, fontSize: 14 }}>
               {cfgSaving ? "保存中..." : "保存配置"}

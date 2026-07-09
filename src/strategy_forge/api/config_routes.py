@@ -93,6 +93,58 @@ def _real_key_or(req_key: str) -> str:
     return k
 
 
+# ── Engine config (non-endpoint: rounds, agents, concurrency, retrieval, timeouts) ──
+
+class EngineConfigUpdate(BaseModel):
+    default_rounds: int = 10
+    max_agents: int = 10000
+    candidate_count: int = 3
+    llm_temperature: float = 0.6
+    max_concurrent: int = 2
+    retrieve_top_k: int = 5
+    similarity_threshold: float = 0.4
+    intel_safety_net: bool = True
+    recall_rel_boost: bool = True
+    event_hybrid: bool = True
+    llm_timeout: int = 300
+    connect_timeout: int = 60
+    generation_timeout: int = 1800
+    retry_passes: int = 3
+    sim_fail_threshold: float = 0.75
+
+
+@router.get("/engine")
+async def get_engine_config():
+    from strategy_forge.core.config import config as _cfg
+    d = registry._data
+    return {
+        "default_rounds": int(d.get("default_rounds", _cfg.deduction_default_rounds)),
+        "max_agents": int(d.get("max_agents", _cfg.deduction_max_agents)),
+        "candidate_count": int(d.get("candidate_count", _cfg.deduction_candidate_count)),
+        "llm_temperature": float(d.get("llm_temperature", _cfg.deduction_llm_temperature)),
+        "max_concurrent": int(d.get("max_concurrent", _cfg.deduction_max_concurrent)),
+        "retrieve_top_k": int(d.get("retrieve_top_k", _cfg.deduction_retrieve_top_k)),
+        "similarity_threshold": float(d.get("similarity_threshold", _cfg.deduction_similarity_threshold)),
+        "intel_safety_net": bool(int(d.get("intel_safety_net", "1")) if d.get("intel_safety_net") is not None else True),
+        "recall_rel_boost": bool(int(d.get("recall_rel_boost", "1")) if d.get("recall_rel_boost") is not None else True),
+        "event_hybrid": bool(int(d.get("event_hybrid", "1")) if d.get("event_hybrid") is not None else True),
+        "llm_timeout": int(d.get("llm_timeout", _cfg.deduction_llm_timeout)),
+        "connect_timeout": int(d.get("connect_timeout", _cfg.deduction_llm_connect_timeout)),
+        "generation_timeout": int(d.get("generation_timeout", _cfg.deduction_llm_generation_timeout)),
+        "retry_passes": int(d.get("retry_passes", _cfg.deduction_llm_retry_passes)),
+        "sim_fail_threshold": float(d.get("sim_fail_threshold", _cfg.deduction_sim_fail_ratio)),
+    }
+
+
+@router.post("/engine")
+async def update_engine(body: EngineConfigUpdate):
+    d = registry._data
+    for k, v in body.model_dump().items():
+        d[k] = v
+    registry.save()
+    return {"status": "ok"}
+
+
 @router.post("/list-models")
 async def list_models(body: ModelListRequest):
     return await registry.list_models(body.base_url, _real_key_or(body.api_key))
