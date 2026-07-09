@@ -468,3 +468,9 @@ python scripts/test_reflection_rollout_lmstudio.py
 python scripts/test_causal_propagation_lmstudio.py
 python scripts/test_report_quality_lmstudio.py
 ```
+
+---
+
+## 许可证
+
+StrategyForge 采用 [Apache License 2.0](LICENSE) 开源。
