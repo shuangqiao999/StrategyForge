@@ -97,6 +97,8 @@ class DeductionOrchestrator:
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
             self._clear_state_snapshot(session_id)
+            if getattr(self, "_preprocessor", None) is not None:
+                self._preprocessor.close()
         except _PhaseCancelledError:
             _total = _time.time() - _total_start
             self._log("orchestrator", f"推演已暂停（运行 {_total:.1f}s），进度已保存")

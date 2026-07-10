@@ -165,6 +165,9 @@ class DeductionEngine:
     def cleanup_events(self, session_id: str) -> None:
         self._stream_events.pop(session_id, None)
         self._round_data.pop(session_id, None)
+        if hasattr(self, '_round_snapshots'):
+            self._round_snapshots.pop(session_id, None)
+        self._fsm_overrides.pop(session_id, None)
 
     # ── 用户强制动作 override ──
     def get_fsm_override_store(self, session_id: str) -> dict[str, dict]:
@@ -206,7 +209,11 @@ class DeductionEngine:
             fsm_override_store=self.get_fsm_override_store(session_id),
         )
 
-        await orchestrator.run()
+        try:
+            await orchestrator.run()
+        finally:
+            self.close_graph()
+            self.cleanup_events(session_id)
 
         # Persist token stats
         import json
@@ -241,3 +248,4 @@ class DeductionEngine:
 
     def close(self) -> None:
         self.close_graph()
+        self.session_store.close()
