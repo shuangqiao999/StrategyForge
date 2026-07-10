@@ -15,15 +15,14 @@ logger = logging.getLogger(__name__)
 
 _REPORT_PROMPT = """你是一位高级战略分析专家。你面前的资料，来自一线情报与模拟推演的交叉验证——涵盖军事、商业、科技与政治博弈。你的任务不是罗列数据，而是从这些纷繁的迹象中，剥离出最精准、最克制、最具指向性的方向性判断。言必有据，不夸大，不臆测。
 
-## 核心写作法则（决定报告质量）
-1. **因果链四要素闭环**：每一条战略判断必须包含「动作→直接机制→结果→被迫反应」。严禁写成"A施压B"的扁平句，必须展开为"A通过[具体手段]，直接导致B的[具体领域]发生[方向性变化]，迫使B转而采取[反制策略]"。
+## 核心写作法则（决定报告质量，逐条强制执行）
+1. **因果链闭环 + 事件锚定**：每一条战略判断必须引用下方「关键事件序列」中的至少一个[事件N]，并以「动作→机制→结果→反制」的因果链展开。格式："[事件N]中A的[动作] → 直接导致B的[领域]发生[变化] → 迫使B转而[反制]"。严禁"A施压B"的扁平句。
 2. **段落即战略维度**：正文必须按博弈维度/主题逻辑分段（如军事对抗、经济博弈、科技竞赛、政治角力、联盟重组），每段用 `### 维度名` 作为小标题。每段聚焦1-2个主要行为体。
 3. **必须写出"战略困境"**：每个主要行为体都必须体现其得失权衡。句式模板："X为获取[收益]，不得不承受[代价/风险]"，或"X虽在[领域A]占优，但在[领域B]已逼近临界点"。
-4. **必须引用精选事件**：你收到的 key_events 已是经过筛选的精华事件。正文必须**至少自然嵌入 3~5 条**这些事件的具体动作，作为因果链的锚点。
-5. **语气与节奏**：克制、事实稠密，但允许使用"倒逼""对冲""临界点"等有张力的动词。每段控制在6行以内，避免堆砌形容词。
-6. **多方平衡视角**：避免单向"某方全面胜出/衰落"的叙事。各方均有优势与制约，必须给出对手视角。
-7. **区分事实与推测**：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实。
-8. **避免极端断言**：禁止出现"完全孤立""社会崩溃""彻底失败"等表述——此类只能作为风险情景谨慎提及，不作为结论。
+4. **语气与节奏**：克制、事实稠密，但允许使用"倒逼""对冲""临界点"等有张力的动词。每段控制在6行以内，避免堆砌形容词。
+5. **多方平衡视角**：避免单向"某方全面胜出/衰落"的叙事。各方均有优势与制约，必须给出对手视角。
+6. **区分事实与推测**：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实。
+7. **避免极端断言**：禁止出现"完全孤立""社会崩溃""彻底失败"等表述——此类只能作为风险情景谨慎提及，不作为结论。
 
 ## 推演基础信息
 - 标题: $title · 领域: $domain · 轮次: $round_count
@@ -56,12 +55,16 @@ $turning_points
 返回 JSON，包含四个字段：
 
 1. **"narrative"**：完整推演报告（800-2000字）。
+   - **硬性要求**：正文必须至少引用 3 条下方「关键事件序列」中的[事件N]编号，作为因果链锚点。
    - 开篇（150字内）：直接点明全局核心矛盾与主要博弈轴线，禁用"报告显示""推演表明""第X轮推演中"等废话。
-   - 正文：按战略维度分段，使用 `###` 标题。严格执行"四要素"因果链闭环，自然嵌入 3~5 条关键事件。
+   - 正文：按战略维度分段，使用 `###` 标题。因果句格式：`[事件N]中A的[动作] → B的[领域]发生[变化] → 迫使B[反制]`。
    - 结尾（150字内）：总览系统级风险与胜负手临界点。
    - 严禁输出任何具体数值/评分，不得出现 JSON、表格或项目符号列表。
 
-2. **"risk_alerts"**：最多5条。格式：`{风险标题} | {具体触发机制/路径} | {受影响方}`。必须写明"如何触发"，而非"存在风险"。直接陈述事实，不前置"可能/或将"。
+2. **"risk_alerts"**：最多5条。格式：`{风险标题} | {具体触发机制/路径} | {受影响方}`。必须写明"如何触发"的因果链条，而非重复"存在风险"或"导致受损"的表象。
+   - 错误示例："供应链风险 | 连续削弱 | 中国"（只写了影响，不是触发路径）
+   - 正确示例："芯片断供风险 | 出口管制扩至成熟制程 → 切断BMS芯片供应 → 产能瘫痪 | 某实体"
+   - 直接陈述事实，不前置"可能/或将"。
 
 3. **"recommendations"**：最多5条。格式：`{针对方}→{具体动作}→{预期机制与效果}`。不写"建议""应""需要"等虚词，每条不超过40字。
 
@@ -189,9 +192,10 @@ async def generate_report(
 
     for rnd in rounds:
         for action in rnd.actions:
+            brief = action.content[:60].split("，")[0]
             key_events.append(f"[轮{rnd.round_number}] "
                                f"{_agent_name(action.agent_id)}: "
-                               f"{action.action_type} — {action.content[:80]}")
+                               f"{action.action_type} — {brief}")
             agent_trajectories.setdefault(action.agent_id, []).append(action.content[:60])
             if hasattr(action, "metadata") and isinstance(action.metadata, dict):
                 for m, v in action.metadata.get("deltas", {}).items():
@@ -280,6 +284,14 @@ async def generate_report(
 
     # 推演设定上下文
     domain_text = "叙事模式（无量化）"
+    if states:
+        try:
+            first = next(iter(states.values()))
+            d = getattr(first, "domain", "")
+            if d and d != "generic":
+                domain_text = d
+        except (StopIteration, AttributeError):
+            pass
     agent_overview = "（无智能体数据）"
     if graph is not None:
         try:
@@ -289,14 +301,6 @@ async def generate_report(
                 agent_overview = "\n".join(
                     f"- {r[0]}: {r[1][:60]}" for r in agents[:12] if r[0])
                 log_fn("report", f"智能体总览 {len(agents)} 个注入报告")
-        except Exception:
-            pass
-        try:
-            dom = graph.query(
-                f"MATCH (a:{graph.AGENT_TABLE}) RETURN a.name LIMIT 1")
-            if dom:
-                # 从 agent area 推断 domain（有限）
-                pass
         except Exception:
             pass
 
@@ -315,6 +319,7 @@ async def generate_report(
     quantified_context = _build_quantified_summary(rounds, states, _thresholds)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
     system = "你是推演分析专家，撰写自然语言推演报告。只输出 JSON。"
+    numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-20:])]
     messages = [Message(role="user", content=Template(_REPORT_PROMPT).substitute(
         title=session.title or "推演会话",
         domain=domain_text,
@@ -323,7 +328,7 @@ async def generate_report(
         round_count=session.current_round,
         agent_overview=agent_overview,
         key_relations=key_relations,
-        key_events="\n".join(key_events[-20:]),
+        key_events="\n".join(numbered),
         action_timeline=action_timeline,
         quantified_context=quantified_context,
         causal_attribution=causal_attribution,
