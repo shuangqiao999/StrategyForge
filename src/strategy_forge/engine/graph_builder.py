@@ -183,6 +183,16 @@ async def build_graph(
                     _rel_pool.append((sid, tid, rel.get("relation", ""), rel.get("evidence", "")))
                 if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
                     log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: pool={len(_ent_pool)} 实体, {len(_rel_pool)} 关系")
+                # 内存保护：超过阈值触发中间写入防止内存膨胀
+                if len(_ent_pool) >= 50_000:
+                    log_fn("graph", f"  内存阈值触发: pool={len(_ent_pool)} 实体, 执行中间批量写入")
+                    seen_names: set[str] = set()
+                    deduped = [(eid, nm, et, ds) for eid, nm, et, ds in _ent_pool
+                               if nm not in seen_names and not seen_names.add(nm)]
+                    graph.upsert_entities_batch(deduped)
+                    total_entities += len(deduped)
+                    _ent_pool.clear()
+            # 剩余实体最终写入（在后面 Phase 3 处理）
 
             # ── Phase 3（内存去重 + 一次批量写 + 别名合并）──
             seen_names: set[str] = set()
