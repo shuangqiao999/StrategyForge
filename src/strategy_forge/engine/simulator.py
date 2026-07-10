@@ -817,7 +817,7 @@ class SimulationEngine:
             f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
             f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
             f"- 仅添加/修正，不删除原有准则。\n"
-            f"- 示例：\"长期补给不足时应优先休整\" \"连胜后保持谨慎避免冒进\" \"与盟友保持紧密协作\"\n"
+            f"- 示例：\"资源持续消耗时应优先补充而非扩张\" \"连续成功后应警惕过度自信\" \"核心关系需定期维护\"\n"
             f"\n只输出准则本身或\"无需调整\"，不要解释。"
         )
 
@@ -1525,7 +1525,7 @@ class SimulationEngine:
                            f"目标:{dec.get('target') or '—'}")
             lines.append(f"{nm} {act_txt}，数值变化: {chg}")
         prompt = (
-            f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的战局叙事（200 字以内）。\n\n"
+                    f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的态势叙事（200 字以内）。\n\n"
             "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n只输出叙事段落，不要解释或列表。"
         )
         resp = await client.chat([Message(role="user", content=prompt)],

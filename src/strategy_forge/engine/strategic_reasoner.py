@@ -298,7 +298,10 @@ class StrategicReasoner:
         imm = "；".join(self._immutable_goals) if self._immutable_goals else "无"
         select_hint = ("从可选行动中分配资源给一个或多个动作"
                        if self._enable_multi_action else "从可选行动中选择一个并给出投入力度")
-        diversity_hint = "。避免连续3轮以上重复相同策略，结合当前局势变化探索多元行动" if round_number > 3 else ""
+        diversity_hint = ("。避免连续3轮以上重复相同策略，结合当前局势变化探索多元行动"
+                          if round_number > 3 else "")
+        if round_number > 5:
+            diversity_hint += "。注意：你已连续多轮执行相同类型的行动，这可能导致策略僵化和对手预判。请认真考虑在当前轮选择一个不同类型的行动。"
         # B4: 云端 prompt 缓存友好排序 —— 同一轮所有 agent 相同的"共享前缀"放最前
         # (不可变目标/可选动作/地形/干预/近期局势)，agent 私有部分居中，输出规范置末。
         if self._enable_multi_action:

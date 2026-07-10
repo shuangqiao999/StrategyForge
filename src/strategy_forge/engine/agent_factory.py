@@ -20,7 +20,7 @@ from .preprocessor import DeductionPreprocessor
 logger = logging.getLogger(__name__)
 
 
-_PERSONA_PROMPT = """基于以下实体信息和原文背景，为该人物生成一个独立人格档案。返回 JSON。
+_PERSONA_PROMPT = """基于以下实体信息和原文背景，为该$domain_role生成一个独立人格档案。返回 JSON。
 
 ## 来自用户的特殊期望（必须严肃考虑）
 $user_expectations
@@ -48,7 +48,7 @@ $keywords
 
 【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
 
-_PERSONA_PROMPT_FALLBACK = """基于以下实体信息和原文背景，为该人物生成一个独立人格档案。返回 JSON。
+_PERSONA_PROMPT_FALLBACK = """基于以下实体信息和原文背景，为该$domain_role生成一个独立人格档案。返回 JSON。
 
 ## 来自用户的特殊期望（必须严肃考虑）
 $user_expectations
@@ -82,35 +82,21 @@ async def create_agents_from_graph(
     pre_interventions: list[str] | None = None,
     chat_fn: Any = None,
     intel_list: list[dict] | None = None,
+    domain: str = "",
 ) -> list[DeductionAgentProfile]:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
-    # Collect decision-making entities: Person + Organization (nations, armies, alliances)
-    persons = graph.get_entities_by_type("Person")
-    if not persons:
-        persons = []
-    # Add Organization-type entities (nations, alliances, institutions, armies)
-    orgs = graph.get_entities_by_type("Organization")
-    if orgs:
-        # Merge: deduplicate by name (an entity may be both Person and Organization)
-        seen_names = {p["name"] for p in persons}
-        for o in orgs:
-            if o["name"] not in seen_names:
-                persons.append(o)
-                seen_names.add(o["name"])
-        log_fn("agents", f"加入 {len(orgs)} 个组织实体作为智能体候选")
-
-    # Fallback: if still no entities, take all
-    if not persons:
-        result = graph._conn.execute(
-            f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
-        )
-        persons = []
-        while result.has_next():
-            r = result.get_next()
-            persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
+    # Collect ALL Entity nodes — IntelSorter handles filtering later
+    result = graph._conn.execute(
+        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
+    )
+    persons: list[dict] = []
+    while result.has_next():
+        r = result.get_next()
+        persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
+    log_fn("agents", f"收集 {len(persons)} 个实体作为智能体候选")
 
     # Deduplicate using alias map from preprocessor (no substring matching)
     if len(persons) > 1:
@@ -165,11 +151,12 @@ async def create_agents_from_graph(
             pname = p.get("name", "")
             # Resolve to canonical name via reverse alias map
             canon = _intel_reverse.get(pname, pname)
-            # Check if canonical name is in active_names or not in intel_map at all
-            # (entities NOT in intel_map are treated as include_in_simulation=True: strategic by default)
+            # (entities NOT in intel_map are excluded by default — IntelSorter must have seen them)
             intel_entry = intel_map.get(canon) or intel_map.get(pname)
-            if intel_entry and not intel_entry.get("include_in_simulation", True):
-                continue  # explicitly marked as non-strategic
+            if intel_entry is None:
+                continue  # IntelSorter没见过的实体 → 排除
+            if not intel_entry.get("include_in_simulation", False):
+                continue  # IntelSorter显式标记为非战略 → 排除
             filtered.append(p)
         persons = filtered
         if len(persons) < before:
@@ -186,6 +173,18 @@ async def create_agents_from_graph(
     expected_keys = {"persona", "background", "goals"}
 
     sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
+
+    _DOMAIN_ROLES: dict[str, str] = {
+        "military": "军事力量",
+        "business": "企业",
+        "politics": "政治实体",
+        "ecology": "生态主体",
+        "urban": "城市管理者",
+        "tech": "科技企业/研究机构",
+        "info_war": "舆论博弈方",
+        "geo_strategy": "战略决策主体",
+    }
+    _domain_role = _DOMAIN_ROLES.get(domain, "独立博弈者")
 
     def _fallback(nm: str) -> dict:
         return {"persona": f"{nm}是一个参与事件的独立个体",
@@ -207,12 +206,12 @@ async def create_agents_from_graph(
                 parent_info=parent_info, sub_info=sub_info,
                 context=full_context[:8000],
                 keywords=", ".join(keywords) if keywords else "无",
-                user_expectations=ue)
+                user_expectations=ue, domain_role=_domain_role)
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
             parent_info=parent_info, sub_info=sub_info,
-            context=source_material[:2000], user_expectations=ue)
+            context=source_material[:2000], user_expectations=ue, domain_role=_domain_role)
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")
