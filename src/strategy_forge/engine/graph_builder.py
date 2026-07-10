@@ -50,6 +50,9 @@ $relation_types
 ## 候选实体白名单（抽取的实体名必须是以下标准名之一）
 $candidate_entities
 
+## 重要约束
+实体名必须严格来自上述白名单，禁止新增任何不在白名单中的实体名。如果文本提到了白名单外的概念，忽略它，不要将其作为实体输出。
+
 ## 别名映射表（发现别名时必须归一化为标准名）
 $alias_map
 
@@ -108,7 +111,7 @@ async def build_graph(
         # ── 高频实体 → 定向深度抽取 ──
         if high_freq:
             log_fn("graph", f"实体驱动模式: {len(high_freq)} 个高频实体定向抽取")
-            system = "You are a JSON-only knowledge graph builder. Output ONLY a valid JSON array. NO markdown code blocks, NO explanations."
+            system = "You are a JSON-only knowledge graph builder. Extract entity-relation triples strictly from the allowed list — never invent new entity names. NO markdown."
 
             # Pre-format constant parts using Template (safe from { } in alias_map JSON)
             _extract_base = Template(_EXTRACT_PROMPT).substitute(
@@ -217,7 +220,7 @@ async def _extract_from_chunks(
 ) -> None:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
-    system = "你是知识图谱构建专家，从文本中精确抽取实体和关系三元组。只输出 JSON。"
+    system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
     _chunk_base = Template(_EXTRACT_PROMPT).substitute(
         text="__TEXT__",
