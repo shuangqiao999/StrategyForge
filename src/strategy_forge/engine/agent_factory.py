@@ -88,15 +88,27 @@ async def create_agents_from_graph(
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
-    # Collect ALL Entity nodes — IntelSorter handles filtering later
-    result = graph._conn.execute(
-        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
-    )
-    persons: list[dict] = []
-    while result.has_next():
-        r = result.get_next()
-        persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
-    log_fn("agents", f"收集 {len(persons)} 个实体作为智能体候选")
+    # Collect decision-making entities: Person + Organization types only
+    persons = graph.get_entities_by_type("Person")
+    if not persons:
+        persons = []
+    orgs = graph.get_entities_by_type("Organization")
+    if orgs:
+        seen_names = {p["name"] for p in persons}
+        for o in orgs:
+            if o["name"] not in seen_names:
+                persons.append(o)
+                seen_names.add(o["name"])
+        log_fn("agents", f"加入 {len(orgs)} 个组织实体作为智能体候选")
+    # Fallback: if still no entities, take all
+    if not persons:
+        result = graph._conn.execute(
+            f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
+        )
+        persons = []
+        while result.has_next():
+            r = result.get_next()
+            persons.append({"id": r[0], "name": r[1], "type": r[2], "description": r[3]})
 
     # Deduplicate using alias map from preprocessor (no substring matching)
     if len(persons) > 1:
