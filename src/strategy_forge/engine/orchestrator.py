@@ -365,7 +365,8 @@ class DeductionOrchestrator:
             from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
             entity_names = list(self.graph.get_entity_names())
             self._intel_list = await sort_entities(
-                self.session.source_material, entity_names, LLMClient())
+                self.session.source_material, entity_names, LLMClient(),
+                domain=getattr(self._rule_engine, "domain", ""))
             if self._intel_list:
                 active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
                 passive = len(self._intel_list) - active
