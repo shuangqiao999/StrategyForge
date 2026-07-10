@@ -165,6 +165,7 @@ export default function App() {
   const [ovRounds, setOvRounds] = useState(1);
   const logsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [trendSnapshots, setTrendSnapshots] = useState<Array<{round: number, entities: Array<{name:string, metrics:Record<string,number>, alive:boolean}>}>>([]);
   const graphRef = useRef<any>(null);
   const causalGraphRef = useRef<any>(null);
   const sseSidRef = useRef<string | null>(null);
@@ -653,7 +654,15 @@ export default function App() {
       try {
         const d = JSON.parse(ev.data);
         if (d.type === "round") {
-          if (d.snapshot) setSnapshot(d.snapshot);
+          if (d.snapshot) {
+            setSnapshot(d.snapshot);
+            if (d.snapshot.entities && d.round) {
+              setTrendSnapshots(prev => {
+                const filtered = prev.filter(s => s.round !== d.round);
+                return [...filtered, {round: d.round, entities: d.snapshot.entities}].sort((a,b) => a.round - b.round);
+              });
+            }
+          }
           fetchGraph(selectedId);
           fetchTimeline(selectedId);
           fetchCausal(selectedId);
@@ -1263,12 +1272,27 @@ export default function App() {
                         const keys = Array.from(allKeys).slice(0, 6);
                         const thresholds = (snapshot as any)._thresholds as Record<string, number> | undefined;
                         const getStatus = (e: typeof entities[0]) => {
-                          if (!thresholds || !e.alive) return { dot: "#ef4444", text: "已淘汰" };
-                          const critical = keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0));
-                          if (critical) return { dot: "#ef4444", text: "危急" };
-                          const warning = keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 1.5);
-                          if (warning) return { dot: "#f59e0b", text: "警戒" };
-                          return { dot: "#22c55e", text: "安全" };
+                          if (!thresholds || !e.alive) return { dot: "#6b7280", text: "已淘汰" };
+                          const maxRatio = Math.max(...keys.map(k => (e.metrics[k] || 0) / Math.max(thresholds[k] || 1, 1)));
+                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 1.5))
+                            return { dot: "#ef4444", text: "危急" };
+                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 2))
+                            return { dot: "#f97316", text: "受创" };
+                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 3))
+                            return { dot: "#f59e0b", text: "承压" };
+                          if (maxRatio >= 4) return { dot: "#16a34a", text: "强势" };
+                          return { dot: "#22c55e", text: "稳定" };
+                        };
+                        const weightedScore = (e: typeof entities[0]) => {
+                          if (!thresholds || !e.metrics) return 0;
+                          let num = 0, den = 0;
+                          for (const [k, v] of Object.entries(e.metrics)) {
+                            const th = thresholds[k] || 100;
+                            const w = 1 / Math.max(th, 1);
+                            num += (v / 100) * w;
+                            den += w;
+                          }
+                          return den > 0 ? (num / den) * 100 : 0;
                         };
                         return (
                           <div style={{ marginBottom: 16 }}>
@@ -1314,6 +1338,71 @@ export default function App() {
                           </div>
                         );
                       })()}
+
+                      {/* ── 趋势折线图 ── */}
+                      {trendSnapshots.length >= 2 && snapshot.entities && snapshot.entities.length > 0 && (() => {
+                        const thresholds = (snapshot as any)._thresholds as Record<string, number> | undefined;
+                        const colors = ["#3b82f6","#ef4444","#22c55e","#f59e0b","#a78bfa","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#e11d48","#8b5cf6","#10b981","#f43f5e","#0ea5e9","#d946ef","#65a30d","#0891b2","#be123c","#7c3aed","#059669","#e11d48","#0284c7","#c026d3","#4d7c0f","#0e7490","#9f1239"];
+                        const allEntities = (snapshot.entities as Array<{name:string,metrics:Record<string,number>,alive:boolean}>);
+                        const chartH = 200; const padL = 60; const padR = 30; const padB = 30; const padT = 10;
+                        const svgW = 800; const svgH = chartH + padB + padT;
+                        const plotW = svgW - padL - padR;
+                        const plotH = chartH;
+                        const rounds = trendSnapshots.map(s => s.round);
+                        const minR = Math.min(...rounds); const maxR = Math.max(...rounds);
+                        const xScale = (r: number) => padL + ((r - minR) / Math.max(maxR - minR, 1)) * plotW;
+                        // Compute weighted scores for all entities across all rounds
+                        const entityScores: Record<string, Array<{round:number,score:number}>> = {};
+                        for (const ts of trendSnapshots) {
+                          for (const ent of ts.entities) {
+                            if (!entityScores[ent.name]) entityScores[ent.name] = [];
+                            let num = 0, den = 0;
+                            for (const [k,v] of Object.entries(ent.metrics)) {
+                              const th = thresholds?.[k] || 100;
+                              const w = 1 / Math.max(th, 1);
+                              num += (v / 100) * w;
+                              den += w;
+                            }
+                            entityScores[ent.name].push({round: ts.round, score: den > 0 ? (num/den)*100 : 0});
+                          }
+                        }
+                        const allScores = Object.values(entityScores).flatMap(a => a.map(s => s.score));
+                        const minScore = Math.min(...allScores, 0);
+                        const maxScore = Math.max(...allScores, 100);
+                        const yScale = (s: number) => padT + plotH - ((s - minScore) / Math.max(maxScore - minScore, 1)) * plotH;
+                        return (
+                          <div style={{ marginBottom: 16 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 10, borderLeft: "3px solid #8b5cf6", paddingLeft: 8 }}>综合得分趋势</div>
+                            <div style={{ overflowX: "auto", background: "#0f172a", borderRadius: 8, padding: 8 }}>
+                              <svg width={svgW} height={svgH} style={{ display: "block" }}>
+                                {/* Grid */}
+                                {[0,1,2,3,4].map(i => { const y = padT + (i/4)*plotH; const v = maxScore - (i/4)*(maxScore-minScore); return <line key={i} x1={padL} y1={y} x2={svgW-padR} y2={y} stroke="#1e293b" strokeWidth={1} />; })}
+                                {/* Y labels */}
+                                {[0,1,2,3,4].map(i => { const y = padT + (i/4)*plotH; const v = maxScore - (i/4)*(maxScore-minScore); return <text key={i} x={padL-8} y={y+4} textAnchor="end" fill="#64748b" fontSize={9}>{v.toFixed(0)}</text>; })}
+                                {/* X labels */}
+                                {trendSnapshots.map(s => { const x = xScale(s.round); return <text key={s.round} x={x} y={svgH-8} textAnchor="middle" fill="#64748b" fontSize={9}>R{s.round}</text>; })}
+                                {/* Lines */}
+                                {Object.entries(entityScores).map(([name, points], ei) => {
+                                  if (points.length < 2) return null;
+                                  const d = points.map((p, i) => `${i===0?'M':'L'}${xScale(p.round).toFixed(1)},${yScale(p.score).toFixed(1)}`).join(' ');
+                                  const s = points[points.length-1];
+                                  const color = colors[ei % colors.length];
+                                  return (
+                                    <g key={name}>
+                                      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.7} />
+                                      {points.map((p,i) => <circle key={i} cx={xScale(p.round)} cy={yScale(p.score)} r={i===points.length-1?3:1.5} fill={i===points.length-1?color:"#1e293b"} stroke={color} strokeWidth={1} />)}
+                                      <text x={xScale(s.round)+5} y={yScale(s.score)+4} fill={color} fontSize={9}>{name.length>6?name.slice(0,6)+"..":name}</text>
+                                    </g>
+                                  );
+                                })}
+                                {/* Legend */}
+                                <text x={svgW-padR} y={padT+8} textAnchor="end" fill="#64748b" fontSize={9}>{rounds.length} rounds</text>
+                              </svg>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                     </>
                   ) : (
                     <div style={{ color: "#64748b", textAlign: "center", paddingTop: 60 }}>
