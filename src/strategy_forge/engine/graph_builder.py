@@ -157,7 +157,11 @@ async def build_graph(
             gathered = await asyncio.gather(*(_extract_call(prompts[k]) for k in idxs))
             content_by_idx = dict(zip(idxs, gathered, strict=False))
 
-            # ── Phase 3（顺序·写库，每5批触发一次增量去重）──
+            # ── Phase 2.5（内存缓冲·解析 + 积累，不写 Kuzu）──
+            _ent_pool: list[tuple[str, str, str, str]] = []   # (id, name, type, desc)
+            _rel_pool: list[tuple[str, str, str, str]] = []   # (sid, tid, relation, ev)
+            all_aliases_map: dict[str, list[str]] = dict(high_freq)
+
             for i, (std_name, _aliases) in enumerate(hf_items):
                 content = content_by_idx.get(i)
                 if not content:
@@ -167,30 +171,47 @@ async def build_graph(
                 except Exception as e:
                     logger.warning("[Graph] parse '%s' failed: %s", std_name, e)
                     continue
-                # 归一化 + 写入 Kuzu (O(1) reverse alias lookup)
                 for ent in entities:
                     name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
-                    ent_id = _make_id(name, "")
-                    graph.upsert_entity(ent_id, name, ent.get("type", ""),
-                                       ent.get("description", ""))
-                    total_entities += 1
+                    _ent_pool.append((_make_id(name, ""), name,
+                                      ent.get("type", ""), ent.get("description", "")))
                 for rel in relations:
                     sid = _make_id(
                         _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
                     tid = _make_id(
                         _reverse_alias.get(rel.get("target", ""), rel.get("target", "")), "")
-                    graph.upsert_relation(
-                        sid, tid, rel.get("relation", ""),
-                        evidence=rel.get("evidence", ""),
-                    )
-                    total_relations += 1
-                # 每 15 批触发一次增量去重，防止中间态实体爆炸
-                if (i + 1) % 15 == 0 or i == len(hf_items) - 1:
-                    try:
-                        graph.merge_alias_nodes(std_name, _aliases)
-                    except Exception:
-                        pass  # 增量去重非致命，失败不影响后续
-                    log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: {total_entities} 实体, {total_relations} 关系")
+                    _rel_pool.append((sid, tid, rel.get("relation", ""), rel.get("evidence", "")))
+                if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
+                    log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: pool={len(_ent_pool)} 实体, {len(_rel_pool)} 关系")
+
+            # ── Phase 3（内存去重 + 一次批量写 + 别名合并）──
+            seen_names: set[str] = set()
+            deduped_ents: list[tuple[str, str, str, str]] = []
+            for item in _ent_pool:
+                nm = item[1]
+                if nm not in seen_names:
+                    seen_names.add(nm)
+                    deduped_ents.append(item)
+            total_entities = graph.upsert_entities_batch(deduped_ents)
+            del _ent_pool, seen_names, deduped_ents  # 释放内存
+
+            seen_rels: set[tuple[str, str, str]] = set()
+            deduped_rels: list[tuple[str, str, str, str]] = []
+            for item in _rel_pool:
+                key = (item[0], item[1], item[2])
+                if key not in seen_rels:
+                    seen_rels.add(key)
+                    deduped_rels.append(item)
+            total_relations = graph.upsert_relations_batch(deduped_rels)
+            del _rel_pool, seen_rels, deduped_rels  # 释放内存
+
+            # 一次性全部别名合并
+            for std_name, _aliases in all_aliases_map.items():
+                try:
+                    graph.merge_alias_nodes(std_name, _aliases)
+                except Exception:
+                    pass
+            log_fn("graph", f"图谱批量写入完成: {total_entities} 实体, {total_relations} 关系")
 
         # ── 低频实体 → 语义分块顺带抽取 ──
         if result.chunks and low_freq:

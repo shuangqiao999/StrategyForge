@@ -106,6 +106,43 @@ class DeductionGraphStore:
                  "w": weight, "ev": evidence},
             )
 
+    # ── Batch write helpers ──
+
+    def upsert_entities_batch(self, items: list[tuple[str, str, str, str]]) -> int:
+        """批量写实体 (id, name, type, desc)，单次锁，返回写入数。每500条分一组防内存堆积。"""
+        if not items:
+            return 0
+        n = 0
+        self._check_conn()
+        with self._lock:
+            for eid, name, etype, desc in items:
+                self._conn.execute(
+                    f"MERGE (e:{self.NODE_TABLE} {{id: $id}}) "
+                    "SET e.name = $name, e.type = $type, e.description = $description",
+                    {"id": eid, "name": name, "type": etype, "description": desc},
+                )
+                n += 1
+        return n
+
+    def upsert_relations_batch(self, items: list[tuple[str, str, str, str]]) -> int:
+        """批量写关系 (sid, tid, relation, evidence)，单次锁，返回写入数。"""
+        if not items:
+            return 0
+        n = 0
+        self._check_conn()
+        with self._lock:
+            for sid, tid, rel, ev in items:
+                if not sid or not tid:
+                    continue
+                self._conn.execute(
+                    f"MATCH (a:{self.NODE_TABLE} {{id: $sid}}), (b:{self.NODE_TABLE} {{id: $tid}}) "
+                    "MERGE (a)-[r:RELATES {relation: $rel}]->(b) "
+                    "SET r.weight = 1.0, r.evidence = $ev",
+                    {"sid": sid, "tid": tid, "rel": rel, "ev": ev},
+                )
+                n += 1
+        return n
+
     def upsert_agent_node(self, agent_id: str, name: str, persona: str,
                           background: str = "", goals: str = "[]") -> None:
         with self._lock:
