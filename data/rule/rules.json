@@ -303,7 +303,12 @@
               "supply": [
                 ">",
                 60
-              ]
+              ],
+              "leadership": [
+                ">",
+                30
+              ],
+              "streak": 2
             }
           },
           {
@@ -1755,6 +1760,13 @@
           "tech_lead": -2
         }
       },
+      "rnd_saturation": {
+        "condition": "tech_lead > 70",
+        "effects": {
+          "talent_pool": -1,
+          "patent_barrier": -1
+        }
+      },
       "talent_burnout": {
         "condition": "talent_pool > 80",
         "effects": {
@@ -2567,7 +2579,8 @@
       "threshold_score": 30.0,
       "hard_core": {
         "strength": 8,
-        "cash_flow": 3
+        "cash_flow": 3,
+        "unity": 30
       }
     }
   }
