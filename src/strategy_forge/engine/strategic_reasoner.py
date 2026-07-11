@@ -24,41 +24,41 @@ _POSITIVE_KW = frozenset({"support", "help", "cooperate", "praise", "agree"})
 _NEGATIVE_KW = frozenset({"oppose", "attack", "betray", "insult", "threaten", "block"})
 
 
-_CANDIDATE_PROMPT = """You are a strategic advisor. Generate $candidate_count distinct action strategies for $agent_name.
+_CANDIDATE_PROMPT = """你是一个战略顾问。为 $agent_name 生成 $candidate_count 个不同的行动策略。
 
-## Immutable Goals (highest priority — persist throughout entire simulation)
+## 不可变目标（最高优先级，贯穿整个模拟）
 $immutable_goals
 
-## Override Directive (highest priority — must influence every candidate)
+## 外部指令（最高优先级，必须影响每个候选）
 $user_intervention
 
-## Agent Profile
-Persona: $persona
-Background: $background
-Goals: $goals
+## 智能体档案
+人格: $persona
+背景: $background
+目标: $goals
 
-## Current World State
-Round: $round_number
-Recent events: $recent_events
+## 当前世界状态
+轮次: $round_number
+近期事件: $recent_events
 
-## Trust Relationship Summary
+## 信任关系摘要
 $trust_summary
 
 ## 关系网络（来自知识图谱：盟友 / 对手）
 $relationship_context
 
-## Output — pure JSON array
+## 输出 — 纯 JSON 数组
 [
   {
-    "action": "post|reply|interact|observe",
-    "target": "target entity name or empty",
-    "content": "action description (30-100 chars)",
-    "rationale": "why this action (20-60 chars)",
+    "action": "initiate|respond|collaborate|compete|observe",
+    "target": "目标实体名或留空",
+    "content": "行动描述 (30-100字)",
+    "rationale": "行动理由 (20-60字)",
     "risk_level": "low|medium|high"
   }
 ]
 
-Output ONLY the JSON array. No markdown, no explanations."""
+只输出 JSON 数组，不要 markdown，不要解释。"""
 
 
 class StrategicReasoner:
@@ -198,7 +198,7 @@ class StrategicReasoner:
 
         # 3. Generate candidates via LLM
         recent = world_state.get("recent_events", "None")
-        system = "You are a JSON-only strategic advisor. Output ONLY a valid JSON array."
+        system = "你是战略顾问，只输出 JSON 数组。"
         llm = client if client is not None else LLMClient()
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,

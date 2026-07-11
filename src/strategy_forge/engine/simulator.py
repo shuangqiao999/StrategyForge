@@ -198,7 +198,7 @@ $recent_events
 ## 输出 JSON — 选择一种行动
 ```json
 {
-  "action": "post|reply|interact|observe",
+  "action": "initiate|respond|collaborate|compete|observe",
   "target": "目标实体名或留空",
   "content": "行动内容 (30-100字)"
 }
@@ -1202,8 +1202,8 @@ class SimulationEngine:
         if self._cancel is not None and self._cancel.is_set():
             return sim_round
         # ── FSM 分流：上一轮的 FSM 状态决定本轮哪些代理走 LLM ──
-        fsm_states = getattr(self, "_last_fsm_states", None)
-        fsm_actions = getattr(self, "_last_fsm_actions", None)
+        fsm_state_map = getattr(self, "_last_fsm_states_map", None) or {}
+        fsm_action_map = getattr(self, "_last_fsm_actions_map", None) or {}
         fsm_command = getattr(self, "_last_fsm_command_states", {"combat"})
 
         # 第一遍（顺序）：override / FSM 走确定性动作（纯 Python、含状态消费），
@@ -1218,13 +1218,13 @@ class SimulationEngine:
                 plan.append(ov)
                 self._log("simulation", f"[用户强制] {agent.name} → {ov.get('action_type')}")
                 continue
-            # Check if FSM should drive this agent
-            state = fsm_states[i] if fsm_states is not None and i < len(fsm_states) else None
+            # Check if FSM should drive this agent (entity_id based lookup, not index)
+            state = fsm_state_map.get(agent.entity_id) if fsm_state_map else None
             if state is not None and state not in fsm_command:
                 # FSM deterministic action — skip LLM
-                act = None
-                if fsm_actions is not None and i < len(fsm_actions) and fsm_actions[i]:
-                    act = dict(fsm_actions[i])
+                act = fsm_action_map.get(agent.entity_id) if fsm_action_map else None
+                if act is not None:
+                    act = dict(act)
                 if act is None:
                     act = {"action_type": "observe", "intensity": 0.3, "target": ""}
                 # 数据差异化描述：结合当前指标最危险项，避免"[FSM] observe"千篇一律
@@ -1379,8 +1379,17 @@ class SimulationEngine:
                 self._spatial_state = ctx.spatial
             # Save FSM state for next round's agent decision split
             if "fsm.agent_states" in ctx.metadata:
-                self._last_fsm_states = list(ctx.metadata["fsm.agent_states"])
-                self._last_fsm_actions = list(ctx.metadata.get("fsm.agent_actions", []))
+                raw_states = list(ctx.metadata["fsm.agent_states"])
+                raw_actions = list(ctx.metadata.get("fsm.agent_actions", []))
+                # 按 entity_id 建映射表，避免下一轮 agent 淘汰后索引错位
+                self._last_fsm_states_map = {
+                    entity_ids[i]: raw_states[i] for i in range(len(raw_states))
+                } if len(raw_states) == len(entity_ids) else {}
+                self._last_fsm_actions_map = {}
+                if raw_actions and len(raw_actions) == len(entity_ids):
+                    for i in range(len(raw_actions)):
+                        if raw_actions[i] is not None:
+                            self._last_fsm_actions_map[entity_ids[i]] = dict(raw_actions[i])
                 self._last_fsm_command_states = set(
                     ctx.metadata.get("fsm.command_states", ["combat"])
                 )

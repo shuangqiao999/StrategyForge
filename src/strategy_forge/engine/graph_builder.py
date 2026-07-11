@@ -111,7 +111,7 @@ async def build_graph(
         # ── 高频实体 → 定向深度抽取 ──
         if high_freq:
             log_fn("graph", f"实体驱动模式: {len(high_freq)} 个高频实体定向抽取")
-            system = "You are a JSON-only knowledge graph builder. Extract entity-relation triples strictly from the allowed list — never invent new entity names. NO markdown."
+            system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
             # Pre-format constant parts using Template (safe from { } in alias_map JSON)
             _extract_base = Template(_EXTRACT_PROMPT).substitute(

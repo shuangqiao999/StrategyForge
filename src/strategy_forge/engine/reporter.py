@@ -13,7 +13,7 @@ from .models import DeductionReport, DeductionSession, SimulationRound
 
 logger = logging.getLogger(__name__)
 
-_REPORT_PROMPT = """你是一位高级战略分析专家。你面前的资料，来自一线情报与模拟推演的交叉验证——涵盖军事、商业、科技与政治博弈。你的任务不是罗列数据，而是从这些纷繁的迹象中，剥离出最精准、最克制、最具指向性的方向性判断。言必有据，不夸大，不臆测。
+_REPORT_PROMPT = """你是一位高级战略分析专家。你面前的资料，来自模拟推演的完整记录——涵盖军事、商业、科技与政治博弈。你的任务不是罗列数据，而是从这些纷繁的迹象中，剥离出最精准、最克制、最具指向性的方向性判断。言必有据，不夸大，不臆测。
 
 ## 核心写作法则（决定报告质量，逐条强制执行）
 1. **因果链闭环 + 事件锚定**：每一条战略判断必须引用下方「关键事件序列」中的至少一个[事件N]，并以「动作→机制→结果→反制」的因果链展开。核心判断格式："[事件N]中A的[动作] → 直接导致B的[领域]发生[变化] → 迫使B转而[反制]"。次要事件可简写为"[事件N]中A的[动作] → 导致[结果]，进而使B陷入[困境]"。严禁"A施压B"的扁平句。
@@ -66,16 +66,16 @@ $turning_points
    ```
    开篇引入段（无标题，直接进入分析）...
 
-   ### 科技竞赛
-   [事件4]中美国的转向科技投资突破封锁 → 直接导致中国产业链面临更严峻的断供压力 → 迫使DeepSeek深化合作巩固战略后方（[事件7]），试图以商业韧性对冲技术围堵。中国虽在现金流高位趋稳，但在高端制造领域已逼近临界点，不得不承受供应链重构的代价。
+   ### 核心博弈维度一
+   [事件4]中A方的关键动作 → 直接导致B方的关键指标发生方向性变化 → 迫使B方转而采取反制策略（[事件7]），试图以优势对冲风险。B方虽在某领域占优，但在另一领域已逼近临界点，不得不承受调整的代价。
 
-   ### 区域安全
-   [事件2]中真主党的打破僵化防守 → 直接导致以色列的军事优势被稀释 → 迫使伊朗以攻代守打击核心目标（[事件10]）...
+   ### 核心博弈维度二
+   [事件2]中C方的主动出击 → 直接导致D方的既有优势被稀释 → 迫使E方调整姿态应对连锁反应（[事件10]）...
    ```
 
 2. **"risk_alerts"**：输出 3~5 条。格式：`{风险标题} | {具体触发机制/路径} | {受影响方}`。narrative 中已分析过的风险场景必须在 risk_alerts 中逐一展开触发链，不得遗漏。必须写明"如何触发"的因果链条，而非重复"存在风险"或"导致受损"的表象。
-   - 错误示例："供应链风险 | 连续削弱 | 中国"（只写了影响，不是触发路径）
-   - 正确示例："芯片断供风险 | 出口管制扩至成熟制程 → 切断BMS芯片供应 → 产能瘫痪 | 某实体"
+   - 错误示例："供应链风险 | 连续削弱 | 某方"（只写了影响，不是触发路径）
+   - 正确示例："资源断供风险 | 外部管制扩至关键环节 → 切断核心供应通路 → 产能受限 | 受影响的实体"
    - 直接陈述事实，不前置"可能/或将"。
 
 3. **"recommendations"**：最多5条。格式：`{针对方}→{具体动作}→{预期机制与效果}`。不写"建议""应""需要"等虚词，每条不超过40字。
@@ -350,7 +350,7 @@ async def generate_report(
     default_report = DeductionReport(
         session_id=session.id,
         summary="推演完成，请查看详细事件记录。",
-        key_events=[{"description": e} for e in key_events[:10]],
+        key_events=[{"description": e} for e in key_events[-20:]],
         agent_trajectories=agent_trajectories,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
@@ -366,17 +366,50 @@ async def generate_report(
 
     log_fn("report", "报告 LLM 生成完成")
 
+    # 归一化：模型可能返回 dict 列表而非 | 分隔字符串，统一转换避免前端崩溃
+    raw_risks = report_data.get("risk_alerts", [])
+    normalized_risks: list[str] = []
+    for item in raw_risks:
+        if isinstance(item, str):
+            normalized_risks.append(item)
+        elif isinstance(item, dict):
+            title = item.get("风险标题") or item.get("risk_title") or item.get("标题", "")
+            path = item.get("具体触发机制/路径") or item.get("trigger_path") or item.get("触发路径", "")
+            target = item.get("受影响方") or item.get("affected_entity") or item.get("受方", "")
+            normalized_risks.append(f"{title} | {path} | {target}")
+        else:
+            normalized_risks.append(str(item))
+
+    raw_recs = report_data.get("recommendations", [])
+    normalized_recs: list[str] = []
+    for item in raw_recs:
+        if isinstance(item, str):
+            normalized_recs.append(item)
+        elif isinstance(item, dict):
+            agent = item.get("针对方") or item.get("agent") or ""
+            action = item.get("具体动作") or item.get("action") or ""
+            effect = item.get("预期机制与效果") or item.get("effect") or ""
+            normalized_recs.append(f"{agent}→{action}→{effect}")
+        else:
+            normalized_recs.append(str(item))
+
+    # 归一化：确保 summary/conclusion 始终为字符串
+    narrative_raw = report_data.get("narrative", "") or report_data.get("summary", default_report.summary)
+    conclusion_raw = report_data.get("conclusion", "")
+    narrative = str(narrative_raw) if not isinstance(narrative_raw, str) else narrative_raw
+    conclusion = str(conclusion_raw) if not isinstance(conclusion_raw, str) else conclusion_raw
+
     return DeductionReport(
         session_id=session.id,
-        summary=report_data.get("narrative", "") or report_data.get("summary", default_report.summary),
-        key_events=default_report.key_events,
+        summary=narrative,
+        key_events=[{"description": e} for e in key_events[-20:]],
         agent_trajectories=default_report.agent_trajectories,
-        risk_alerts=report_data.get("risk_alerts", []),
-        recommendations=report_data.get("recommendations", []),
+        risk_alerts=normalized_risks,
+        recommendations=normalized_recs,
         causal_summary=report_data.get("causal_summary", []),
         stage_narratives=report_data.get("stage_narratives", []),
         deviation_analysis=report_data.get("deviation_analysis", []),
-        conclusion=report_data.get("conclusion", ""),
+        conclusion=conclusion,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
 

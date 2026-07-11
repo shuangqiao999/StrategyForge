@@ -33,7 +33,7 @@ $user_expectations
 - 所属组织: $parent_info
 - 下属机构: $sub_info
 
-## 全书关键片段（LanceDB 语义检索）
+## 原文关键片段（LanceDB 语义检索）
 $context
 
 ## 高频共现关键词标签
@@ -41,7 +41,7 @@ $keywords
 
 ## 输出 JSON — 必须是纯 JSON 对象
 {
-  "persona": "详细的人格描述 (80-150字), 包括性格特征、价值观、行为模式、人物弧光演变",
+  "persona": "详细的人格描述 (80-150字), 包括性格特征、价值观、行为模式、行为演化趋势",
   "background": "背景故事 (80-150字), 包括关键经历、社会关系、动机、性格变迁",
   "goals": ["目标1", "目标2", "目标3"]
 }
@@ -175,14 +175,14 @@ async def create_agents_from_graph(
     sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
 
     _DOMAIN_ROLES: dict[str, str] = {
-        "military": "军事力量",
-        "business": "企业",
-        "politics": "政治实体",
-        "ecology": "生态主体",
-        "urban": "城市管理者",
-        "tech": "科技企业/研究机构",
-        "info_war": "舆论博弈方",
-        "geo_strategy": "战略决策主体",
+        "military": "军事力量或决策实体",
+        "business": "企业或行业参与者",
+        "politics": "政治实体或政策制定者",
+        "ecology": "生态主体或环境利益方",
+        "urban": "城市管理机构或市政实体",
+        "tech": "科技企业或研究机构",
+        "info_war": "信息舆论参与方",
+        "geo_strategy": "地缘战略决策主体",
     }
     _domain_role = _DOMAIN_ROLES.get(domain, "独立博弈者")
 
@@ -225,7 +225,7 @@ async def create_agents_from_graph(
             except Exception as e:
                 logger.debug("[Deduction] persona retrieve failed for %s: %s", person_name, e)
         prompt = _build_prompt(person, person_name, fragments)
-        system = "You are a JSON-only character profile generator. Output ONLY a valid JSON object. NO markdown, NO explanations."
+        system = "你是角色档案生成专家，只输出 JSON 对象。不要 markdown，不要解释。"
         messages = [Message(role="user", content=prompt)]
         async with sem:  # 并发上限 = FORGE_MAX_CONCURRENT
             try:
