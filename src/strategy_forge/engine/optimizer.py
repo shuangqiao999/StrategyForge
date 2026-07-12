@@ -317,7 +317,12 @@ class StrategyOptimizer:
 
     def _judge_quantified(self, rule_engine: Any, states: dict[str, Any],
                           scenario: dict[str, Any]) -> SimulationOutcome:
-        """量化模式：按结构化目标条件读最终 EntityState 数值客观判胜负（解决评估者悖论）。"""
+        """量化模式：按结构化目标条件读最终 EntityState 数值客观判胜负。
+
+        当指定 entity_ref 时，使用 rule_engine.judge() 的加权成本计算。
+        未指定时，使用规则包 elimination.weights（若存在）做加权平均健康度，
+        无 weights 时回退等权平均。
+        """
         win_target = scenario.get("win_target") or {}
         ref = (win_target.get("entity_ref") or "").strip()
         target_state = None
@@ -332,16 +337,28 @@ class StrategyOptimizer:
             detail = ", ".join(f"{k}={v:.0f}" for k, v in target_state.metrics.items())
             return SimulationOutcome(success=j["success"], win_score=j["win_score"],
                                      cost=j["cost"], rationale=f"{target_state.name}: {detail}")
-        # 缺省（未指定我方实体）：用全体存活率 + 平均健康度作客观评分
+        # 缺省（未指定我方实体）：用全体存活率 + 加权健康度作客观评分
         if not states:
             return SimulationOutcome(False, 0.0, 1.0, "无量化实体")
         alive = sum(1 for st in states.values() if rule_engine.is_alive(st))
         n = len(states)
         win_score = round(alive / n, 4)
-        avg = sum(sum(st.metrics.values()) / max(1, len(st.metrics))
-                  for st in states.values()) / n / 100.0
+        # 使用规则包 elimination.weights 做加权平均，无 weights 时回退等权
+        weights = rule_engine.pack.get("elimination", {}).get("weights", {})
+        metric_list = getattr(rule_engine, "_metrics", []) or rule_engine.metrics()
+        if not weights:
+            weights = {m: 1.0 / len(metric_list) for m in metric_list} if metric_list else {}
+        total_weighted = 0.0
+        total_weight = 0.0
+        for st in states.values():
+            for m, w in weights.items():
+                val = st.metrics.get(m, 0.0)
+                total_weighted += val * w
+                total_weight += w
+        avg_weighted = (total_weighted / max(1, total_weight)) / 100.0 if total_weight > 0 else 0.0
+        cost = round(1.0 - avg_weighted, 4)
         return SimulationOutcome(success=win_score >= 0.5, win_score=win_score,
-                                 cost=round(1.0 - avg, 4), rationale=f"存活 {alive}/{n}")
+                                 cost=cost, rationale=f"存活 {alive}/{n}，加权健康度 {avg_weighted:.0%}")
 
     async def _evaluate_outcome(
         self, client: Any, win_condition: str, directive: str, actions: list[Any],
@@ -432,9 +449,12 @@ class StrategyOptimizer:
                 best = max(stats_list, key=lambda x: x["win_mean"])
             elif objective == "min_cost":
                 best = min(stats_list, key=lambda x: x["cost_mean"])
-            else:  # balanced: 帕累托前沿上 (胜率-成本) 最大
+            else:  # balanced: 帕累托前沿上 (胜率-成本) 最大，同分取更稳定（CI更窄）
                 front = [s for s in stats_list if s["is_pareto"]] or stats_list
-                best = max(front, key=lambda x: x["win_mean"] - x["cost_mean"])
+                best = max(front, key=lambda x: (
+                    x["win_mean"] - x["cost_mean"],
+                    -(x["win_ci95"][1] - x["win_ci95"][0]),
+                ))
             recommended = {
                 "name": best["name"],
                 "win_mean": best["win_mean"],
@@ -443,12 +463,31 @@ class StrategyOptimizer:
                 "cost_mean": best["cost_mean"],
             }
 
+        # 推荐理由
+        rationale = ""
+        if recommended and stats_list:
+            rec = next((s for s in stats_list if s["name"] == recommended["name"]), None)
+            others = [s for s in stats_list if s["name"] != recommended["name"]]
+            if rec:
+                rationale = f"推荐策略「{recommended['name']}」：{rec['runs']}次模拟中达成率{rec['success_rate']*100:.0f}%，平均达成度{rec['win_mean']*100:.0f}%，成本{rec['cost_mean']:.2f}。"
+                if others:
+                    second = max(others, key=lambda x: x["win_mean"] - x["cost_mean"])
+                    win_gap = rec["win_mean"] - second["win_mean"]
+                    cost_gap = rec["cost_mean"] - second["cost_mean"]
+                    if win_gap > 0 and cost_gap < 0:
+                        rationale += f"相比次优方案「{second['name']}」形成支配优势（胜率更高+成本更低）。"
+                    elif win_gap > 0:
+                        rationale += f"相比次优方案「{second['name']}」胜率高{abs(win_gap)*100:.1f}%，成本高{abs(cost_gap):.2f}，需权衡。"
+                    else:
+                        rationale += f"相比次优方案「{second['name']}」成本低{abs(cost_gap):.2f}，胜率低{abs(win_gap)*100:.1f}%。"
+
         return {
             "objective": objective,
             "win_condition": win_condition,
             "scenarios": sorted(stats_list, key=lambda x: x["win_mean"], reverse=True),
             "pareto_front": [s["name"] for s in stats_list if s["is_pareto"]],
             "recommended": recommended,
+            "recommendation_rationale": rationale,
         }
 
 
