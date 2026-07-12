@@ -1020,8 +1020,9 @@ export default function App() {
                       }}
                       nodeLabel={(n: any) => `${n.name}\n${n.group}`}
                       nodeColor={(n: any) => {
-                        const colors: Record<string, string> = { Person: "#60a5fa", Organization: "#f59e0b", Event: "#ef4444", Concept: "#34d399", Location: "#a78bfa" };
-                        return colors[n.group] || "#94a3b8";
+                        const palette = ["#60a5fa", "#f59e0b", "#34d399", "#a78bfa", "#f87171"];
+                        const hash = [...(n.group || "")].reduce((h, c) => h + c.charCodeAt(0), 0);
+                        return palette[hash % palette.length];
                       }}
                       nodeVal={(n: any) => (graphData.links.filter(l => l.source === n.id || l.target === n.id).length || 1) * 2}
                       linkLabel={(l: any) => String(l.value)}
