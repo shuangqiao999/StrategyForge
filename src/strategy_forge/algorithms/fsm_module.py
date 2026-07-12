@@ -9,6 +9,7 @@ All other states produce deterministic actions via action_map, bypassing LLM.
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 
 import numpy as np
 
@@ -78,8 +79,12 @@ class FiniteStateMachineModule(AlgorithmModule):
             if not from_state or not to_state:
                 continue
             streak_req = condition.get("streak", 1) if isinstance(condition, dict) else 1
-            # Build a stable streak key for this rule (for persistence across rounds)
-            rule_fprint = f"{from_state}->{to_state}"
+            # Include condition fingerprint in streak key to avoid counter collision
+            # when multiple rules share the same from→to transition but different conditions
+            cond_fprint = hashlib.md5(
+                str(sorted(condition.items())).encode()
+            ).hexdigest()[:6] if isinstance(condition, dict) else "noop"
+            rule_fprint = f"{from_state}->{to_state}.{cond_fprint}"
             if rule_fprint not in streak_counters:
                 streak_counters[rule_fprint] = ctx.metadata.get(f"fsm.streak.{rule_fprint}", [0] * n)
                 streak_keys.append(rule_fprint)

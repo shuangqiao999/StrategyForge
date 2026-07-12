@@ -218,7 +218,10 @@ class PhysicsModule(AlgorithmModule):
                 if w_sum > 1e-9:
                     new_arr[i] += rate * np.sum((arr[j_indices] - arr[i]) * weights) / w_sum
             if boundary == "reflect":
-                new_arr = np.clip(new_arr, 0.0, None)
+                # Mirror overshoot back into domain: values exceeding bounds are reflected
+                overshoot = new_arr - 100.0
+                new_arr = np.where(overshoot > 0, 100.0 - overshoot, new_arr)
+                new_arr = np.maximum(new_arr, 0.0)
             ctx.arrays[key] = new_arr
 
     def _apply_explosions(self, sp: Any, ctx: ModuleContext) -> None:

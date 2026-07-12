@@ -33,6 +33,7 @@ class OpinionDynamicsModule(AlgorithmModule):
         self._graph_type: str = "spatial"
         self._weighted: bool = False
         self._norm_range: tuple[float, float] | None = None
+        self._alpha: float = 0.5  # convergence rate: 0=no change, 1=full neighbor influence
 
     @property
     def name(self) -> str:
@@ -47,6 +48,7 @@ class OpinionDynamicsModule(AlgorithmModule):
         self._epsilon = float(params.get("epsilon", 0.3))
         self._graph_type = str(params.get("graph_type", "spatial"))
         self._weighted = bool(params.get("weighted", False))
+        self._alpha = float(params.get("alpha", 0.5))
         nr = params.get("norm_range", None)
         if nr is not None and len(nr) == 2:
             self._norm_range = (float(nr[0]), float(nr[1]))
@@ -112,12 +114,16 @@ class OpinionDynamicsModule(AlgorithmModule):
                         w_sum = w.sum()
                         if w_sum > 0:
                             w = w / w_sum
-                            new_opinions[i] = opinions[i] * 0.5 + np.average(opinions[mask], weights=w) * 0.5
+                            new_opinions[i] = opinions[i] * (1 - self._alpha) + np.average(opinions[mask], weights=w) * self._alpha
                         else:
-                            new_opinions[i] = opinions[i] * 0.5 + np.mean(opinions[mask]) * 0.5
+                            new_opinions[i] = opinions[i] * (1 - self._alpha) + np.mean(opinions[mask]) * self._alpha
                     else:
-                        new_opinions[i] = opinions[i] * 0.5 + np.mean(opinions[mask]) * 0.5
+                        new_opinions[i] = opinions[i] * (1 - self._alpha) + np.mean(opinions[mask]) * self._alpha
 
+            # Clamp back to original range to prevent numerical drift
+            if self._norm_range is not None:
+                lo, hi = self._norm_range
+                new_opinions = np.clip(new_opinions, lo, hi)
             ctx.arrays[metric] = new_opinions
             updated_metrics.append(metric)
 
