@@ -170,9 +170,11 @@ class DeductionGraphStore:
         self._check_conn()
         with self._lock:
             self._conn.execute(
-                f"CREATE (ev:{self.EVENT_TABLE} {{id: $id, description: $desc, "
-                "event_type: $type, timestamp: $ts, agent_id: $aid, "
-                "round: $rnd, target_id: $tid, effect: $eff, driver: $drv}})",
+                f"CREATE (ev:{self.EVENT_TABLE} {{id: $id}}) "
+                "SET ev.description = $desc, ev.event_type = $type, "
+                "ev.timestamp = $ts, ev.agent_id = $aid, "
+                "ev.round = $rnd, ev.target_id = $tid, "
+                "ev.effect = $eff, ev.driver = $drv",
                 {
                     "id": event_id, "desc": description[:500],
                     "type": event_type, "ts": timestamp,

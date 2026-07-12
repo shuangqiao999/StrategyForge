@@ -1635,9 +1635,14 @@ export default function App() {
                             胜率 {(optReport.recommended.win_mean * 100).toFixed(0)}%
                             （95%CI {(optReport.recommended.win_ci95[0] * 100).toFixed(0)}–{(optReport.recommended.win_ci95[1] * 100).toFixed(0)}%）
                             · 成功率 {(optReport.recommended.success_rate * 100).toFixed(0)}%
-                            · 成本 {optReport.recommended.cost_mean.toFixed(2)}
-                          </div>
-                        </div>
+                             · 成本 {optReport.recommended.cost_mean.toFixed(2)}
+                           </div>
+                           {optReport.recommendation_rationale && (
+                             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6, lineHeight: 1.7 }}>
+                               {optReport.recommendation_rationale}
+                             </div>
+                           )}
+                         </div>
                       )}
                       {optReport.scenarios && optReport.scenarios.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
