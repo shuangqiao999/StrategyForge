@@ -47,12 +47,15 @@ def _logistic(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
 
 
 def _fatigue_recovery(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Fast recovery when high, slow when low: dy/dt = -rate * sqrt(y).
-    Rate configurable via ctx['_fatigue_rate']. Default 0.05."""
+    """Fatigue recovery with saturation: dy/dt = -rate * sqrt(y) * (1 - y/K).
+    Recovery rate peaks at moderate fatigue (~33) and tapers at both extremes,
+    eliminating oscillation in the 50-70 range.
+    Rate configurable via ctx['_fatigue_rate']; K via ctx['_carrying_capacity']."""
     rate = float(ctx.get("_fatigue_rate", 0.05))
+    K = float(ctx.get("_carrying_capacity", 100.0))
     dy = np.zeros_like(values)
     mask = values > 0
-    dy[mask] = -rate * np.sqrt(values[mask])
+    dy[mask] = -rate * np.sqrt(values[mask]) * (1.0 - values[mask] / K)
     return dy
 
 

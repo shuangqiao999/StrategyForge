@@ -1795,12 +1795,12 @@
             "tech_lead": {
               "_carrying_capacity": 100,
               "_logistic_rate": 0.06,
-              "_competition_factor": 0.3
+              "_competition_factor": 0.12
             },
             "talent_pool": {
               "_carrying_capacity": 100,
               "_logistic_rate": 0.04,
-              "_competition_factor": 0.25
+              "_competition_factor": 0.10
             }
           }
         },
