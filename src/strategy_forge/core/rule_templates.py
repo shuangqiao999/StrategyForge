@@ -217,6 +217,10 @@ def reload_rules() -> None:
         for f in sorted(custom_dir.glob("*.json")):
             rules = _load_json_file(f)
             if rules:
+                conflicts = [k for k in rules if k in loaded]
+                if conflicts:
+                    logger.warning("[rule_templates] 自定义规则覆盖内置: %s → %s",
+                                   f.name, ", ".join(conflicts))
                 loaded.update(rules)
                 logger.info("[rule_templates] 加载自定义规则: %s", f.name)
 

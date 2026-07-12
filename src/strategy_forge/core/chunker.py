@@ -155,8 +155,15 @@ class TextChunker:
         result: list[str] = []
         pos = 0
         while pos < len(text):
-            result.append(text[pos:pos + self.max_chunk_size])
-            pos += self.max_chunk_size
+            end = min(pos + self.max_chunk_size, len(text))
+            # Attempt to find a natural boundary (space/punctuation) near the cut point
+            if end < len(text):
+                for candidate in range(end, max(pos, end - 40), -1):
+                    if text[candidate] in " ,.!?;:\u3002\uff0c\u3001\uff1b\uff1f\uff01\uff1a\n":
+                        end = candidate + 1
+                        break
+            result.append(text[pos:end])
+            pos = end
         return result
 
     # ------------------------------------------------------------------

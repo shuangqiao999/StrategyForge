@@ -93,7 +93,10 @@ class DeductionConfig:
         self.deduction_recall_rel_max = int(os.getenv("FORGE_RECALL_REL_MAX", "4"))
 
     def __getattr__(self, name: str):
-        return None
+        raise AttributeError(
+            f"DeductionConfig has no attribute '{name}'. "
+            f"Check for typos in the field name or use an environment variable instead."
+        )
 
 
 config = DeductionConfig()

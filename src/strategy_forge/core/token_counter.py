@@ -34,7 +34,7 @@ class TokenAccumulator:
     """Module-level singleton that accumulates token stats per session."""
 
     def __init__(self) -> None:
-        self._stats: dict[str, dict[str, dict[str, TokenStats | list]]] = {}
+        self._stats: dict[str, dict[str, dict[str, TokenStats | dict]]] = {}
 
     def record(self, session_id: str, phase: str, round_num: int,
                stats: TokenStats) -> None:

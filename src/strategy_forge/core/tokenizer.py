@@ -230,6 +230,15 @@ def compress_to_keywords(text: str, top_k: int = 20) -> list[str]:
     if not content_words:
         return extract_keywords(text, top_k=top_k)
 
+    # 常见高频虚词停用，防止占据关键词列表头部
+    _STOP_WORDS = frozenset({
+        "进行", "可以", "提供", "使用", "通过", "需要", "包括",
+        "一个", "这个", "这些", "那些", "一些", "其中", "之间",
+        "方面", "实现", "显示", "认为", "表示", "以及", "可能",
+        "目前", "相关", "主要", "部分", "获得", "具有",
+    })
+    content_words = [w for w in content_words if w not in _STOP_WORDS]
+
     freq = Counter(content_words)
     return [w for w, _ in freq.most_common(top_k)]
 

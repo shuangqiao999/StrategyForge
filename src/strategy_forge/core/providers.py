@@ -164,9 +164,29 @@ class ProviderRegistry:
 
     def _resolve(self, prefix: str, provider_slug: str) -> dict[str, str]:
         pd = PROVIDER_CATALOG.get(provider_slug)
-        base = self._data.get(f"{prefix}_base_url", "") or os.getenv(f"FORGE_{prefix.upper()}_BASE", "") or (pd.default_llm_base_url if pd else "")
-        key = self._data.get(f"{prefix}_api_key", "") or os.getenv(f"FORGE_{prefix.upper()}_KEY", "")
-        model = self._data.get(f"{prefix}_model", "") or os.getenv(f"FORGE_{prefix.upper()}_MODEL", "") or (pd.default_llm_model if pd else "") if prefix == "llm" else self._data.get("embedding_model_name", "") or os.getenv("FORGE_EMBED_MODEL", "") or (pd.default_embed_model if pd else "")
+        # Explicit None/empty check: allow UI to clear fields by storing ""
+        # even when env vars have old values ("" or chain would skip to env).
+        base = self._data.get(f"{prefix}_base_url")
+        if base is None:
+            base = os.getenv(f"FORGE_{prefix.upper()}_BASE", "") or (pd.default_llm_base_url if pd else "")
+        else:
+            base = base or os.getenv(f"FORGE_{prefix.upper()}_BASE", "") or (pd.default_llm_base_url if pd else "")
+        key = self._data.get(f"{prefix}_api_key")
+        if key is None:
+            key = os.getenv(f"FORGE_{prefix.upper()}_KEY", "")
+        else:
+            key = key or os.getenv(f"FORGE_{prefix.upper()}_KEY", "")
+        model = self._data.get(f"{prefix}_model")
+        if prefix == "llm":
+            if model is None:
+                model = os.getenv("FORGE_LLM_MODEL", "") or (pd.default_llm_model if pd else "")
+            else:
+                model = model or os.getenv("FORGE_LLM_MODEL", "") or (pd.default_llm_model if pd else "")
+        else:
+            if model is None:
+                model = self._data.get("embedding_model_name", "") or os.getenv("FORGE_EMBED_MODEL", "") or (pd.default_embed_model if pd else "")
+            else:
+                model = model or self._data.get("embedding_model_name", "") or os.getenv("FORGE_EMBED_MODEL", "") or (pd.default_embed_model if pd else "")
         return {"api_base": base.rstrip("/") if base else "", "api_key": key, "model": model}
 
     def resolve_for_llm_client(self) -> dict[str, str]:
