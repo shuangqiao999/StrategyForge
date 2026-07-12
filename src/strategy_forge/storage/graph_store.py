@@ -168,24 +168,18 @@ class DeductionGraphStore:
                   timestamp: str, agent_id: str = "", round_number: int = 0,
                   target_id: str = "", effect: str = "", driver: str = "") -> None:
         self._check_conn()
-        safe = {
-            "id": event_id.replace("'", "\\'"),
-            "desc": description.replace("'", "\\'")[:500],
-            "type": event_type.replace("'", "\\'"),
-            "ts": timestamp.replace("'", "\\'"),
-            "aid": agent_id.replace("'", "\\'"),
-            "tid": (target_id or "").replace("'", "\\'"),
-            "eff": (effect or "").replace("'", "\\'")[:200],
-            "drv": (driver or "").replace("'", "\\'")[:16],
-        }
-        rnd = int(round_number)
         with self._lock:
             self._conn.execute(
-                f"CREATE (ev:{self.EVENT_TABLE} {{id: '{safe['id']}', "
-                f"description: '{safe['desc']}', event_type: '{safe['type']}', "
-                f"timestamp: '{safe['ts']}', agent_id: '{safe['aid']}', "
-                f"round: {rnd}, target_id: '{safe['tid']}', "
-                f"effect: '{safe['eff']}', driver: '{safe['drv']}'}})"
+                f"CREATE (ev:{self.EVENT_TABLE} {{id: $id, description: $desc, "
+                "event_type: $type, timestamp: $ts, agent_id: $aid, "
+                "round: $rnd, target_id: $tid, effect: $eff, driver: $drv}})",
+                {
+                    "id": event_id, "desc": description[:500],
+                    "type": event_type, "ts": timestamp,
+                    "aid": agent_id, "rnd": int(round_number),
+                    "tid": target_id or "", "eff": (effect or "")[:200],
+                    "drv": (driver or "")[:16],
+                },
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:
