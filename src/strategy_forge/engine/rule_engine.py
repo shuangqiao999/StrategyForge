@@ -100,11 +100,18 @@ class RuleEngine:
 
     def action_catalog(self) -> str:
         """供决策 prompt 使用的可选动作说明。"""
+        _TARGET_HINTS: dict[str, str] = {
+            "partner": "提示：partner 应选择同行业或已知供应链/战略投资关系的实体，不应跨行业随机结盟",
+            "diplomacy": "提示：diplomacy 应选择利益相关的可对话方（对手、盟国、冲突方），而非无关第三方",
+        }
         lines = []
         for a in self.pack["actions"]:
             eff = self.pack["self_effects"].get(a, {})
             desc = ", ".join(f"{k}{v:+.0f}" for k, v in eff.items()) or "无直接消耗"
-            lines.append(f"- {a}（自身效应: {desc}）")
+            line = f"- {a}（自身效应: {desc}）"
+            if a in _TARGET_HINTS:
+                line += f"\n  {_TARGET_HINTS[a]}"
+            lines.append(line)
         return "\n".join(lines)
 
     # ── 状态初始化 ──
