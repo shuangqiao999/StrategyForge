@@ -338,6 +338,11 @@ class StrategicReasoner:
         if imm != "无":
             prefix_parts.append(f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n")
         prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine)}\n")
+        # 合作目标约束：partner 必须从关系网络中的已知合作方或同行业实体中选择
+        if relationship_context and "（无" not in relationship_context:
+            prefix_parts.append(f"## 合作目标约束\npartner 动作的目标必须从你的关系网络中选择已知合作方，"
+                                f"或同行业/上游供应链实体。禁止选择直接竞对、跨行业无关方。"
+                                f"当前已知关系：\n{relationship_context}\n")
         if env_context:
             prefix_parts.append(f"## 地形与天气\n{env_context}\n")
         if user_cmd:

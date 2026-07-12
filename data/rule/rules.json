@@ -664,7 +664,8 @@
             "cash_flow": {
               "_decay_rate": 0.008,
               "_base_recovery": 2.0,
-              "_scale_protection": 8.0
+              "_scale_protection": 8.0,
+              "_rnd_monetization": 1.5
             },
             "brand": {
               "_carrying_capacity": 100,

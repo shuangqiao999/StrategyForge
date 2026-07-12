@@ -121,14 +121,20 @@ def _competitive_logistic(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.
 
 
 def _cash_flow_dynamics(values: np.ndarray, ctx: dict[str, np.ndarray]) -> np.ndarray:
-    """Cash flow with base recovery + scale protection from supply chain & tech."""
+    """Cash flow with base recovery + scale protection from supply chain & tech + R&D monetization.
+    
+    _rnd_monetization models the revenue feedback from high R&D (licensing, tech premiums).
+    Defaults to 0 for backward compatibility."""
     rate = float(ctx.get("_decay_rate", 0.01))
     base = float(ctx.get("_base_recovery", 0.0))
     scale = float(ctx.get("_scale_protection", 0.0))
+    rnd_mon = float(ctx.get("_rnd_monetization", 0.0))
     supply_chain = ctx.get("supply_chain", np.zeros_like(values))
     tech_lead = ctx.get("tech_lead", np.ones_like(values) * 50)
+    rnd = ctx.get("rnd", np.ones_like(values) * 50)
     protection = base + scale * (np.clip(supply_chain, 0, 100) / 100.0) * (np.clip(tech_lead, 0, 100) / 100.0)
-    return -rate * values + protection
+    rnd_bonus = rnd_mon * (np.clip(rnd, 0, 100) / 100.0)
+    return -rate * values + protection + rnd_bonus
 
 
 ODE_PRESETS: dict[str, Any] = {

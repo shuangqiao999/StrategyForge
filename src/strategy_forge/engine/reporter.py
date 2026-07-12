@@ -177,7 +177,14 @@ def _build_quantified_summary(
             cum_delta = deltas_by_metric.get(k, 0.0)
             th_text = f" 淘汰线={th:.0f}" if th > 0 else ""
             near_thresh = " ⚠逼近淘汰线" if th > 0 and v <= th * 1.3 else ""
-            segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh})")
+            # 区分战略性投入（现金流下降但研发/市占上升）与危机型下跌
+            qualifier = ""
+            if k in ("cash_flow", "supply") and cum_delta < -3:
+                rnd_d = deltas_by_metric.get("rnd", 0)
+                ms_d = deltas_by_metric.get("market_share", 0)
+                if rnd_d > 3 or ms_d > 3:
+                    qualifier = "（战略性投入，非危机）"
+            segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh}{qualifier})")
 
         parts.append(f"{name}: {'; '.join(segs) if segs else '无关键指标'}")
     return "\n".join(parts)
