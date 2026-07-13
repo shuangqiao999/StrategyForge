@@ -1111,13 +1111,18 @@ export default function App() {
 
                       {/* ── 三、时序因果叙事 / 角色弧光 ── */}
                       {report.stage_narratives && report.stage_narratives.length > 0 && (
-                        <details open style={{ marginBottom: 18 }}>
-                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#a78bfa", cursor: "pointer", borderLeft: "3px solid #a78bfa", paddingLeft: 8, marginBottom: 6 }}>
-                            {typeof report.stage_narratives[0] === "string"
-                              ? `🎭 角色弧光（${report.stage_narratives.length} 条）`
-                              : `时序因果叙事（${report.stage_narratives.length} 阶段）`}
-                          </summary>
-                          {typeof report.stage_narratives[0] === "string" ? (
+                        typeof report.stage_narratives[0] === "string" ? (
+                          <div style={{ marginBottom: 18, background: "#0f172a", borderRadius: 8, padding: 14, borderLeft: "3px solid #a78bfa" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#c4b5fd", marginBottom: 10 }}>🎭 角色弧光</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {(report.stage_narratives as unknown as string[]).map((arc: string, i: number) => (
+                                <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: "#e2e8f0" }}>
+                                  {arc}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                               {(report.stage_narratives as unknown as string[]).map((arc: string, i: number) => (
                                 <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #a78bfa", fontSize: 13, lineHeight: 1.7, color: "#e2e8f0" }}>
@@ -1165,16 +1170,25 @@ export default function App() {
                         </details>
                       )}
 
-                      {/* ── 五、结论（风险/建议已在上方展示，此处不重复） ── */}
+                      {/* ── 五、结论 ── */}
                       {report.conclusion && (
-                        <details open style={{ marginBottom: 18 }}>
-                          <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #60a5fa", paddingLeft: 8, marginBottom: 6 }}>
-                            结论
-                          </summary>
-                          <div style={{ marginBottom: 12, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
-                            {report.conclusion}
+                        report.quantified ? (
+                          <details open style={{ marginBottom: 18 }}>
+                            <summary style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", cursor: "pointer", borderLeft: "3px solid #60a5fa", paddingLeft: 8, marginBottom: 6 }}>
+                              结论
+                            </summary>
+                            <div style={{ marginBottom: 12, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>
+                              {report.conclusion}
+                            </div>
+                          </details>
+                        ) : (
+                          <div style={{ marginBottom: 18, background: "#0f172a", borderRadius: 8, padding: 14, borderLeft: "3px solid #60a5fa" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", marginBottom: 10 }}>📌 故事收束</div>
+                            <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap", color: "#e2e8f0", fontSize: 13 }}>
+                              {report.conclusion}
+                            </div>
                           </div>
-                        </details>
+                        )
                       )}
 
                       {/* ── 附录：关键事件（仅量化模式）── */}
