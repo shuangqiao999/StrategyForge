@@ -600,9 +600,11 @@ class SimulationEngine:
             f"## 任务\n"
             f"根据以上经历，判断是否需要添加一条新的行为准则（或修正旧准则），"
             f"使你的行为更符合当前的处境。\n"
+            f"【重要】你的人格核心不可动摇，新准则只能是对核心人格的策略性微调，"
+            f"禁止产生与核心人格根本矛盾的方向性反转。\n"
             f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
             f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
-            f"- 仅添加/修正，不删除原有准则。\n"
+            f"- 仅添加/修正，不删除原有准则。最多保留3条准则，超限时替换最旧的一条。\n"
             f"- 示例：\"遭受背叛后更谨慎选择盟友\" \"危急时刻敢于孤注一掷\"\n"
             f"- 何时输出\"无需调整\"：近期经历与人格一致、现有准则已覆盖行为模式\n"
             f"\n只输出准则本身或\"无需调整\"，不要解释。"
@@ -619,7 +621,13 @@ class SimulationEngine:
                 return
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
-                agent.system_prompt_extra = f"{old_extra}；{text}"
+                # 最多保留 3 条准则，超限时替换最旧
+                parts = old_extra.split("；")
+                if len(parts) >= 3:
+                    parts = parts[1:]  # 丢弃最旧
+                    agent.system_prompt_extra = "；".join(parts + [text])
+                else:
+                    agent.system_prompt_extra = f"{old_extra}；{text}"
             elif not old_extra:
                 agent.system_prompt_extra = text
             else:
