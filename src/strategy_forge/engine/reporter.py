@@ -422,7 +422,7 @@ async def generate_report(
     # ── 中文感知 Token 估算 + 上下文窗口安全上限 ──
     _cn = len(re.findall(r"[\u4e00-\u9fff]", prompt_str))
     _input_est = _cn + max(1, (len(prompt_str) - _cn) // 3)
-    _ctx_limit = 7800 if is_narrative else 12800  # gemma-4-12b=8k, 量化可用更大模型
+    _ctx_limit = 262144  # 主流模型上下文窗口上限，400超限时由重试自动修正
     _safe_max = max(2000, _ctx_limit - _input_est - 200)
     report_max_tokens = min(config.deduction_report_max_tokens, _safe_max)
     log_fn("report", f"Token估算: input≈{_input_est} max_tokens={report_max_tokens}")
