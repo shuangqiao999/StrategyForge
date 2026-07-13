@@ -1298,12 +1298,12 @@ export default function App() {
                         const thresholds = (snapshot as any)._thresholds as Record<string, number> | undefined;
                         const getStatus = (e: typeof entities[0]) => {
                           if (!thresholds || !e.alive) return { dot: "#6b7280", text: "已淘汰" };
-                          const maxRatio = Math.max(...keys.map(k => (e.metrics[k] || 0) / Math.max(thresholds[k] || 1, 1)));
-                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 1.5))
+                           const maxRatio = Math.max(...keys.map(k => ((e.metrics || {})[k] || 0) / Math.max(thresholds[k] || 1, 1)));
+                          if (keys.some(k => ((e.metrics || {})[k] || 0) <= (thresholds[k] || 0) * 1.5))
                             return { dot: "#ef4444", text: "危急" };
-                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 2))
+                          if (keys.some(k => ((e.metrics || {})[k] || 0) <= (thresholds[k] || 0) * 2))
                             return { dot: "#f97316", text: "受创" };
-                          if (keys.some(k => (e.metrics[k] || 0) <= (thresholds[k] || 0) * 3))
+                          if (keys.some(k => ((e.metrics || {})[k] || 0) <= (thresholds[k] || 0) * 3))
                             return { dot: "#f59e0b", text: "承压" };
                           if (maxRatio >= 4) return { dot: "#16a34a", text: "强势" };
                           return { dot: "#22c55e", text: "稳定" };
@@ -1338,7 +1338,7 @@ export default function App() {
                                       <tr key={e.name} style={{ borderBottom: "1px solid #1e293b" }}>
                                         <td style={{ padding: "7px 10px", color: e.alive ? "#e2e8f0" : "#475569", fontWeight: 500 }}>{e.name}</td>
                                         {keys.map(k => {
-                                          const val = e.metrics[k];
+                                          const val = e.metrics?.[k];
                                           const th = thresholds?.[k];
                                           const warn = th != null && val != null && val <= th * 1.5;
                                           const crit = th != null && val != null && val <= th;
@@ -1382,7 +1382,7 @@ export default function App() {
                           for (const ent of ts.entities) {
                             if (!entityScores[ent.name]) entityScores[ent.name] = [];
                             let num = 0, den = 0;
-                            for (const [k,v] of Object.entries(ent.metrics)) {
+                            for (const [k,v] of Object.entries(ent.metrics || {})) {
                               const th = thresholds?.[k] || 100;
                               const w = 1 / Math.max(th, 1);
                               num += (v / 100) * w;
