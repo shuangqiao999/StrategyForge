@@ -169,6 +169,19 @@ async def create_agents_from_graph(
             log_fn("agents", f"情报过滤: {before} → {len(persons)} 个智能体（排除非战略实体）")
     else:
         intel_map = {}
+        # 叙事模式：基于实体类型的基础过滤，排除非决策者类型
+        _NON_AGENT_TYPES = {"地理区域", "地理位置", "地点", "天气", "气象",
+                            "文档", "协议", "合同", "批文", "文件",
+                            "概念", "现象", "事件", "日期", "时间",
+                            "设施", "基础设施", "建筑",
+                            "自然景观", "自然现象", "环境要素"}
+        before = len(persons)
+        persons = [
+            p for p in persons
+            if p.get("type", "") not in _NON_AGENT_TYPES
+        ]
+        if len(persons) < before:
+            log_fn("agents", f"叙事模式类型过滤: {before} → {len(persons)} 个智能体（排除非决策者类型）")
 
     max_agents = min(len(persons), config.deduction_max_agents)
     log_fn("agents", f"从 {len(persons)} 个实体中生成最多 {max_agents} 个智能体")

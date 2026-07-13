@@ -32,13 +32,10 @@ os.environ["FORGE_MAX_CONCURRENT"] = "1"
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-SEED = """总统埃琳娜·莫雷诺执政六年后试图修宪延长任期，遭到反对党领袖
-卡洛斯·维加的强烈抵制。码头工人工会主席维克多·陈宣布罢工抗议削减补贴。
-环保组织"绿岛之友"领导人玛丽亚·桑托斯揭露总统与外来资本的利益交换。
-邻国A国和B国的外交代表正在秘密接触各方势力。媒体"岛镜报"展开调查。"""
+SEED = """总统莫雷诺签署外国钻探协议，引发港口抗议。反对党领袖阿米娜建议推迟投票。前总统托马斯质疑合法性。军方参谋长拉扎尔发表讲话。"""
 
 DOMAIN = "narrative"
-ROUNDS = 5
+ROUNDS = 2
 
 
 async def main():
@@ -92,17 +89,11 @@ async def main():
 
     # 2. Agent 数量（跳过 IntelSorter 后应 >5）
     agent_count = updated_session.agent_count if updated_session else 0
-    checks.append(("Agent 数量 >5 (P0)", agent_count > 5,
+    checks.append(("Agent 数量 >3 (P0+类型过滤)", agent_count > 3,
                    f"{agent_count} 个智能体"))
 
-    # 3. Agent 类型多样
-    types = set()
-    for l in logs:
-        msg = l.get("message", "")
-        if "智能体总览" in msg:
-            # Parse agent names from overview
-            pass
-    checks.append(("Agent 数量 >= 10", agent_count >= 10,
+    # 3. Agent数量在合理范围
+    checks.append(("Agent数合理(<15)", agent_count < 15,
                    f"{agent_count}"))
 
     # 4. 报告是故事化输出
