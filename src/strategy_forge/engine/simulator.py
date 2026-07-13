@@ -595,10 +595,10 @@ class SimulationEngine:
             last_r = self._last_reflection_round_n.get(eid, 0)
             reason = None
 
-            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >15）
+            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >10）
             for k in self._narrative_env:
                 delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
-                if abs(delta) > 15:
+                if abs(delta) > 10:
                     reason = f"环境剧变({k}{delta:+.0f})"
                     break
 
@@ -613,8 +613,8 @@ class SimulationEngine:
                 if prev_allies != curr_allies or prev_opps != curr_opps:
                     reason = "关系网络变化"
 
-            # 条件3：长时间无反思保护（超过 8 轮）
-            if reason is None and (round_number - last_r) > 8:
+            # 条件3：长时间无反思保护（超过 5 轮）
+            if reason is None and (round_number - last_r) > 5:
                 reason = "长期无反思保护"
 
             if reason:
