@@ -205,6 +205,14 @@ class DeductionOrchestrator:
             stored_agents = []
         if stored_agents:
             self._log("orchestrator", f"从图谱恢复 {len(stored_agents)} 个智能体（复用已存画像）")
+            # 预先查询实体类型映射，供恢复时填充 entity_type
+            type_map: dict[str, str] = {}
+            try:
+                erows = self.graph.query(
+                    f"MATCH (e:{self.graph.NODE_TABLE}) RETURN e.id, e.type")
+                type_map = {r[0]: r[1] for r in erows if r[0] and r[1]}
+            except Exception:
+                pass
             for a in stored_agents:
                 try:
                     goals = _json.loads(a.get("goals") or "[]")
@@ -216,6 +224,7 @@ class DeductionOrchestrator:
                     persona=a.get("persona", ""),
                     background=a.get("background", ""),
                     goals=goals if isinstance(goals, list) else [],
+                    entity_type=type_map.get(a.get("id", ""), ""),
                 ))
             self.session.agent_count = len(self._agents)
         else:
