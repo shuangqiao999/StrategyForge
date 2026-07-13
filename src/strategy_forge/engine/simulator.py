@@ -688,6 +688,9 @@ class SimulationEngine:
             f"- 仅添加/修正，不删除原有准则。最多保留3条准则，超限时替换最旧的一条。\n"
             f"- 示例：\"遭受背叛后更谨慎选择盟友\" \"危急时刻敢于孤注一掷\"\n"
             f"- 何时输出\"无需调整\"：近期经历与人格一致、现有准则已覆盖行为模式\n"
+            f"- 如果本轮经历了重要的人际承诺、债务或背叛，另起一行输出：\n"
+            f"  记忆：向[某角色]承诺/欠/被[具体事件]\n"
+            f"  没有重要人际事件则省略此行。\n"
             f"\n只输出准则本身或\"无需调整\"，不要解释。"
         )
         try:
@@ -698,6 +701,22 @@ class SimulationEngine:
                 max_tokens=80,
             )
             text = extract_text(resp).strip()
+            if not text:
+                return
+            # 提取私人记忆行（"记忆：..."），与人格准则分离处理
+            if "记忆：" in text:
+                parts = text.split("记忆：", 1)
+                rule_text = parts[0].strip()
+                mem_text = parts[1].strip()[:40] if len(parts) > 1 else ""
+                if mem_text:
+                    if not hasattr(self, "_character_journal"):
+                        self._character_journal: dict[str, list[str]] = {}
+                    self._character_journal.setdefault(agent.entity_id, []).append(
+                        f"R{round_number}: {mem_text}")
+                    if len(self._character_journal[agent.entity_id]) > 5:
+                        self._character_journal[agent.entity_id] = \
+                            self._character_journal[agent.entity_id][-5:]
+                text = rule_text
             if not text or "无需调整" in text or len(text) < 2:
                 return
             old_extra = agent.system_prompt_extra
@@ -725,7 +744,8 @@ class SimulationEngine:
         import random as _random
         sample = sim_round.actions[:]
         _random.shuffle(sample)
-        sample = sample[:3]
+        _max = max(3, min(len(sample), len(self.agents) // 2))
+        sample = sample[:_max]
 
         env_state = "\n".join(
             f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()
@@ -830,6 +850,10 @@ class SimulationEngine:
 
         # ── Strategic Reasoning (primary path) ──
         context_text = recent_text
+        # 注入角色私人记忆（人际承诺/债务/背叛）
+        journal = getattr(self, "_character_journal", {}).get(agent.entity_id, [])
+        if journal:
+            context_text = "## 你的私人记忆\n" + "\n".join(f"- {j}" for j in journal) + "\n\n" + context_text
         if env_text:
             context_text = env_text + "\n\n" + context_text
         if action_catalog_text:
