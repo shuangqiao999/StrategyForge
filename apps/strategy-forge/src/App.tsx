@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ForceGraph3D from "react-force-graph-3d";
 
-const API_BASE = import.meta.env.DEV ? "/api/forge" : "http://127.0.0.1:8000/api/forge";
+const API_BASE = import.meta.env.DEV
+  ? "/api/forge"
+  : isTauri()
+    ? "http://127.0.0.1:8000/api/forge"
+    : "/api/forge";
+
+function isTauri(): boolean {
+  return !!(window as any).__TAURI_INTERNALS__;
+}
 
 const lbl: React.CSSProperties = { fontSize: 13, color: "#94a3b8", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%" };
