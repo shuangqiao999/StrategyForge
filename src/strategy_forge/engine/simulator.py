@@ -573,13 +573,6 @@ class SimulationEngine:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
                                      action.agent_id, e)
 
-        # ── 叙事模式人格动态化 (每 REFLECT_INTERVAL 轮触发一次) ──
-        if round_number % self.REFLECT_INTERVAL == 0:
-            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-            _rc = LLMClient()
-            for agent in self.agents:
-                await self._reflect_narrative(agent, round_number, _rc)
-
         # ── 叙事模式环境评估（每轮最多 3 个 Agent 抽样）──
         await self._assess_env_impact(sim_round, round_number)
 
@@ -587,6 +580,43 @@ class SimulationEngine:
         for key in self._narrative_env:
             self._narrative_env[key] = max(0.0, min(100.0,
                 round(self._narrative_env[key] * 0.95, 1)))
+
+        # ── 叙事模式人格动态化（5轮基准 + 事件触发）──
+        # 计算环境变化幅度（任一维度变化 >10 即触发）
+        prev_env = getattr(self, "_prev_narrative_env", None)
+        env_shock = False
+        if prev_env is not None:
+            for k in self._narrative_env:
+                if abs(self._narrative_env[k] - prev_env.get(k, self._narrative_env[k])) > 10:
+                    env_shock = True
+                    break
+        self._prev_narrative_env = dict(self._narrative_env)
+
+        # 检测关系网络变化（新的盟友/对手关系建立或断裂）
+        rel_changed = False
+        prev_rel = getattr(self, "_prev_rel_keys", set())
+        curr_keys = set()
+        for eid, ctx in self._rel_context.items():
+            allies = ctx.get("allies", [])
+            opponents = ctx.get("opponents", [])
+            for a in allies:
+                curr_keys.add((eid, a, "ally"))
+            for o in opponents:
+                curr_keys.add((eid, o, "opponent"))
+        if prev_rel and curr_keys != prev_rel:
+            rel_changed = True
+        self._prev_rel_keys = curr_keys
+
+        should_reflect = (round_number % self.REFLECT_INTERVAL == 0) or env_shock or rel_changed
+        if should_reflect:
+            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+            _rc = LLMClient()
+            trigger_reason = "例行" if round_number % self.REFLECT_INTERVAL == 0 else (
+                "环境剧变" if env_shock else "关系变化")
+            for agent in self.agents:
+                await self._reflect_narrative(agent, round_number, _rc)
+            if not (round_number % self.REFLECT_INTERVAL == 0):
+                self._log("simulation", f"[叙事人格演化] 事件触发反思: {trigger_reason} (R{round_number})")
 
         return sim_round
 
