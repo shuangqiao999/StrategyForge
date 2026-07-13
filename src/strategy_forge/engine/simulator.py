@@ -274,6 +274,14 @@ class SimulationEngine:
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
         self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
+        # 叙事模式环境变量：舆论/抗议/媒体/国际压力/社会分裂（仅叙事模式使用）
+        self._narrative_env: dict[str, float] = {
+            "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
+            "抗议规模": 0.0,     # 0=无 50=局部 100=全城
+            "媒体关注": 20.0,    # 0=无人 50=全国 100=全球
+            "国际压力": 10.0,    # 0=无视 50=关注 100=干预
+            "社会分裂": 30.0,    # 0=团结 50=分歧 100=对立
+        }
         self._spatial_state = None   # cached SpatialState, updated after each module run
         from strategy_forge.core.config import config
 
@@ -572,6 +580,14 @@ class SimulationEngine:
             for agent in self.agents:
                 await self._reflect_narrative(agent, round_number, _rc)
 
+        # ── 叙事模式环境评估（每轮最多 3 个 Agent 抽样）──
+        await self._assess_env_impact(sim_round, round_number)
+
+        # ── 环境自然衰减──
+        for key in self._narrative_env:
+            self._narrative_env[key] = max(0.0, min(100.0,
+                round(self._narrative_env[key] * 0.95, 1)))
+
         return sim_round
 
     async def _reflect_narrative(
@@ -637,6 +653,55 @@ class SimulationEngine:
         except Exception as e:
             logger.debug("[Simulator] 叙事反思失败: %s", e)
 
+    async def _assess_env_impact(self, sim_round: SimulationRound, round_number: int) -> None:
+        """叙事模式环境评估：随机抽 3 个 Agent 用 LLM 评估其动作对环境的影响。"""
+        if not sim_round.actions:
+            return
+        import random as _random
+        sample = sim_round.actions[:]
+        _random.shuffle(sample)
+        sample = sample[:3]
+
+        env_state = "\n".join(
+            f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()
+        )
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient, Message
+        from ._utils import extract_json
+        client = LLMClient()
+        import re as _re
+
+        total_deltas: dict[str, float] = {k: 0.0 for k in self._narrative_env}
+        for action in sample:
+            agent_name = next((a.name for a in self.agents if a.entity_id == action.agent_id), action.agent_id[:8])
+            prompt = (
+                f"你是环境观察者。角色「{agent_name}」执行了「{action.action_type}」：{action.content[:80]}\n\n"
+                f"当前环境：\n{env_state}\n\n"
+                f"该动作对以下 5 个环境变量的影响（每个 -10 到 +10）：\n"
+                f'{{"舆论风向": 0, "抗议规模": 0, "媒体关注": 0, "国际压力": 0, "社会分裂": 0}}\n'
+                f"只输出 JSON。"
+            )
+            try:
+                resp = await client.chat(
+                    [Message(role="user", content=prompt)],
+                    system="你是环境观察者，评估单一动作的环境影响。只输出 JSON。",
+                    temperature=0.2,
+                    max_tokens=60,
+                )
+                data = extract_json(str(resp))
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if k in total_deltas:
+                            delta = max(-10.0, min(10.0, float(v)))
+                            total_deltas[k] += delta
+            except Exception as e:
+                logger.debug("[Simulator] 环境评估失败: %s", e)
+
+        # 限幅：单轮单变量总变化不超过 ±15
+        for k in total_deltas:
+            clamped = max(-15.0, min(15.0, total_deltas[k] / max(1, len(sample))))
+            self._narrative_env[k] = max(0.0, min(100.0,
+                round(self._narrative_env[k] + clamped, 1)))
+
     async def _agent_decide(
         self, client: Any, agent: DeductionAgentProfile, round_number: int
     ) -> SimulationAction | None:
@@ -648,6 +713,14 @@ class SimulationEngine:
             f"{e.get('content', '')[:80]}"
             for e in recent
         ) or "无近期事件"
+
+        # ── 叙事环境上下文（注入到决策 prompt 中）──
+        from .narrative_actions import get_narrative_actions
+        env_lines = [f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()]
+        env_text = "当前社会环境：\n" + "\n".join(env_lines) if not self._quantified else ""
+        action_list = get_narrative_actions(agent.entity_type) if not self._quantified else []
+        action_catalog_text = ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
+                               if action_list and not self._quantified else "")
 
         # ── Path A: 静态原著背景检索 ──
         static_text = "无特定背景"
@@ -691,7 +764,12 @@ class SimulationEngine:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
 
         # ── Strategic Reasoning (primary path) ──
-        world = {"recent_events": recent_text, "static_knowledge": static_text,
+        context_text = recent_text
+        if env_text:
+            context_text = env_text + "\n\n" + context_text
+        if action_catalog_text:
+            context_text = context_text + action_catalog_text
+        world = {"recent_events": context_text, "static_knowledge": static_text,
                   "dynamic_memory": dynamic_text,
                   "relationship_context": self._rel_context.get(agent.entity_id, {}).get("summary", "")}
         try:
@@ -712,7 +790,7 @@ class SimulationEngine:
             messages = [Message(role="user", content=Template(_ACTION_PROMPT).substitute(
                 persona=agent.persona, background=agent.background,
                 goals=", ".join(agent.goals) if agent.goals else "参与互动",
-                round_number=round_number, recent_events=recent_text,
+                round_number=round_number, recent_events=context_text,
                 static_knowledge=static_text, dynamic_memory=dynamic_text,
             ))]
             try:

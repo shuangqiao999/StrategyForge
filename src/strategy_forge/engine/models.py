@@ -79,6 +79,7 @@ class DeductionAgentProfile:
     goals: list[str] = field(default_factory=list)
     relationships: dict[str, str] = field(default_factory=dict)
     system_prompt_extra: str = ""
+    entity_type: str = ""
 
 
 @dataclass

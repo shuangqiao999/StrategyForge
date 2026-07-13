@@ -265,6 +265,7 @@ async def create_agents_from_graph(
             persona=profile_data.get("persona", ""),
             background=profile_data.get("background", ""),
             goals=profile_data.get("goals", []),
+            entity_type=person.get("type", ""),
         )
         agents.append(agent_profile)
 

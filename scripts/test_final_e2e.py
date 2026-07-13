@@ -28,7 +28,7 @@ except Exception:
 
 os.environ["FORGE_PROVIDER"] = "lmstudio"
 os.environ["FORGE_LLM_BASE"] = "http://127.0.0.1:1234/v1"
-os.environ["FORGE_LLM_MODEL"] = "qwen/qwen3.5-9b"
+os.environ["FORGE_LLM_MODEL"] = "google/gemma-4-12b"
 os.environ["FORGE_EMBED_BASE"] = "http://127.0.0.1:1234/v1"
 os.environ["FORGE_EMBED_MODEL"] = "text-embedding-embeddinggemma-300m-qat"
 os.environ["FORGE_MAX_CONCURRENT"] = "1"
