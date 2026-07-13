@@ -1269,7 +1269,7 @@ export default function App() {
                       {snapshot.entities && snapshot.entities.length > 0 && (() => {
                         const entities = snapshot.entities as Array<{ name: string; metrics: Record<string, number>; alive: boolean }>;
                         const allKeys = new Set<string>();
-                        entities.forEach(e => Object.keys(e.metrics).forEach(k => allKeys.add(k)));
+                        entities.forEach(e => Object.keys(e.metrics || {}).forEach(k => allKeys.add(k)));
                         const keys = Array.from(allKeys).slice(0, 6);
                         const thresholds = (snapshot as any)._thresholds as Record<string, number> | undefined;
                         const getStatus = (e: typeof entities[0]) => {
