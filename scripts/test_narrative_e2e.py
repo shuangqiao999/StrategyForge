@@ -23,11 +23,13 @@ try:
 except Exception:
     pass
 
-os.environ["FORGE_PROVIDER"] = "lmstudio"
-os.environ["FORGE_LLM_BASE"] = "http://127.0.0.1:1234/v1"
-os.environ["FORGE_LLM_MODEL"] = "google/gemma-4-12b"
-os.environ["FORGE_EMBED_BASE"] = "http://127.0.0.1:1234/v1"
-os.environ["FORGE_EMBED_MODEL"] = "text-embedding-embeddinggemma-300m-qat"
+_MODEL = os.environ.get("FORGE_LLM_MODEL", "google/gemma-4-12b")
+
+os.environ.setdefault("FORGE_PROVIDER", "lmstudio")
+os.environ.setdefault("FORGE_LLM_BASE", "http://127.0.0.1:1234/v1")
+os.environ.setdefault("FORGE_LLM_MODEL", _MODEL)
+os.environ.setdefault("FORGE_EMBED_BASE", "http://127.0.0.1:1234/v1")
+os.environ.setdefault("FORGE_EMBED_MODEL", "text-embedding-embeddinggemma-300m-qat")
 os.environ["FORGE_MAX_CONCURRENT"] = "1"
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -41,7 +43,7 @@ ROUNDS = 2
 async def main():
     print("=" * 60)
     print(f"  叙事模式专项验证 (narrative, {ROUNDS}轮)")
-    print(f"  LLM: google/gemma-4-12b")
+    print(f"  LLM: {_MODEL}")
     print("=" * 60)
 
     ws = tempfile.mkdtemp(prefix="sf_narr_")
