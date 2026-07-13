@@ -444,17 +444,17 @@ async def generate_report(
         # 上下文超限 → 用减半的 max_tokens 重试一次
         if "400" in str(e) and report_max_tokens > 1500:
             _retry = max(1500, report_max_tokens // 2)
-            log_fn("report", f"LLM 调用失败(可能上下文超限)，重试(max_tokens={_retry})")
+            log_fn("report", f"LLM 调用失败(可能上下文超限)，减半重试(max_tokens={_retry})")
             try:
                 response = await client.chat(messages, system=system, temperature=report_temp,
                                              max_tokens=_retry)
                 content = extract_text(response)
                 report_data = _parse_report_json(content)
             except Exception as e2:
-                logger.warning("[Deduction] Report LLM failed after retry: %s", e2)
+                logger.warning("[Deduction] 报告 LLM 重试失败，使用默认摘要: %s", e2)
                 return default_report
         else:
-            logger.warning("[Deduction] Report LLM failed, using defaults: %s", e)
+            logger.warning("[Deduction] 报告 LLM 调用失败，使用默认摘要: %s", e)
             return default_report
 
     log_fn("report", "报告 LLM 生成完成")
