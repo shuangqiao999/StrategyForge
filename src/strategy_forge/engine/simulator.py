@@ -581,42 +581,57 @@ class SimulationEngine:
             self._narrative_env[key] = max(0.0, min(100.0,
                 round(self._narrative_env[key] * 0.95, 1)))
 
-        # ── 叙事模式人格动态化（5轮基准 + 事件触发）──
-        # 计算环境变化幅度（任一维度变化 >10 即触发）
-        prev_env = getattr(self, "_prev_narrative_env", None)
-        env_shock = False
-        if prev_env is not None:
+        # ── 叙事模式人格动态化（纯事件驱动）──
+        # 每个 Agent 维护独立的上次反思环境基线 + 轮次记录
+        if not hasattr(self, "_reflection_baselines"):
+            self._reflection_baselines: dict[str, dict[str, float]] = {}
+            self._last_reflection_round_n: dict[str, int] = {}
+
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        _rc = LLMClient()
+        for agent in self.agents:
+            eid = agent.entity_id
+            baseline = self._reflection_baselines.get(eid, dict(self._narrative_env))
+            last_r = self._last_reflection_round_n.get(eid, 0)
+            reason = None
+
+            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >15）
             for k in self._narrative_env:
-                if abs(self._narrative_env[k] - prev_env.get(k, self._narrative_env[k])) > 10:
-                    env_shock = True
+                delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
+                if abs(delta) > 15:
+                    reason = f"环境剧变({k}{delta:+.0f})"
                     break
-        self._prev_narrative_env = dict(self._narrative_env)
 
-        # 检测关系网络变化（新的盟友/对手关系建立或断裂）
-        rel_changed = False
-        prev_rel = getattr(self, "_prev_rel_keys", set())
-        curr_keys = set()
-        for eid, ctx in self._rel_context.items():
-            allies = ctx.get("allies", [])
-            opponents = ctx.get("opponents", [])
-            for a in allies:
-                curr_keys.add((eid, a, "ally"))
-            for o in opponents:
-                curr_keys.add((eid, o, "opponent"))
-        if prev_rel and curr_keys != prev_rel:
-            rel_changed = True
-        self._prev_rel_keys = curr_keys
+            # 条件2：该 Agent 的关系网络发生变化
+            if reason is None:
+                prev_rels = getattr(self, "_prev_rel_map", {})
+                curr_rels = self._rel_context.get(eid, {})
+                prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
+                curr_allies = set(curr_rels.get("allies", []))
+                prev_opps = set(prev_rels.get(eid, {}).get("opponents", []))
+                curr_opps = set(curr_rels.get("opponents", []))
+                if prev_allies != curr_allies or prev_opps != curr_opps:
+                    reason = "关系网络变化"
 
-        should_reflect = (round_number % self.REFLECT_INTERVAL == 0) or env_shock or rel_changed
-        if should_reflect:
-            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-            _rc = LLMClient()
-            trigger_reason = "例行" if round_number % self.REFLECT_INTERVAL == 0 else (
-                "环境剧变" if env_shock else "关系变化")
-            for agent in self.agents:
+            # 条件3：长时间无反思保护（超过 8 轮）
+            if reason is None and (round_number - last_r) > 8:
+                reason = "长期无反思保护"
+
+            if reason:
                 await self._reflect_narrative(agent, round_number, _rc)
-            if not (round_number % self.REFLECT_INTERVAL == 0):
-                self._log("simulation", f"[叙事人格演化] 事件触发反思: {trigger_reason} (R{round_number})")
+                self._reflection_baselines[eid] = dict(self._narrative_env)
+                self._last_reflection_round_n[eid] = round_number
+                self._log("simulation",
+                    f"[叙事人格演化] {agent.name}: {reason} (R{round_number})")
+
+        # 保存本轮关系网络快照供下轮对比
+        if not hasattr(self, "_prev_rel_map"):
+            self._prev_rel_map: dict = {}
+        for eid, ctx in self._rel_context.items():
+            self._prev_rel_map[eid] = {
+                "allies": list(ctx.get("allies", [])),
+                "opponents": list(ctx.get("opponents", [])),
+            }
 
         return sim_round
 
