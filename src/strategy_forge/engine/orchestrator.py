@@ -401,30 +401,34 @@ class DeductionOrchestrator:
                 logger.warning("[Orchestrator] 情报整理失败，使用全部实体: %s", e)
                 self._intel_list = []
         else:
-            self._log("graph", "叙事模式：跳过情报过滤，保留全量实体")
-            # 叙事模式基础别名合并：短名是长名的子串 → 并入长名
+            # 叙事模式：用 NarrativeSorter (LLM) 做故事角色分类
+            self._log("graph", "叙事模式：故事编辑分类实体...")
             try:
+                from strategy_forge.engine.narrative_sorter import sort_narrative_entities
+                from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
-                merged_total = 0
-                for i, short_name in enumerate(entity_names):
-                    if len(short_name) < 3:
-                        continue
-                    for long_name in entity_names:
-                        if short_name == long_name or short_name not in (entity_names):
-                            break
-                        if len(long_name) > len(short_name) and short_name in long_name:
+                self._intel_list = await sort_narrative_entities(
+                    self.session.source_material, entity_names, LLMClient())
+                if self._intel_list:
+                    active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
+                    passive = len(self._intel_list) - active
+                    self._log("graph", f"故事编辑: {len(self._intel_list)} 实体 → {active} 角色 + {passive} 背景")
+                    # 别名合并
+                    merged_total = 0
+                    for e in self._intel_list:
+                        aliases = e.get("aliases") or []
+                        if aliases:
                             try:
-                                merged_total += self.graph.merge_alias_nodes(long_name, [short_name])
-                                # Remove from list so we don't double-merge
-                                entity_names = [n for n in entity_names if n != short_name]
-                            except Exception:
-                                pass
-                if merged_total:
-                    e_count2 = self.graph.count_entities()
-                    self.store.update(self.session.id, entity_count=e_count2)
-                    self._log("graph", f"叙事模式别名合并: 并入 {merged_total} 个别名节点，实体数→{e_count2}")
+                                merged_total += self.graph.merge_alias_nodes(e.get("name", ""), aliases)
+                            except Exception as ex:
+                                logger.debug("[Orchestrator] 别名合并失败 %s: %s", e.get("name"), ex)
+                    if merged_total:
+                        e_count2 = self.graph.count_entities()
+                        self.store.update(self.session.id, entity_count=e_count2)
+                        self._log("graph", f"别名合并: 并入 {merged_total} 个别名节点，实体数→{e_count2}")
             except Exception as e:
-                logger.debug("[Orchestrator] 叙事模式别名合并失败: %s", e)
+                logger.warning("[Orchestrator] 叙事模式分类失败: %s", e)
+                self._intel_list = []
 
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")
