@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from string import Template
 from typing import Any
@@ -418,6 +419,14 @@ async def generate_report(
 
     messages = [Message(role="user", content=prompt_str)]
 
+    # ── 中文感知 Token 估算 + 上下文窗口安全上限 ──
+    _cn = len(re.findall(r"[\u4e00-\u9fff]", prompt_str))
+    _input_est = _cn + max(1, (len(prompt_str) - _cn) // 3)
+    _ctx_limit = 7800 if is_narrative else 12800  # gemma-4-12b=8k, 量化可用更大模型
+    _safe_max = max(2000, _ctx_limit - _input_est - 200)
+    report_max_tokens = min(config.deduction_report_max_tokens, _safe_max)
+    log_fn("report", f"Token估算: input≈{_input_est} max_tokens={report_max_tokens}")
+
     default_report = DeductionReport(
         session_id=session.id,
         summary="推演完成，请查看详细事件记录。",
@@ -428,12 +437,25 @@ async def generate_report(
 
     try:
         response = await client.chat(messages, system=system, temperature=report_temp,
-                                     max_tokens=config.deduction_report_max_tokens)
+                                     max_tokens=report_max_tokens)
         content = extract_text(response)
         report_data = _parse_report_json(content)
     except Exception as e:
-        logger.warning("[Deduction] Report LLM failed, using defaults: %s", e)
-        return default_report
+        # 上下文超限 → 用减半的 max_tokens 重试一次
+        if "400" in str(e) and report_max_tokens > 1500:
+            _retry = max(1500, report_max_tokens // 2)
+            log_fn("report", f"LLM 调用失败(可能上下文超限)，重试(max_tokens={_retry})")
+            try:
+                response = await client.chat(messages, system=system, temperature=report_temp,
+                                             max_tokens=_retry)
+                content = extract_text(response)
+                report_data = _parse_report_json(content)
+            except Exception as e2:
+                logger.warning("[Deduction] Report LLM failed after retry: %s", e2)
+                return default_report
+        else:
+            logger.warning("[Deduction] Report LLM failed, using defaults: %s", e)
+            return default_report
 
     log_fn("report", "报告 LLM 生成完成")
 
