@@ -94,6 +94,37 @@ $turning_points
 只返回纯 JSON，不要 markdown 代码块，不要注释。
 - 正文中禁止出现"X"、"某方"等模糊占位符，所有战略判断必须指明具体行为体名称。"""
 
+_REPORT_PROMPT_NARRATIVE = """你是一位叙事文学作家。基于以下角色档案、事件序列和行动时序，将推演过程改写为一篇有情感张力、有人物弧光的故事化叙事。
+
+## 写作要求
+1. 以故事文体写作——有场景氛围、有心理描写、有情感落点。不是分析报告，不是简报，不是总结。
+2. 按时间线推进叙事，关键事件作为情节节点。重要的语义召回事件必须嵌入故事中。
+3. 重点刻画角色的心理变化与关系演化——谁在压力下崩溃、谁暗中结盟、谁背叛了谁、谁的信仰动摇了。
+4. 对话与内心独白可以虚构，但必须基于下方提供的角色人格档案和事件事实。
+5. 结尾应有收束感——可以开放式，但要有情感落点，让读者感受到故事的主题。
+6. $output_length 字左右。
+
+## 角色档案
+$agent_overview
+
+## 关键事件序列（按轮次）
+$key_events
+
+## 行动时序
+$action_timeline
+
+## 语义召回关键事件（跨轮重要事件，必须嵌入）
+$key_recall
+
+## 输出 JSON（纯 JSON，不要 markdown）
+{
+  "narrative": "故事文本（按时间线推进，有场景、有心理、有弧光）",
+  "character_arcs": ["角色A: 从天真走向冷酷", "角色B: 在孤独中坚守信念", "角色C: 被背叛后黑化"],
+  "conclusion": "故事收束（150字内，情感落点，不一定需要Happy Ending）"
+}
+
+只返回纯 JSON，不要 markdown 代码块。"""
+
 
 def _level_label(v: float) -> str:
     """将指标值映射为定性档位（不输出具体数值，避免过度戏剧化极端值）。"""
@@ -347,22 +378,45 @@ async def generate_report(
             pass
     quantified_context = _build_quantified_summary(rounds, states, _thresholds)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
-    system = "你是推演分析专家，撰写自然语言推演报告。只输出 JSON。"
     numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-20:])]
-    messages = [Message(role="user", content=Template(_REPORT_PROMPT).substitute(
-        title=session.title or "推演会话",
-        domain=domain_text,
-        immutable_goals=immutable_goals,
-        agent_count=session.agent_count,
-        round_count=session.current_round,
-        agent_overview=agent_overview,
-        key_relations=key_relations,
-        key_events="\n".join(numbered),
-        action_timeline=action_timeline,
-        quantified_context=quantified_context,
-        causal_attribution=causal_attribution,
-        turning_points=turning_points,
-    ))]
+
+    # ── 模式选择：叙事模式 vs 量化模式 ──
+    is_narrative = states is None or len(states) == 0
+    if is_narrative:
+        # 叙事模式：故事化报告，temperature 更高鼓励创造性
+        agent_count = session.agent_count
+        output_len = max(2000, min(8000, agent_count * 300 + len(key_events) * 80))
+        # 语义召回事件单独注入，帮助 LLM 识别跨轮关键情节
+        recall_events = [e for e in key_events if "[语义召回]" in e]
+        non_recall = [e for e in key_events if "[语义召回]" not in e]
+        prompt_str = Template(_REPORT_PROMPT_NARRATIVE).substitute(
+            output_length=str(output_len),
+            agent_overview=agent_overview,
+            key_events="\n".join(non_recall),
+            action_timeline=action_timeline,
+            key_recall="\n".join(recall_events) if recall_events else "（无）",
+        )
+        system = "你是叙事文学作家，撰写故事化推演叙事。只输出 JSON。"
+        report_temp = 0.75
+    else:
+        prompt_str = Template(_REPORT_PROMPT).substitute(
+            title=session.title or "推演会话",
+            domain=domain_text,
+            immutable_goals=immutable_goals,
+            agent_count=session.agent_count,
+            round_count=session.current_round,
+            agent_overview=agent_overview,
+            key_relations=key_relations,
+            key_events="\n".join(numbered),
+            action_timeline=action_timeline,
+            quantified_context=quantified_context,
+            causal_attribution=causal_attribution,
+            turning_points=turning_points,
+        )
+        system = "你是推演分析专家，撰写自然语言推演报告。只输出 JSON。"
+        report_temp = 0.4
+
+    messages = [Message(role="user", content=prompt_str)]
 
     default_report = DeductionReport(
         session_id=session.id,
@@ -373,7 +427,7 @@ async def generate_report(
     )
 
     try:
-        response = await client.chat(messages, system=system, temperature=0.4,
+        response = await client.chat(messages, system=system, temperature=report_temp,
                                      max_tokens=config.deduction_report_max_tokens)
         content = extract_text(response)
         report_data = _parse_report_json(content)
@@ -424,7 +478,7 @@ async def generate_report(
         risk_alerts=normalized_risks,
         recommendations=normalized_recs,
         causal_summary=report_data.get("causal_summary", []),
-        stage_narratives=report_data.get("stage_narratives", []),
+        stage_narratives=report_data.get("stage_narratives", []) or report_data.get("character_arcs", []),
         deviation_analysis=report_data.get("deviation_analysis", []),
         conclusion=conclusion,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},

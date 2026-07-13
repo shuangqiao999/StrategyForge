@@ -565,7 +565,69 @@ class SimulationEngine:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
                                      action.agent_id, e)
 
+        # ── 叙事模式人格动态化 (每 REFLECT_INTERVAL 轮触发一次) ──
+        if round_number % self.REFLECT_INTERVAL == 0:
+            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+            _rc = LLMClient()
+            for agent in self.agents:
+                await self._reflect_narrative(agent, round_number, _rc)
+
         return sim_round
+
+    async def _reflect_narrative(
+        self, agent: DeductionAgentProfile, round_number: int, client: Any,
+    ) -> None:
+        """叙事模式人格反思：基于事件历史而非指标数据触发性格演化。"""
+        from strategy_forge.core.llm_client import Message
+        from ._utils import extract_text
+
+        my_events = [
+            e for e in self._event_history[-20:]
+            if e.get("agent") == agent.entity_id or e.get("agent_name") == agent.name
+        ]
+        if not my_events:
+            return
+        events_text = "\n".join(
+            f"- [R{e.get('round','?')}] {e.get('content','')[:100]}"
+            for e in my_events[-8:]
+        )
+        prompt = (
+            f"你是 {agent.name} 的潜意识。回顾你近期的行动经历，"
+            f"判断你的性格是否需要微调。\n\n"
+            f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
+            f"## 你现有的行为准则\n{agent.system_prompt_extra or '（无，完全依据核心人格）'}\n\n"
+            f"## 近期行动经历\n{events_text}\n\n"
+            f"## 任务\n"
+            f"根据以上经历，判断是否需要添加一条新的行为准则（或修正旧准则），"
+            f"使你的行为更符合当前的处境。\n"
+            f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
+            f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
+            f"- 仅添加/修正，不删除原有准则。\n"
+            f"- 示例：\"遭受背叛后更谨慎选择盟友\" \"危急时刻敢于孤注一掷\"\n"
+            f"- 何时输出\"无需调整\"：近期经历与人格一致、现有准则已覆盖行为模式\n"
+            f"\n只输出准则本身或\"无需调整\"，不要解释。"
+        )
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
+                temperature=0.3,
+                max_tokens=80,
+            )
+            text = extract_text(resp).strip()
+            if not text or "无需调整" in text or len(text) < 2:
+                return
+            old_extra = agent.system_prompt_extra
+            if old_extra and text not in old_extra:
+                agent.system_prompt_extra = f"{old_extra}；{text}"
+            elif not old_extra:
+                agent.system_prompt_extra = text
+            else:
+                return
+            self._log("simulation",
+                       f"[叙事人格演化] {agent.name} 新增准则: {text} (R{round_number})")
+        except Exception as e:
+            logger.debug("[Simulator] 叙事反思失败: %s", e)
 
     async def _agent_decide(
         self, client: Any, agent: DeductionAgentProfile, round_number: int
