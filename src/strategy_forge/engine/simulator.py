@@ -637,6 +637,7 @@ class SimulationEngine:
         sim_round.state_delta["snapshot"] = {
             "round": round_number,
             "entity_count": len(self.agents),
+            "_thresholds": {},  # 空阈值避免前端判定全部"已淘汰"
             "entities": [
                 {"name": a.name, "alive": True}
                 for a in self.agents

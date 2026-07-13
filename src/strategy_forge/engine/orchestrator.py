@@ -602,6 +602,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             pre_goals=getattr(self, "_pre_goals", []),
             states=getattr(self, "_states", None),
+            thresholds=self._rule_engine.pack.get("thresholds", {}) if self._rule_engine else None,
         )
         self.session.report = report
 

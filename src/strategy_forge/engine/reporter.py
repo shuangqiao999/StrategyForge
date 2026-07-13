@@ -234,6 +234,7 @@ async def generate_report(
     preprocessor: Any = None,
     pre_goals: list[str] | None = None,
     states: dict[str, Any] | None = None,
+    thresholds: dict[str, float] | None = None,
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
@@ -366,17 +367,7 @@ async def generate_report(
             pass
 
     client = LLMClient()
-    # Extract thresholds from states if available
-    _thresholds: dict[str, float] = {}
-    if states and hasattr(next(iter(states.values())), "metrics"):
-        try:
-            from strategy_forge.engine.rule_engine import RuleEngine
-        except Exception:
-            pass
-        else:
-            # thresholds come from the domain rule pack; pass them through
-            # to _build_quantified_summary for elimination-line context
-            pass
+    _thresholds: dict[str, float] = thresholds or {}
     quantified_context = _build_quantified_summary(rounds, states, _thresholds)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
     numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-20:])]
