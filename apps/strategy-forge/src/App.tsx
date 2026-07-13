@@ -1056,7 +1056,9 @@ export default function App() {
                       {/* ── 推演叙事报告 ── */}
                       {report.summary && (
                         <div style={{ marginBottom: 24, background: "#0f172a", borderRadius: 8, padding: 16, borderLeft: "3px solid #3b82f6" }}>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: "#60a5fa", marginBottom: 12 }}>📋 推演报告</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#60a5fa", marginBottom: 12 }}>
+                            {report.quantified ? "📋 推演报告" : "📖 故事叙事"}
+                          </div>
                           <div style={{ lineHeight: 2, whiteSpace: "pre-wrap", color: "#e2e8f0" }}>
                             {report.summary}
                           </div>
@@ -1107,26 +1109,38 @@ export default function App() {
                         </details>
                       )}
 
-                      {/* ── 三、时序因果叙事 ── */}
+                      {/* ── 三、时序因果叙事 / 角色弧光 ── */}
                       {report.stage_narratives && report.stage_narratives.length > 0 && (
                         <details open style={{ marginBottom: 18 }}>
                           <summary style={{ fontSize: 14, fontWeight: 700, color: "#a78bfa", cursor: "pointer", borderLeft: "3px solid #a78bfa", paddingLeft: 8, marginBottom: 6 }}>
-                            时序因果叙事（{report.stage_narratives.length} 阶段）
+                            {typeof report.stage_narratives[0] === "string"
+                              ? `🎭 角色弧光（${report.stage_narratives.length} 条）`
+                              : `时序因果叙事（${report.stage_narratives.length} 阶段）`}
                           </summary>
-                          {report.stage_narratives.map((s: any, i: number) => (
-                            <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "2px solid #a78bfa" }}>
-                              <div style={{ fontWeight: 600, color: "#c4b5fd", marginBottom: 6 }}>
-                                <span style={{ background: "#312e81", padding: "1px 8px", borderRadius: 4, fontSize: 11, marginRight: 8 }}>
-                                  {s.round_range || `第${(i*3+1)}-${(i+1)*3}轮`}
-                                </span>
-                                {s.stage || `阶段${i+1}`}
-                              </div>
-                              {s.start_state && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, lineHeight: 1.6 }}>◉ 起始状态：{s.start_state}</div>}
-                              {s.key_decisions && <div style={{ fontSize: 12, color: "#e2e8f0", marginBottom: 4, lineHeight: 1.6 }}>◉ 核心决策：{s.key_decisions}</div>}
-                              {s.causal_logic && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 4, lineHeight: 1.6 }}>◉ 因果逻辑：{s.causal_logic}</div>}
-                              {s.end_state && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>◉ 阶段终点：{s.end_state}</div>}
+                          {typeof report.stage_narratives[0] === "string" ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {(report.stage_narratives as unknown as string[]).map((arc: string, i: number) => (
+                                <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #a78bfa", fontSize: 13, lineHeight: 1.7, color: "#e2e8f0" }}>
+                                  {arc}
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          ) : (
+                            (report.stage_narratives as any[]).map((s: any, i: number) => (
+                              <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "2px solid #a78bfa" }}>
+                                <div style={{ fontWeight: 600, color: "#c4b5fd", marginBottom: 6 }}>
+                                  <span style={{ background: "#312e81", padding: "1px 8px", borderRadius: 4, fontSize: 11, marginRight: 8 }}>
+                                    {s.round_range || `第${(i*3+1)}-${(i+1)*3}轮`}
+                                  </span>
+                                  {s.stage || `阶段${i+1}`}
+                                </div>
+                                {s.start_state && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, lineHeight: 1.6 }}>◉ 起始状态：{s.start_state}</div>}
+                                {s.key_decisions && <div style={{ fontSize: 12, color: "#e2e8f0", marginBottom: 4, lineHeight: 1.6 }}>◉ 核心决策：{s.key_decisions}</div>}
+                                {s.causal_logic && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 4, lineHeight: 1.6 }}>◉ 因果逻辑：{s.causal_logic}</div>}
+                                {s.end_state && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>◉ 阶段终点：{s.end_state}</div>}
+                              </div>
+                            ))
+                          )}
                         </details>
                       )}
 
@@ -1163,8 +1177,8 @@ export default function App() {
                         </details>
                       )}
 
-                      {/* ── 附录：关键事件 ── */}
-                      {report.key_events && report.key_events.length > 0 && (
+                      {/* ── 附录：关键事件（仅量化模式）── */}
+                      {report.quantified && report.key_events && report.key_events.length > 0 && (
                         <details style={{ marginBottom: 18 }}>
                           <summary style={{ fontSize: 14, fontWeight: 700, color: "#64748b", cursor: "pointer", borderLeft: "3px solid #475569", paddingLeft: 8, marginBottom: 6 }}>
                             附录 · 关键事件 ({report.key_events.length} 条)
