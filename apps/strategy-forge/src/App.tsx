@@ -1123,15 +1123,11 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              {(report.stage_narratives as unknown as string[]).map((arc: string, i: number) => (
-                                <div key={i} style={{ background: "#0f172a", borderRadius: 6, padding: "8px 12px", borderLeft: "2px solid #a78bfa", fontSize: 13, lineHeight: 1.7, color: "#e2e8f0" }}>
-                                  {arc}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            (report.stage_narratives as any[]).map((s: any, i: number) => (
+                          <details open style={{ marginBottom: 18 }}>
+                            <summary style={{ fontSize: 14, fontWeight: 700, color: "#a78bfa", cursor: "pointer", borderLeft: "3px solid #a78bfa", paddingLeft: 8, marginBottom: 6 }}>
+                              时序因果叙事（{report.stage_narratives.length} 阶段）
+                            </summary>
+                            {(report.stage_narratives as any[]).map((s: any, i: number) => (
                               <div key={i} style={{ marginBottom: 12, background: "#0f172a", borderRadius: 6, padding: 10, borderLeft: "2px solid #a78bfa" }}>
                                 <div style={{ fontWeight: 600, color: "#c4b5fd", marginBottom: 6 }}>
                                   <span style={{ background: "#312e81", padding: "1px 8px", borderRadius: 4, fontSize: 11, marginRight: 8 }}>
@@ -1144,9 +1140,9 @@ export default function App() {
                                 {s.causal_logic && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 4, lineHeight: 1.6 }}>◉ 因果逻辑：{s.causal_logic}</div>}
                                 {s.end_state && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>◉ 阶段终点：{s.end_state}</div>}
                               </div>
-                            ))
-                          )}
-                        </details>
+                            ))}
+                          </details>
+                        )
                       )}
 
                       {/* ── 四、偏离分析 ── */}
