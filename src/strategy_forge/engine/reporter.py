@@ -386,7 +386,7 @@ async def generate_report(
         prompt_str = Template(_REPORT_PROMPT_NARRATIVE).substitute(
             output_length=str(output_len),
             agent_overview=agent_overview,
-            key_events="\n".join(non_recall),
+            key_events="\n".join(non_recall[-30:]),
             action_timeline=action_timeline,
             key_recall="\n".join(recall_events) if recall_events else "（无）",
         )
