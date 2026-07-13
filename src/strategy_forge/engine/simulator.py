@@ -633,6 +633,21 @@ class SimulationEngine:
                 "opponents": list(ctx.get("opponents", [])),
             }
 
+        # ── 叙事模式态势快照（供前端 dashboard tab 使用）──
+        sim_round.state_delta["snapshot"] = {
+            "round": round_number,
+            "entity_count": len(self.agents),
+            "entities": [
+                {"name": a.name, "alive": True}
+                for a in self.agents
+            ],
+            "recent": [
+                {"agent": e.get("agent_name", ""), "action": e.get("action", ""),
+                 "content": e.get("content", "")[:80], "round": e.get("round", 0)}
+                for e in self._event_history[-8:]
+            ],
+        }
+
         return sim_round
 
     async def _reflect_narrative(
