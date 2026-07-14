@@ -196,6 +196,15 @@ class StrategicReasoner:
         # 2. Build trust summary
         trust = self._trust_summary_for(agent.entity_id)
 
+        # 2.5 全局目标块：附加"推动收敛"指令，避免 agent 无方向即兴表演
+        if self._immutable_goals:
+            goals_block = "\n".join(f"- {g}" for g in self._immutable_goals) + (
+                "\n注意：上述目标是本次推演要回答的核心问题。每个候选策略都应实质性推动局势向"
+                "\"该问题可被明确判定\"的方向演进——扩大或削弱关键方的控制力、迫使摊牌、打破僵局。"
+                "避免与核心问题无关的原地观望或重复性表态。")
+        else:
+            goals_block = "No immutable goals — act freely based on your profile."
+
         # 3. Generate candidates via LLM
         recent = world_state.get("recent_events", "None")
         system = "你是战略顾问，只输出 JSON 数组。"
@@ -203,7 +212,7 @@ class StrategicReasoner:
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,
             agent_name=agent.name,
-            immutable_goals="\n".join(f"- {g}" for g in self._immutable_goals) if self._immutable_goals else "No immutable goals — act freely based on your profile.",
+            immutable_goals=goals_block,
             user_intervention=user_cmd,
             persona=agent.persona,
             background=agent.background,
@@ -252,6 +261,20 @@ class StrategicReasoner:
             if agent.goals and any(g[:4] in c.get("content", "") or g[:4] in c.get("rationale", "")
                                   for g in agent.goals):
                 score += 0.2
+            # Global immutable-goal alignment bonus: reward candidates whose
+            # rationale engages with the core deduction question's keywords
+            if self._immutable_goals:
+                imm_kws = {w for g in self._immutable_goals
+                           for w in re.findall(r"[\u4e00-\u9fff]{2,4}|[A-Za-z]{3,}", g)}
+                text = c.get("content", "") + c.get("rationale", "")
+                hits = sum(1 for kw in imm_kws if kw in text)
+                if hits >= 2:
+                    score += 0.4
+                elif hits == 1:
+                    score += 0.2
+            # Penalize passive observation when a core question awaits resolution
+            if self._immutable_goals and c.get("action") == "observe":
+                score -= 0.2
             # Trust awareness: prefer interacting with trusted agents
             target = c.get("target", "")
             if target and self.get_trust(agent.entity_id, target) > 1.0:

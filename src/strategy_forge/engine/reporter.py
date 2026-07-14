@@ -97,12 +97,15 @@ $turning_points
 
 _REPORT_PROMPT_NARRATIVE = """你是一位叙事文学作家。基于以下角色档案、事件序列和行动时序，将推演过程改写为一篇有情感张力、有人物弧光的故事化叙事。
 
+## 推演核心问题（最高优先级——故事必须回答它）
+$immutable_goals
+
 ## 写作要求
 1. 以故事文体写作——有场景氛围、有心理描写、有情感落点。不是分析报告，不是简报，不是总结。
 2. 不要逐轮罗列动作。按时间跳跃叙述关键场景——只写转折点、高潮、关键时刻，中间的过程一笔带过或完全省略。
 3. 重点刻画角色的心理变化与关系演化——谁在压力下崩溃、谁暗中结盟、谁背叛了谁、谁的信仰动摇了。
 4. 对话与内心独白可以虚构，但必须基于下方提供的角色人格档案和事件事实。
-5. 结尾应有收束感——可以开放式，但要有情感落点，让读者感受到故事的主题。
+5. **结局必须对「推演核心问题」给出明确判定**：基于事件序列中各角色的实际行动、结盟与得失，推断出最合理的答案（如"谁最终掌权""哪一方胜出"），并在故事结尾以具体情节呈现这个结果。禁止用"未来充满不确定性""斗争仍未结束"等模糊表述回避判定。若局势确实胶着，也必须指出当前最占优的一方及其决定性筹码。
 6. $output_length 字左右。
 7. 避免宏大叙事词汇。禁止使用"胜利""灵魂""升华""永恒""神圣""注定""命运的齿轮"等过度拔高的词。保持克制、冷静的文学语调，像好的新闻特稿而非史诗。
 8. 同一角色最多出现 3~4 个关键场景。如果角色在多个轮次做了类似的事，只写最有张力的那一次，不要反复描述同一行为模式。
@@ -121,9 +124,9 @@ $key_recall
 
 ## 输出 JSON（纯 JSON，不要 markdown）
 {
-  "narrative": "故事文本（按时间线推进，有场景、有心理、有弧光）",
+  "narrative": "故事文本（按时间线推进，有场景、有心理、有弧光，结尾以具体情节呈现核心问题的答案）",
   "character_arcs": ["角色A: 从天真走向冷酷", "角色B: 在孤独中坚守信念", "角色C: 被背叛后黑化"],
-  "conclusion": "故事收束（150字内，情感落点，不一定需要Happy Ending）"
+  "conclusion": "故事收束（200字内）。第一句必须直接回答「推演核心问题」——点名具体的人/方及其凭借的关键筹码；随后给出情感落点。禁止回避式结论。"
 }
 
 只返回纯 JSON，不要 markdown 代码块。"""
@@ -237,6 +240,7 @@ async def generate_report(
     pre_goals: list[str] | None = None,
     states: dict[str, Any] | None = None,
     thresholds: dict[str, float] | None = None,
+    goal_resolution: str = "",
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
@@ -372,6 +376,8 @@ async def generate_report(
     _thresholds: dict[str, float] = thresholds or {}
     quantified_context = _build_quantified_summary(rounds, states, _thresholds)
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
+    if goal_resolution:
+        immutable_goals += f"（收敛判定：{goal_resolution}）"
     numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-20:])]
 
     # ── 模式选择：叙事模式 vs 量化模式 ──
@@ -383,8 +389,13 @@ async def generate_report(
         # 语义召回事件单独注入，帮助 LLM 识别跨轮关键情节
         recall_events = [e for e in key_events if "[语义召回]" in e]
         non_recall = [e for e in key_events if "[语义召回]" not in e]
+        narrative_goals = ("；".join(pre_goals) if pre_goals
+                           else "（用户未指定核心问题——结局需明确交代各主要角色的最终结局与格局归属，不得含糊收尾）")
+        if goal_resolution:
+            narrative_goals += f"\n推演中期裁判已判定收敛结果（结局必须与之一致）：{goal_resolution}"
         prompt_str = Template(_REPORT_PROMPT_NARRATIVE).substitute(
             output_length=str(output_len),
+            immutable_goals=narrative_goals,
             agent_overview=agent_overview,
             key_events="\n".join(non_recall[-30:]),
             action_timeline=action_timeline,

@@ -57,6 +57,7 @@ class DeductionOrchestrator:
         self._enable_narrate: bool = True
         self._enable_multi_action: bool = False
         self._max_actions: int = 3
+        self._goal_resolution: str = ""
 
     async def run(self) -> DeductionSession:
         import time as _time
@@ -561,6 +562,10 @@ class DeductionOrchestrator:
 
         rounds: list[SimulationRound] = []
         start_rnd = self._resume_start_round + 1
+        pre_goals = getattr(self, "_pre_goals", []) or []
+        # 设定轮数是上限而非必跑条件：每 conv_interval 轮判定一次目标是否已显现，
+        # 已显现则提前收束，不再继续跑满剩余轮数
+        conv_interval = max(3, min(10, total_rounds // 10))
         for rnd in range(start_rnd, total_rounds + 1):
             if self._cancel is not None and self._cancel.is_set():
                 self._log("simulation", "推演收到取消信号，提前终止")
@@ -581,6 +586,17 @@ class DeductionOrchestrator:
             if stats:
                 self.store.update(self.session.id,
                                   token_json=_json.dumps(stats, ensure_ascii=False))
+            # ── 目标收敛检查：每 conv_interval 轮判定核心问题是否已可明确回答 ──
+            if (pre_goals and rnd < total_rounds and rnd >= conv_interval
+                    and rnd % conv_interval == 0):
+                resolved, verdict = await self._check_goal_convergence(rounds)
+                if resolved:
+                    self._goal_resolution = verdict
+                    self._log("simulation",
+                              f"目标收敛检查(第{rnd}轮): 核心问题已有明确答案，提前收束 — {verdict[:80]}")
+                    break
+                if verdict:
+                    self._log("simulation", f"目标收敛检查(第{rnd}轮): 尚未收敛 — {verdict[:60]}")
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "
@@ -588,6 +604,50 @@ class DeductionOrchestrator:
         self.store.update(self.session.id,
                           status=SessionStatus.REPORTING.value,
                           phase=DeductionPhase.REPORT.value)
+
+    async def _check_goal_convergence(self, rounds: list[SimulationRound]) -> tuple[bool, str]:
+        """用 LLM 判定推演核心问题是否已可基于事件给出明确答案。
+
+        返回 (resolved, verdict)。resolved=True 时 verdict 为答案+依据；
+        False 时 verdict 为缺失的决定性条件（可为空）。判定失败一律视为未收敛。
+        """
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        from strategy_forge.core.llm_client import Message
+
+        from ._utils import extract_json, extract_text
+
+        name_map = {a.entity_id: a.name for a in getattr(self, "_agents", [])}
+        events: list[str] = []
+        for r in rounds[-12:]:
+            for act in r.actions:
+                who = name_map.get(act.agent_id, act.agent_id[:8])
+                events.append(f"[轮{r.round_number}] {who}: {act.content[:60]}")
+        if not events:
+            return False, ""
+
+        goals_text = "；".join(getattr(self, "_pre_goals", []))
+        prompt = (
+            "你是推演裁判。基于近期事件，判断推演核心问题是否已经可以给出明确、可辩护的答案。\n"
+            "只有当事件序列显示出决定性的力量对比变化（如某方掌握了压倒性筹码、对手被淘汰或屈服）时才判定为已收敛；"
+            "局势仍胶着、各方仅在试探或表态时判定为未收敛。\n\n"
+            f"## 核心问题\n{goals_text}\n\n"
+            "## 近期事件\n" + "\n".join(events[-40:]) + "\n\n"
+            '## 输出 JSON（纯 JSON）\n'
+            '{"resolved": true或false, "verdict": "若已收敛：明确答案+关键依据(80字内)；'
+            '若未收敛：还缺什么决定性事件(40字内)"}'
+        )
+        try:
+            client = LLMClient()
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是推演收敛判定裁判，只输出 JSON。",
+                temperature=0.2, max_tokens=300)
+            data = extract_json(extract_text(resp))
+            if isinstance(data, dict):
+                return bool(data.get("resolved")), str(data.get("verdict", ""))[:200]
+        except Exception as e:
+            logger.debug("[Orchestrator] 目标收敛判定失败(忽略): %s", e)
+        return False, ""
 
     async def _phase5_report(self) -> None:
         _current_phase.set("report")
@@ -603,6 +663,7 @@ class DeductionOrchestrator:
             pre_goals=getattr(self, "_pre_goals", []),
             states=getattr(self, "_states", None),
             thresholds=self._rule_engine.pack.get("thresholds", {}) if self._rule_engine else None,
+            goal_resolution=getattr(self, "_goal_resolution", ""),
         )
         self.session.report = report
 
