@@ -289,7 +289,7 @@ async def create_agents_from_graph(
             json.dumps(agent_profile.goals, ensure_ascii=False),
         )
 
-        log_fn("agents", f"  [{i+1}/{max_agents}] {person_name}: {agent_profile.persona[:80]}...")
+        log_fn("agents", f"  [{i+1}/{max_agents}] {person_name}: {agent_profile.persona}")
 
     return agents
 

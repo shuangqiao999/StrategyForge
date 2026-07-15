@@ -134,7 +134,7 @@ class DeductionEngine:
         if ev:
             ev.set()
 
-    def get_logs(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
+    def get_logs(self, session_id: str, limit: int = 0) -> list[dict[str, Any]]:
         return self.session_store.get_logs(session_id, limit=limit)
 
     def _ensure_event(self, session_id: str) -> asyncio.Event:

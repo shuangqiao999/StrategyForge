@@ -593,10 +593,10 @@ class DeductionOrchestrator:
                 if resolved:
                     self._goal_resolution = verdict
                     self._log("simulation",
-                              f"目标收敛检查(第{rnd}轮): 核心问题已有明确答案，提前收束 — {verdict[:80]}")
+                              f"目标收敛检查(第{rnd}轮): 核心问题已有明确答案，提前收束 — {verdict}")
                     break
                 if verdict:
-                    self._log("simulation", f"目标收敛检查(第{rnd}轮): 尚未收敛 — {verdict[:60]}")
+                    self._log("simulation", f"目标收敛检查(第{rnd}轮): 尚未收敛 — {verdict}")
 
         self._simulation_rounds = rounds
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "
@@ -688,7 +688,7 @@ class DeductionOrchestrator:
             }
         self.store.update(self.session.id,
                           report_json=_json.dumps(report_payload, ensure_ascii=False))
-        self._log("report", f"报告生成完成: {report.summary[:100]}...")
+        self._log("report", f"报告生成完成: {report.summary}")
 
     def get_realtime_round(self) -> SimulationRound | None:
         rounds = getattr(self, "_simulation_rounds", None)

@@ -416,7 +416,7 @@ export default function App() {
 
   const fetchLogs = useCallback(async (sessionId: string) => {
     try {
-      const r = await fetch(`${API_BASE}/session/${sessionId}/logs`);
+      const r = await fetch(`${API_BASE}/session/${sessionId}/logs?limit=0`);
       if (r.ok) setLogs(await r.json());
     } catch { /* ignore */ }
   }, []);

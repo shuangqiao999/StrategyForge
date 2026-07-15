@@ -419,7 +419,7 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
             round_number=round_num,
             event_type="user_intervention", priority=1.0,
         )
-        engine.log(session_id, "intervene", f"用户干预: {req.content[:100]}")
+        engine.log(session_id, "intervene", f"用户干预: {req.content}")
         return {"session_id": session_id, "injected": True, "round_number": round_num}
     except Exception as e:
         raise HTTPException(500, f"干预注入失败: {e}")
@@ -461,7 +461,7 @@ async def set_pre_goal(session_id: str, req: PreGoalRequest, request: Request):
     pre_goals.append(req.content)
     config["pre_goals"] = pre_goals
     engine.session_store.update(session_id, config_json=json.dumps(config, ensure_ascii=False))
-    engine.log(session_id, "pre-goal", f"推演前目标: {req.content[:100]}")
+    engine.log(session_id, "pre-goal", f"推演前目标: {req.content}")
     return {"session_id": session_id, "pre_goals": pre_goals}
 
 
@@ -581,7 +581,7 @@ async def get_report(session_id: str, request: Request):
 
 
 @router.get("/session/{session_id}/logs")
-async def get_logs(session_id: str, limit: int = Query(200), request: Request = None):
+async def get_logs(session_id: str, limit: int = Query(0), request: Request = None):
     engine = _get_engine(request)
     return engine.get_logs(session_id, limit=limit)
 
