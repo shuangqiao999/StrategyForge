@@ -65,3 +65,21 @@ def get_narrative_actions(entity_type: str) -> list[str]:
         if key in t or t in key:
             return list(_NARRATIVE_ACTION_CATALOG[key])
     return list(_FALLBACK_ACTIONS)
+
+
+# ── 事件可见性：私密行动只有参与者可见，信息差成为博弈资源 ──
+_SECRET_ACTION_KW = (
+    "秘密", "私下", "暗中", "潜入", "密谈", "密会", "窃听", "卧底",
+    "间谍", "情报交易", "情报渗透", "秘密录音", "线人", "匿名",
+    "内部清洗", "逃亡计划",
+)
+
+
+def is_secret_action(action_type: str, content: str = "") -> bool:
+    """判定行动是否私密（不进入其他角色的可见事件流）。
+
+    以 action_type 为主判据，content 前 40 字为辅（覆盖 action_type 是
+    通用枚举如 collaborate 但内容实为密会的情况）。
+    """
+    text = f"{action_type or ''} {(content or '')[:40]}"
+    return any(kw in text for kw in _SECRET_ACTION_KW)

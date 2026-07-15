@@ -185,6 +185,8 @@ class DeductionPreprocessor:
             pa.field("session_id", pa.string()),
             pa.field("priority", pa.float32()),
             pa.field("event_type", pa.string()),
+            pa.field("visibility", pa.string()),
+            pa.field("participants", pa.string()),
         ])
         self._event_table_name = f"deduction_events_{self.session_id}"
         self._event_table = self._create_or_open(self._event_table_name, schema)
@@ -230,7 +232,9 @@ class DeductionPreprocessor:
 
     def add_event_memory(self, content: str, agent_id: str,
                          round_number: int, event_type: str = "",
-                         priority: float = 0.5) -> None:
+                         priority: float = 0.5,
+                         visibility: str = "public",
+                         participants: str = "") -> None:
         if self._event_table is None or self._dim <= 0:
             return
         embed_text = f"[R{round_number}] {event_type}: {content}"[:self._INDEX_PREFIX_LEN]
@@ -246,15 +250,27 @@ class DeductionPreprocessor:
                 "agent_id": agent_id, "round_number": round_number,
                 "session_id": self.session_id,
                 "priority": priority, "event_type": event_type,
+                "visibility": visibility or "public",
+                "participants": participants or "",
             }])
         except Exception:
-            # Fallback for old tables without priority/event_type columns
-            self._event_table.add([{
-                "event_id": str(uuid.uuid4()),
-                "vector": vec, "content": content,
-                "agent_id": agent_id, "round_number": round_number,
-                "session_id": self.session_id,
-            }])
+            try:
+                # Fallback for tables without visibility/participants columns
+                self._event_table.add([{
+                    "event_id": str(uuid.uuid4()),
+                    "vector": vec, "content": content,
+                    "agent_id": agent_id, "round_number": round_number,
+                    "session_id": self.session_id,
+                    "priority": priority, "event_type": event_type,
+                }])
+            except Exception:
+                # Fallback for old tables without priority/event_type columns
+                self._event_table.add([{
+                    "event_id": str(uuid.uuid4()),
+                    "vector": vec, "content": content,
+                    "agent_id": agent_id, "round_number": round_number,
+                    "session_id": self.session_id,
+                }])
         # 事件表已变更，标记 FTS 索引需在下次检索前重建（每轮至多一次）
         self._event_fts_dirty = True
 
@@ -327,12 +343,19 @@ class DeductionPreprocessor:
 
     def retrieve_dynamic_events(
         self, query_text: str, top_k: int = 3, min_similarity: float = 0.4,
+        observer: str = "",
     ) -> list[str]:
+        """检索动态事件记忆。
+
+        observer 非空时启用可见性过滤：visibility=private 的事件仅当
+        observer（名称或实体ID）出现在 participants 或为事件行动者时可见。
+        observer 为空 = 上帝视角（报告器/裁判使用），可见全部事件。
+        """
         if self._event_table is None or self._dim <= 0:
             return []
         from strategy_forge.core.config import config as _cfg
         use_hybrid = bool(getattr(_cfg, "deduction_event_hybrid", False))
-        cache_key = (query_text[:80], top_k, min_similarity, use_hybrid)
+        cache_key = (query_text[:80], top_k, min_similarity, use_hybrid, observer)
         cached = self._dynamic_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -375,6 +398,11 @@ class DeductionPreprocessor:
             # Python 侧强制剔除目标/干预事件，保证即使 hybrid 的 where 未生效也不泄漏
             if r.get("event_type", "") in self._EVENT_EXCLUDED_TYPES:
                 continue
+            # 可见性过滤：私密事件只有参与者可见（信息差是博弈资源）
+            if observer and (r.get("visibility", "") or "public") == "private":
+                parts = r.get("participants", "") or ""
+                if observer not in parts and observer != (r.get("agent_id", "") or ""):
+                    continue
             # hybrid: 靠 RRF 融合排序 + top_k 截断，不套用余弦阈值；
             # 纯向量: 沿用 _distance 相似度门槛过滤。
             if not hybrid and r.get("_distance", 10.0) >= min_distance:

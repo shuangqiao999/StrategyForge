@@ -533,16 +533,22 @@ class SimulationEngine:
                 continue
             if action is not None:
                 sim_round.actions.append(action)
+                _actor_name = getattr(
+                    next((a for a in self.agents if a.entity_id == action.agent_id), None),
+                    "name", action.agent_id[:8])
+                from .narrative_actions import is_secret_action
+                _secret = is_secret_action(action.action_type, action.content)
+                _participants = "|".join(filter(None, [
+                    _actor_name, action.agent_id, str(action.target_id or "")]))
                 self._event_history.append({
                     "agent": action.agent_id,
-                    "agent_name": getattr(
-                        next((a for a in self.agents if a.entity_id == action.agent_id), None),
-                        "name", action.agent_id[:8],
-                    ),
+                    "agent_name": _actor_name,
                     "action": action.action_type,
                     "content": action.content,
                     "round": round_number,
                     "timestamp": action.timestamp,
+                    "visibility": "private" if _secret else "public",
+                    "participants": _participants,
                 })
 
         if len(self._event_history) > 200:
@@ -563,11 +569,19 @@ class SimulationEngine:
                 # ★ 动态事件写入 LanceDB (下一轮决策即可语义召回)
                 if self._preprocessor is not None:
                     try:
+                        from .narrative_actions import is_secret_action as _isa
+                        _sec = _isa(action.action_type, action.content)
+                        _an = getattr(
+                            next((a for a in self.agents if a.entity_id == action.agent_id), None),
+                            "name", action.agent_id[:8])
                         self._preprocessor.add_event_memory(
                             content=action.content,
                             agent_id=action.agent_id,
                             round_number=round_number,
                             event_type=action.action_type,
+                            visibility="private" if _sec else "public",
+                            participants="|".join(filter(None, [
+                                _an, action.agent_id, str(action.target_id or "")])),
                         )
                     except Exception as e:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
@@ -797,8 +811,16 @@ class SimulationEngine:
         self, client: Any, agent: DeductionAgentProfile, round_number: int
     ) -> SimulationAction | None:
         from strategy_forge.core.config import config
-        # ── 近期事件 ──
-        recent = self._event_history[-max(1, config.deduction_sim_recent_events):]
+        # ── 近期事件（可见性过滤：私密事件仅参与者可见）──
+        def _visible_to_agent(e: dict) -> bool:
+            if (e.get("visibility", "") or "public") != "private":
+                return True
+            parts = e.get("participants", "") or ""
+            return (agent.name in parts or agent.entity_id in parts
+                    or e.get("agent") == agent.entity_id)
+
+        visible_history = [e for e in self._event_history if _visible_to_agent(e)]
+        recent = visible_history[-max(1, config.deduction_sim_recent_events):]
         recent_text = "\n".join(
             f"- [{e.get('round', '?')}] {e.get('agent_name', e.get('agent', '?'))}: "
             f"{e.get('content', '')[:80]}"
@@ -863,7 +885,8 @@ class SimulationEngine:
                 query = self._augment_recall_query(query, agent.entity_id)
                 dynamic_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_dynamic_events,
-                    query, config.deduction_retrieve_top_k, min_similarity=config.deduction_similarity_threshold,
+                    query, config.deduction_retrieve_top_k, config.deduction_similarity_threshold,
+                    agent.name,
                 )
                 if dynamic_frags:
                     dynamic_text = "\n---\n".join(dynamic_frags)
@@ -871,7 +894,7 @@ class SimulationEngine:
                 logger.warning("[Simulator] Dynamic recall failed for %s: %s", agent.name, e)
         elif not self._persist_events:
             # 隔离模式(蒙特卡洛): 仅用内存事件历史, 不触碰 LanceDB
-            mem = [e for e in self._event_history[-20:]
+            mem = [e for e in visible_history[-20:]
                    if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
             if mem:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
@@ -1378,7 +1401,7 @@ class SimulationEngine:
                     query = self._augment_recall_query(query, agent.entity_id)
                     frags = await asyncio.to_thread(
                         pp.retrieve_dynamic_events, query, _rk,
-                        _cfg.deduction_similarity_threshold)
+                        _cfg.deduction_similarity_threshold, agent.name)
                     if frags:
                         dynamic_text = "\n---\n".join(frags[:_rk])[:_rc]
                 except Exception as e:
