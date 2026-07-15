@@ -106,14 +106,26 @@ $immutable_goals
 3. 重点刻画角色的心理变化与关系演化——谁在压力下崩溃、谁暗中结盟、谁背叛了谁、谁的信仰动摇了。
 4. 对话与内心独白可以虚构，但必须基于下方提供的角色人格档案和事件事实。
 5. **结局必须对「推演核心问题」给出明确判定**：基于事件序列中各角色的实际行动、结盟与得失，推断出最合理的答案（如"谁最终掌权""哪一方胜出"），并在故事结尾以具体情节呈现这个结果。禁止用"未来充满不确定性""斗争仍未结束"等模糊表述回避判定。若局势确实胶着，也必须指出当前最占优的一方及其决定性筹码。
-6. $output_length 字左右。
-7. 避免宏大叙事词汇。禁止使用"胜利""灵魂""升华""永恒""神圣""注定""命运的齿轮"等过度拔高的词。保持克制、冷静的文学语调，像好的新闻特稿而非史诗。
-8. 同一角色最多出现 3~4 个关键场景。如果角色在多个轮次做了类似的事，只写最有张力的那一次，不要反复描述同一行为模式。
+6. **证据一致性（硬性规则）**：结局判定必须以事件序列中的具体事件为依据，且不得与事件矛盾——
+   - 若某角色在事件中遭到公开指控、证据揭露或攻击且事件序列中不存在其澄清/反制/翻盘事件，该角色**不能**被写成最终赢家；
+   - 赢家的胜利必须能追溯到事件序列中其实际做过的行动（结盟、反制、掌握筹码），禁止凭空赋予其"突破""声誉恢复"等未发生的成果；
+   - 事件中已出现的重大线索（背叛、秘密录音、通敌、渗透、并购威胁）必须在结局中交代后果，哪怕一句话，禁止悬空蒸发。
+7. **现实性（硬性规则）**：叙事和结局必须符合现实事物的发展规律——
+   - 禁止超现实桥段：黑客奇迹、凭空出现的巨额资金、一夜掌控他人系统、"底层代码"式的万能筹码；
+   - 权力/控制权的转移必须通过现实中可行的路径呈现（股权、投票、法律程序、联盟倒戈、舆论压力），不能靠宣称完成；
+   - 已死亡或已退场的人物不得在其死亡/退场之后再有任何行动、对话或表态；
+   - 避免"降维打击""绝对控制"等夸张修辞，用克制的现实语言描述力量对比的变化。
+8. $output_length 字左右。
+9. 避免宏大叙事词汇。禁止使用"胜利""灵魂""升华""永恒""神圣""注定""命运的齿轮"等过度拔高的词。保持克制、冷静的文学语调，像好的新闻特稿而非史诗。
+10. 同一角色最多出现 3~4 个关键场景。如果角色在多个轮次做了类似的事，只写最有张力的那一次，不要反复描述同一行为模式。
 
 ## 角色档案
 $agent_overview
 
-## 关键事件序列（按轮次）
+## 人格演变轨迹（推演中真实发生的信念/准则变化，按轮次）
+$personality_evolution
+
+## 关键事件序列（按轮次，含开局锚点/高冲突事件/近期事件——结局判定的证据基础）
 $key_events
 
 ## 行动时序
@@ -126,10 +138,49 @@ $key_recall
 {
   "narrative": "故事文本（按时间线推进，有场景、有心理、有弧光，结尾以具体情节呈现核心问题的答案）",
   "character_arcs": ["角色A: 从天真走向冷酷", "角色B: 在孤独中坚守信念", "角色C: 被背叛后黑化"],
-  "conclusion": "故事收束（200字内）。第一句必须直接回答「推演核心问题」——点名具体的人/方及其凭借的关键筹码；随后给出情感落点。禁止回避式结论。"
+  "conclusion": "故事收束（200字内）。第一句必须直接回答「推演核心问题」——点名具体的人/方及其凭借的关键筹码（筹码必须来自事件序列）；随后给出情感落点。禁止回避式结论。"
 }
+character_arcs 规则：若「人格演变轨迹」非空，弧光必须以其中该角色真实发生的准则变化为依据（可文学化改写但方向一致）；轨迹中未出现的角色才允许基于事件序列推断弧光。
 
 只返回纯 JSON，不要 markdown 代码块。"""
+
+
+_CONFLICT_KW = (
+    "指控", "揭露", "背叛", "录音", "泄露", "泄漏", "攻击", "对抗", "威胁",
+    "并购", "收购", "罢免", "起诉", "诉讼", "摊牌", "决裂", "反制", "曝光",
+    "架空", "逼宫", "收买", "渗透", "通敌", "举报", "证据", "秘密资金",
+    "情报交易", "联盟", "联合", "翻盘", "夺权", "继承权", "遗嘱",
+)
+
+
+def _sample_arc_events(events: list[str], head_n: int = 5,
+                       conflict_n: int = 15, tail_n: int = 15) -> list[str]:
+    """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。
+
+    替代"只取尾部N条"——保证指控/背叛/结盟等因果关键事件必然进入
+    收束视野，结局判定才有完整证据链。冲突事件按关键词命中数加权，
+    采样后恢复时间顺序。
+    """
+    if len(events) <= head_n + conflict_n + tail_n:
+        return events
+    head = events[:head_n]
+    tail = events[-tail_n:]
+    middle = events[head_n:-tail_n]
+    scored: list[tuple[int, int, str]] = []
+    for idx, e in enumerate(middle):
+        hits = sum(1 for kw in _CONFLICT_KW if kw in e)
+        if hits > 0:
+            scored.append((hits, idx, e))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    picked = sorted(scored[:conflict_n], key=lambda x: x[1])
+    conflict = [e for _, _, e in picked]
+    seen: set[str] = set()
+    out: list[str] = []
+    for e in head + conflict + tail:
+        if e not in seen:
+            seen.add(e)
+            out.append(e)
+    return out
 
 
 def _level_label(v: float) -> str:
@@ -241,6 +292,7 @@ async def generate_report(
     states: dict[str, Any] | None = None,
     thresholds: dict[str, float] | None = None,
     goal_resolution: str = "",
+    personality_log: list[dict[str, Any]] | None = None,
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
@@ -393,14 +445,24 @@ async def generate_report(
                            else "（用户未指定核心问题——结局需明确交代各主要角色的最终结局与格局归属，不得含糊收尾）")
         if goal_resolution:
             narrative_goals += f"\n推演中期裁判已判定收敛结果（结局必须与之一致）：{goal_resolution}"
+        arc_events = _sample_arc_events(non_recall)
+        evolution_lines: list[str] = []
+        for p in (personality_log or [])[-30:]:
+            old = p.get("old_extra") or "（初始人格）"
+            evolution_lines.append(
+                f"- [R{p.get('round', '?')}] {p.get('agent', '?')}: {old} → {p.get('new_extra', '')}")
+        personality_evolution = "\n".join(evolution_lines) if evolution_lines else "（无人格演变记录）"
         prompt_str = Template(_REPORT_PROMPT_NARRATIVE).substitute(
             output_length=str(output_len),
             immutable_goals=narrative_goals,
             agent_overview=agent_overview,
-            key_events="\n".join(non_recall[-30:]),
+            personality_evolution=personality_evolution,
+            key_events="\n".join(arc_events),
             action_timeline=action_timeline,
             key_recall="\n".join(recall_events) if recall_events else "（无）",
         )
+        log_fn("report", f"叙事收束事件采样: 全程{len(non_recall)}条 → 弧线采样{len(arc_events)}条"
+                          f" | 人格演变 {len(evolution_lines)} 条注入")
         system = "你是叙事文学作家，撰写故事化推演叙事。只输出 JSON。"
         report_temp = 0.75
     else:

@@ -683,6 +683,8 @@ class SimulationEngine:
             f"使你的行为更符合当前的处境。\n"
             f"【重要】你的人格核心不可动摇，新准则只能是对核心人格的策略性微调，"
             f"禁止产生与核心人格根本矛盾的方向性反转。\n"
+            f"【重要】新准则必须由上方「近期行动经历」中的某条具体经历直接引出，"
+            f"禁止脱离经历凭空生成；准则应符合现实中该处境下真实的人会有的心理变化。\n"
             f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
             f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
             f"- 仅添加/修正，不删除原有准则。最多保留3条准则，超限时替换最旧的一条。\n"
@@ -732,6 +734,10 @@ class SimulationEngine:
                 agent.system_prompt_extra = text
             else:
                 return
+            self._personality_log.append({
+                "round": round_number, "agent": agent.name,
+                "old_extra": old_extra, "new_extra": agent.system_prompt_extra,
+            })
             self._log("simulation",
                        f"[叙事人格演化] {agent.name} 新增准则: {text} (R{round_number})")
         except Exception as e:
@@ -798,6 +804,28 @@ class SimulationEngine:
             f"{e.get('content', '')[:80]}"
             for e in recent
         ) or "无近期事件"
+        recent_text = ("（以下是各方公开可见的行为记录，标注了行为主体——"
+                       "注意区分他人行为与你自己的行动，不要把他人做过的事当成自己做过）\n"
+                       + recent_text) if recent else recent_text
+
+        # ── 三幕节拍指令 + 世界时钟（仅叙事模式）──
+        stage_text = ""
+        if not self._quantified and self.total_rounds > 0:
+            progress = round_number / max(1, self.total_rounds)
+            if progress <= 0.3:
+                stage_hint = ("当前为铺垫幕：自由布局，建立关系、收集信息、埋设伏笔均可，"
+                              "但每轮行动都应产生新信息或新关系，不要空转。")
+            elif progress <= 0.8:
+                stage_hint = ("当前为对抗幕：冲突必须升级。你的行动应针对既有对手或矛盾"
+                              "采取实质性动作（施压、反制、结盟、揭露），"
+                              "禁止停留在观察和重复性会面。")
+            else:
+                stage_hint = ("当前为收束幕：兑现你此前埋下的线索和承诺，迫使关键矛盾摊牌，"
+                              "禁止开启全新的支线。你的行动应直接影响最终格局。")
+            days = round_number * 5
+            stage_text = (f"## 推演节拍\n{stage_hint}\n"
+                          f"推演内时间：约第{days}天（1轮≈5天）。保持时间逻辑一致——"
+                          f"一次性事件（葬礼、发布会、签约）不应跨多轮持续存在。\n\n")
 
         # ── 叙事环境上下文（注入到决策 prompt 中）──
         from .narrative_actions import get_narrative_actions
@@ -854,6 +882,8 @@ class SimulationEngine:
         journal = getattr(self, "_character_journal", {}).get(agent.entity_id, [])
         if journal:
             context_text = "## 你的私人记忆\n" + "\n".join(f"- {j}" for j in journal) + "\n\n" + context_text
+        if stage_text:
+            context_text = stage_text + context_text
         if env_text:
             context_text = env_text + "\n\n" + context_text
         if action_catalog_text:
@@ -877,7 +907,9 @@ class SimulationEngine:
             from strategy_forge.core.llm_client import Message
             system = "你是推演模拟中的角色，根据角色设定和历史事件做出合理的下一步行动。只输出 JSON。"
             messages = [Message(role="user", content=Template(_ACTION_PROMPT).substitute(
-                persona=agent.persona, background=agent.background,
+                persona=(f"{agent.persona}\n【行为准则·由推演经历塑造】{agent.system_prompt_extra}"
+                         if agent.system_prompt_extra else agent.persona),
+                background=agent.background,
                 goals=", ".join(agent.goals) if agent.goals else "参与互动",
                 round_number=round_number, recent_events=context_text,
                 static_knowledge=static_text, dynamic_memory=dynamic_text,

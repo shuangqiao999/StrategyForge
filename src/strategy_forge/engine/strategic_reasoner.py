@@ -37,6 +37,9 @@ $user_intervention
 背景: $background
 目标: $goals
 
+## 你最近几轮已执行的行动（本轮禁止生成与这些雷同的行动——必须推进新的实质性进展，如升级冲突、兑现承诺、改变结盟、迫使摊牌）
+$recent_own_actions
+
 ## 当前世界状态
 轮次: $round_number
 近期事件: $recent_events
@@ -46,6 +49,11 @@ $trust_summary
 
 ## 关系网络（来自知识图谱：盟友 / 对手）
 $relationship_context
+
+## 现实性约束（硬性规则）
+- 行动手段必须限于你当前身份在现实中可用的手段（职权、人脉、资金、信息），禁止超现实桥段：黑客奇迹、凭空巨额资金、一夜掌控他人系统等。
+- 行动只能表达"你做了什么"，不能宣称单方面完成需要多方配合的结果（如接管、罢免、收购需经程序，只能"推动/发起"）。
+- 已死亡或已退场的人物不得作为行动者或对话对象出现。
 
 ## 输出 — 纯 JSON 数组
 [
@@ -82,6 +90,8 @@ class StrategicReasoner:
         self._action_catalog_cache: dict[str, str] = {}
         self._intervention_cache: str | None = None
         self._intervention_round: int = -1
+        # 叙事模式行动去重：每 agent 最近 5 轮已执行行动摘要
+        self._recent_actions: dict[str, list[str]] = defaultdict(list)
 
     def _cached_intervention(self, round_number: int) -> str:
         """Fetch latest intervention, cached per round."""
@@ -169,6 +179,35 @@ class StrategicReasoner:
         "diplomatic_engagement", "fact_check", "conserve", "restoration",
     })
 
+    @staticmethod
+    def _text_overlap(a: str, b: str) -> float:
+        """字符2-gram重合率，用于行动去重打分。返回 [0,1]。"""
+        ga = {a[i:i + 2] for i in range(len(a) - 1)}
+        gb = {b[i:i + 2] for i in range(len(b) - 1)}
+        if not ga or not gb:
+            return 0.0
+        return len(ga & gb) / min(len(ga), len(gb))
+
+    @staticmethod
+    def _normalize_action(action: str) -> str:
+        """枚举校验：清除 'initiate|respond|...' 字面量泄漏等脏 action 值。"""
+        act = str(action or "").strip()
+        if not act:
+            return "observe"
+        if "|" in act:
+            first = act.split("|")[0].strip()
+            return first if first else "observe"
+        return act
+
+    @staticmethod
+    def _persona_with_evolution(agent: Any) -> str:
+        """人格 = 原始人格（不可变） + 推演中演化出的行为准则（信念增量层）。"""
+        base = agent.persona or "（无）"
+        extra = getattr(agent, "system_prompt_extra", "") or ""
+        if extra:
+            return f"{base}\n【行为准则·由推演经历塑造，影响你的决策】{extra}"
+        return base
+
     def _trust_summary_for(self, agent_id: str) -> str:
         relations = self._trust_matrix.get(agent_id, {})
         if not relations:
@@ -207,6 +246,9 @@ class StrategicReasoner:
 
         # 3. Generate candidates via LLM
         recent = world_state.get("recent_events", "None")
+        recent_own = self._recent_actions.get(agent.entity_id, [])
+        recent_own_text = ("\n".join(f"- {a}" for a in recent_own)
+                           if recent_own else "（无——这是你的首轮行动）")
         system = "你是战略顾问，只输出 JSON 数组。"
         llm = client if client is not None else LLMClient()
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
@@ -214,9 +256,10 @@ class StrategicReasoner:
             agent_name=agent.name,
             immutable_goals=goals_block,
             user_intervention=user_cmd,
-            persona=agent.persona,
+            persona=self._persona_with_evolution(agent),
             background=agent.background,
             goals=", ".join(agent.goals) if agent.goals else "act naturally",
+            recent_own_actions=recent_own_text,
             round_number=round_number,
             recent_events=str(recent)[:500],
             trust_summary=trust,
@@ -281,10 +324,25 @@ class StrategicReasoner:
                 score += 0.2
             elif target and self.get_trust(agent.entity_id, target) < -2.0:
                 score -= 0.3
+            # Repetition penalty: discourage repeating recent own actions
+            if recent_own:
+                max_sim = max(self._text_overlap(c.get("content", ""), prev)
+                              for prev in recent_own[-3:])
+                if max_sim >= 0.5:
+                    score -= 0.4
+                elif max_sim >= 0.3:
+                    score -= 0.2
             c["_score"] = score
 
         candidates.sort(key=lambda c: c.get("_score", 0), reverse=True)
         selected = candidates[0]
+        selected["action"] = self._normalize_action(selected.get("action", "observe"))
+
+        # 记录本轮选中行动，供后续轮次去重（每 agent 保留最近 5 条）
+        hist = self._recent_actions[agent.entity_id]
+        hist.append(str(selected.get("content", ""))[:80])
+        if len(hist) > 5:
+            del hist[:-5]
 
         return {
             "selected": selected,
@@ -381,7 +439,7 @@ class StrategicReasoner:
         if causal_feedback:
             agent_parts.append(f"{causal_feedback}\n")
         agent_parts.extend([
-            f"## 你的人格\n{agent.persona or '（无）'}\n",
+            f"## 你的人格\n{self._persona_with_evolution(agent)}\n",
             f"## 你的目标\n{goals}\n",
             f"## 你的当前状态\n{state.to_prompt_context()}\n",
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n",

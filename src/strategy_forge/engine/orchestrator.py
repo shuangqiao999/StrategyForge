@@ -597,8 +597,26 @@ class DeductionOrchestrator:
                     break
                 if verdict:
                     self._log("simulation", f"目标收敛检查(第{rnd}轮): 尚未收敛 — {verdict}")
+                    # 导演反馈闭环：把"缺失的决定性事件"注入后续轮次，
+                    # 推动局势向可判定演进（只提示缺什么，不指定谁该赢）
+                    pp = getattr(self, "_preprocessor", None)
+                    if pp is not None:
+                        try:
+                            goals_text = "；".join(pre_goals)
+                            pp.add_event_memory(
+                                content=(f"【导演提示·第{rnd}轮】核心问题（{goals_text}）尚无法判定，"
+                                         f"缺失的决定性进展：{verdict}。后续行动应实质性推动此类摊牌"
+                                         f"事件发生——立场与方式由你根据自身利益决定，不要原地观望"
+                                         f"或重复既有行为。"),
+                                agent_id="director", round_number=rnd,
+                                event_type="user_intervention", priority=0.95,
+                            )
+                            self._log("simulation", f"导演反馈已注入(第{rnd}轮): 推动缺失进展 — {verdict[:60]}")
+                        except Exception as e:
+                            logger.debug("[Orchestrator] 导演反馈注入失败(忽略): %s", e)
 
         self._simulation_rounds = rounds
+        self._personality_log = list(getattr(engine, "_personality_log", []) or [])
         self._log("simulation", f"模拟完成: {len(rounds)} 轮, "
                   f"{sum(len(r.actions) for r in rounds)} 个总动作")
         self.store.update(self.session.id,
@@ -664,6 +682,7 @@ class DeductionOrchestrator:
             states=getattr(self, "_states", None),
             thresholds=self._rule_engine.pack.get("thresholds", {}) if self._rule_engine else None,
             goal_resolution=getattr(self, "_goal_resolution", ""),
+            personality_log=getattr(self, "_personality_log", []),
         )
         self.session.report = report
 
