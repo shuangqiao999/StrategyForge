@@ -295,6 +295,7 @@ async def generate_report(
     personality_log: list[dict[str, Any]] | None = None,
 ) -> DeductionReport:
     from strategy_forge.core.config import config
+    from strategy_forge.core.providers import registry as _reg
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
@@ -326,8 +327,8 @@ async def generate_report(
     if preprocessor is not None:
         try:
             query = (session.title or session.source_material[:200] or "关键转折与冲突").strip()
-            recalled = preprocessor.retrieve_dynamic_events(query, max(config.deduction_retrieve_top_k, 10),
-                min_similarity=config.deduction_similarity_threshold)
+            recalled = preprocessor.retrieve_dynamic_events(query, max(_reg.retrieve_top_k, 10),
+                min_similarity=_reg.similarity_threshold)
             for c in recalled:
                 line = f"[语义召回] {c[:100]}"
                 if line not in key_events:

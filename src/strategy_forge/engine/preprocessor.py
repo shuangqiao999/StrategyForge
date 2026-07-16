@@ -1,11 +1,12 @@
 ﻿"""Deduction Engine Preprocessor — semantic chunking + LanceDB indexing + hybrid retrieval.
 
-All embedding calls use synchronous HTTP (requests) — no asyncio dependency.
-This avoids RuntimeError in pytest-asyncio or nested event loops.
+Embedding calls use synchronous HTTP (requests); LLM entity discovery uses async.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -26,6 +27,8 @@ class PreprocessResult:
     entity_aliases: dict[str, set[str]] = field(default_factory=dict)
     total_chunks: int = 0
     total_entities: int = 0
+    entity_frequencies: dict[str, int] = field(default_factory=dict)
+    entity_chunk_coverage: dict[str, int] = field(default_factory=dict)
 
 
 def _merge_entity_dicts(jieba_entities: dict[str, set[str]],
@@ -353,8 +356,8 @@ class DeductionPreprocessor:
         """
         if self._event_table is None or self._dim <= 0:
             return []
-        from strategy_forge.core.config import config as _cfg
-        use_hybrid = bool(getattr(_cfg, "deduction_event_hybrid", False))
+        from strategy_forge.core.providers import registry as _reg
+        use_hybrid = _reg.event_hybrid
         cache_key = (query_text[:80], top_k, min_similarity, use_hybrid, observer)
         cached = self._dynamic_cache.get(cache_key)
         if cached is not None:
@@ -418,49 +421,124 @@ class DeductionPreprocessor:
     def clear_round_cache(self) -> None:
         self._dynamic_cache.clear()
 
-    def _llm_entity_discovery(self, source: str) -> dict[str, set[str]]:
+    async def _llm_entity_discovery(self, source: str,
+                                      chunk_texts: list[str] | None = None,
+                                      known_entities: set[str] | None = None) -> dict[str, set[str]]:
         """Use LLM to discover named entities that jieba's POS tagger misses
-        (organizations, abbreviations, compound names, etc.)."""
-        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-        import httpx
+        (organizations, abbreviations, compound names, etc.).
 
-        prompt = (
-            "列出以下文本中出现的所有专有名词实体（人名、地名、机构名、组织名、国家名、事件名、缩写）。"
-            "每行输出一个实体名，不要编号，不要解释，不要重复。\n\n"
-            f"文本：\n{source[:6000]}"
-        )
+        - Uses pre-existing semantic chunks batched per ~5000 chars (max 60 calls).
+        - Skips chunks that jieba already covered (>=5 known entities present).
+        - Concurrent LLM calls via asyncio.Semaphore (FORGE_MAX_CONCURRENT).
+        - Reuses shared LLMClient.chat() for retry/timeout/pooling.
+        """
+        from strategy_forge.core.config import config
+        from strategy_forge.core.providers import registry as _reg
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient, Message, LLMConnectionError
+
+        BATCH_CHARS = 5000
+        MAX_BATCHES = 60
+        MIN_KNOWN = 5
+
+        # ── 1. Filter: skip chunks already rich in jieba-discovered entities ──
+        texts = list(chunk_texts) if chunk_texts else [source[i:i+1500] for i in range(0, len(source), 1500)]
+        if known_entities and texts:
+            filtered = []
+            skipped = 0
+            for t in texts:
+                found = sum(1 for e in known_entities if e in t)
+                if found and found >= MIN_KNOWN:
+                    skipped += 1
+                    continue
+                filtered.append(t)
+            if skipped:
+                logger.info("[Preprocessor] LLM entity discovery: skipped %d entity-rich chunks", skipped)
+            texts = filtered if filtered else texts  # safety: never skip ALL
+
+        # ── 2. Batch chunks ──
+        batches: list[str] = []
+        current = ""
+        for t in texts:
+            t = t.strip()
+            if not t:
+                continue
+            if current and len(current) + len(t) + 20 > BATCH_CHARS:
+                batches.append(current)
+                current = t
+            else:
+                current = f"{current}\n---\n{t}" if current else t
+        if current:
+            batches.append(current)
+
+        # ── 3. Cap: uniform sampling for extremely long texts ──
+        if len(batches) > MAX_BATCHES:
+            step = max(1, len(batches) // MAX_BATCHES)
+            sampled = []
+            for i in range(0, len(batches), step):
+                sampled.append(batches[i])
+                if len(sampled) >= MAX_BATCHES:
+                    break
+            logger.info("[Preprocessor] LLM entity discovery: %d batches -> sampled %d (cap=%d)",
+                        len(batches), len(sampled), MAX_BATCHES)
+            batches = sampled
+
+        if not batches:
+            return {}
+
+        # ── 4. Concurrent LLM calls ──
         client = LLMClient()
-        headers = {"Content-Type": "application/json"}
-        if client.api_key:
-            headers["Authorization"] = f"Bearer {client.api_key}"
+        sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
+        system = "你是实体提取专家。只输出实体名，每行一个，不要编号、不要解释、不要重复。"
+
+        async def _discover_one(batch_text: str) -> dict[str, set[str]]:
+            async with sem:
+                try:
+                    prompt = (
+                        "列出以下文本中出现的所有专有名词实体（人名、地名、机构名、组织名、国家名、事件名、缩写）。"
+                        "每行输出一个实体名，不要编号，不要解释，不要重复。\n\n"
+                        f"文本：\n{batch_text[:BATCH_CHARS]}"
+                    )
+                    resp = await client.chat(
+                        [Message(role="user", content=prompt)],
+                        system=system, temperature=0.1, max_tokens=4000)
+                    content = resp if isinstance(resp, str) else str(resp)
+                    lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
+                    result: dict[str, set[str]] = {}
+                    for line in lines:
+                        line = re.sub(r'^[\d\-·.\s]+', '', line)
+                        line = line.strip()
+                        if len(line) < 2 or len(line) > 50:
+                            continue
+                        result.setdefault(line, set())
+                    return result
+                except LLMConnectionError:
+                    raise
+                except Exception as e:
+                    logger.debug("[Preprocessor] LLM entity discovery batch failed: %s", e)
+                    return {}
 
         try:
-            import re
-            with httpx.Client(timeout=httpx.Timeout(30.0), headers=headers) as http:
-                resp = http.post(
-                    f"{client.api_base}/chat/completions",
-                    json={
-                        "model": client.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                lines = [line.strip() for line in content.split("\n") if line.strip()]
-                entities: dict[str, set[str]] = {}
-                for line in lines:
-                    line = re.sub(r'^[\d\-•·\.\s]+', '', line)
-                    line = line.strip()
-                    if len(line) < 2 or len(line) > 50:
-                        continue
-                    entities.setdefault(line, set())
-                logger.info("[Preprocessor] LLM discovered %d additional entities", len(entities))
-                return entities
-        except Exception as e:
-            logger.warning("[Preprocessor] LLM entity discovery failed: %s", e)
+            results = await asyncio.gather(*(_discover_one(b) for b in batches))
+        except LLMConnectionError:
+            logger.warning("[Preprocessor] LLM entity discovery aborted (connection error)")
             return {}
+
+        # ── 5. Merge with fuzzy dedup ──
+        all_entities: dict[str, set[str]] = {}
+        for r in results:
+            if not r:
+                continue
+            for k, v in r.items():
+                existing = _find_fuzzy_match(k, all_entities.keys())
+                if existing:
+                    all_entities[existing].update(v or set())
+                else:
+                    all_entities[k] = v or set()
+
+        if all_entities:
+            logger.info("[Preprocessor] LLM discovered %d additional entities (%d batches, concurrent=%d)",
+                        len(all_entities), len(batches), _reg.max_concurrent)
+        return all_entities
 
     # ── Static chunk retrieval ──
 
@@ -517,22 +595,27 @@ class DeductionPreprocessor:
     def result(self) -> PreprocessResult | None:
         return self._result
 
-    def preprocess(self, source: str) -> PreprocessResult:
+    async def preprocess(self, source: str) -> PreprocessResult:
         from strategy_forge.core.chunker import TextChunker
         from strategy_forge.core.tokenizer import extract_named_entities
 
         # 1. semantic chunking
         chunker = TextChunker(strategy="paragraph", max_chunk_size=1536)
         chunks = chunker.chunk(source, file_type=".txt")
+        chunk_texts = [c.content for c in chunks]
         logger.info("[Preprocessor] Chunked into %d semantic chunks", len(chunks))
 
         # 2. Jieba POS entity extraction
         all_entities = extract_named_entities(source, top_k=1000, min_freq=1)
         high_freq: dict[str, set[str]] = {}
         low_freq: dict[str, set[str]] = {}
-        import re
+        entity_freq: dict[str, int] = {}
+        entity_chunk_cov: dict[str, int] = {}
         for std_name, aliases in all_entities.items():
             count = len(re.findall(re.escape(std_name), source))
+            entity_freq[std_name] = count
+            entity_chunk_cov[std_name] = sum(
+                1 for ct in chunk_texts if std_name in ct)
             if count >= 2:
                 high_freq[std_name] = aliases
             else:
@@ -542,13 +625,19 @@ class DeductionPreprocessor:
 
         # 2.5 LLM-assisted entity discovery — catches entities jieba misses (orgs, abbreviations, compounds)
         try:
-            llm_entities = self._llm_entity_discovery(source)
+            known = set(all_entities.keys())
+            llm_entities = await self._llm_entity_discovery(
+                source, chunk_texts=chunk_texts, known_entities=known)
             if llm_entities:
                 merged = _merge_entity_dicts(all_entities, llm_entities)
                 # Re-split high/low with merged entities
                 high_freq.clear(); low_freq.clear()
+                entity_freq.clear(); entity_chunk_cov.clear()
                 for std_name, aliases in merged.items():
                     count = len(re.findall(re.escape(std_name), source))
+                    entity_freq[std_name] = count
+                    entity_chunk_cov[std_name] = sum(
+                        1 for ct in chunk_texts if std_name in ct)
                     if count >= 2:
                         high_freq[std_name] = aliases
                     else:
@@ -567,7 +656,8 @@ class DeductionPreprocessor:
             self._result = PreprocessResult(
                 session_id=self.session_id, chunks=list(chunks),
                 high_freq_entities=high_freq, low_freq_entities=low_freq,
-                total_chunks=len(chunks), total_entities=len(all_entities))
+                total_chunks=len(chunks), total_entities=len(all_entities),
+                entity_frequencies=entity_freq, entity_chunk_coverage=entity_chunk_cov)
             return self._result
 
         self._ensure_table(dim)
@@ -583,7 +673,8 @@ class DeductionPreprocessor:
                 session_id=self.session_id, chunks=list(chunks),
                 high_freq_entities=high_freq, low_freq_entities=low_freq,
                 entity_aliases=all_entities,
-                total_chunks=len(chunks), total_entities=len(all_entities))
+                total_chunks=len(chunks), total_entities=len(all_entities),
+                entity_frequencies=entity_freq, entity_chunk_coverage=entity_chunk_cov)
             return self._result
 
         rows = [{"id": chunk_ids[i], "vector": vecs[i],
@@ -604,7 +695,8 @@ class DeductionPreprocessor:
             session_id=self.session_id, chunks=list(chunks),
             high_freq_entities=high_freq, low_freq_entities=low_freq,
             entity_aliases=all_entities,
-            total_chunks=len(chunks), total_entities=len(all_entities))
+            total_chunks=len(chunks), total_entities=len(all_entities),
+            entity_frequencies=entity_freq, entity_chunk_coverage=entity_chunk_cov)
         return self._result
 
     @staticmethod

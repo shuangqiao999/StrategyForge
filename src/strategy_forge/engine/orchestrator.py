@@ -348,7 +348,7 @@ class DeductionOrchestrator:
             workspace_root=config.project_root,
             session_id=self.session.id,
         )
-        preprocessor.preprocess(self.session.source_material)
+        await preprocessor.preprocess(self.session.source_material)
         self._preprocessor = preprocessor
 
         from .graph_builder import build_graph
@@ -408,8 +408,18 @@ class DeductionOrchestrator:
                 from strategy_forge.engine.narrative_sorter import sort_narrative_entities
                 from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
+                # 传递预处理器的实体统计和分块数据，供超长文本构建全局视图
+                pp = getattr(self, "_preprocessor", None)
+                pp_result = pp.result if pp else None
+                entity_freq = getattr(pp_result, "entity_frequencies", None) if pp_result else None
+                entity_cov = getattr(pp_result, "entity_chunk_coverage", None) if pp_result else None
+                chunk_texts = [c.content for c in pp_result.chunks] if pp_result and pp_result.chunks else None
                 self._intel_list = await sort_narrative_entities(
-                    self.session.source_material, entity_names, LLMClient())
+                    self.session.source_material, entity_names, LLMClient(),
+                    entity_frequencies=entity_freq,
+                    entity_chunk_coverage=entity_cov,
+                    chunk_texts=chunk_texts,
+                )
                 if self._intel_list:
                     active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
                     passive = len(self._intel_list) - active

@@ -91,6 +91,7 @@ class StrategyOptimizer:
         progress_cb: Callable[[int, int, str, SimulationOutcome], None] | None = None,
     ) -> dict[str, Any]:
         from strategy_forge.core.config import config
+        from strategy_forge.core.providers import registry as _reg
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         from strategy_forge.engine.agent_factory import create_agents_from_graph
         from strategy_forge.engine.graph_builder import build_graph
@@ -107,15 +108,15 @@ class StrategyOptimizer:
         source = session.source_material or ""
         if not source.strip():
             raise RuntimeError("种子材料为空，无法进行推演优化")
-        total_rounds = session.total_rounds or config.deduction_default_rounds
-        max_concurrent = max_concurrent or config.deduction_max_concurrent
+        total_rounds = session.total_rounds or _reg.default_rounds
+        max_concurrent = max_concurrent or _reg.max_concurrent
 
         # ── 1. 自建基线：一次 Phase1-3（失败必须传播） ──
         olog("优化器启动：构建基线（本体 → 图谱 → 智能体）...")
         try:
             ontology = await generate_ontology(source)
             preprocessor = DeductionPreprocessor(config.project_root, session_id)
-            preprocessor.preprocess(source)
+            await preprocessor.preprocess(source)
             graph = self.engine.get_graph(session_id)
             await build_graph(
                 source=source, graph=graph, ontology=ontology,

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import config
+from .providers import registry as _reg
 from .token_counter import TokenStats
 
 logger = logging.getLogger(__name__)
@@ -74,10 +75,10 @@ class DeductionLLMClient:
         self.model = model or resolved.get("model", "")
         self._http: httpx.AsyncClient | None = None
         # 超时种子值在构造时确定（不依赖 _ensure_client），便于测试与环境注入
-        fallback_t = max(10.0, config.deduction_llm_timeout)
-        self._conn_timeout = max(10.0, config.deduction_llm_connect_timeout
+        fallback_t = max(10.0, _reg.llm_timeout)
+        self._conn_timeout = max(10.0, _reg.connect_timeout
                                  if os.getenv("FORGE_LLM_CONNECT_TIMEOUT") else fallback_t)
-        self._gen_timeout = max(10.0, config.deduction_llm_generation_timeout
+        self._gen_timeout = max(10.0, _reg.generation_timeout
                                 if os.getenv("FORGE_LLM_GENERATION_TIMEOUT") else fallback_t)
 
     async def _ensure_client(self):
@@ -86,7 +87,7 @@ class DeductionLLMClient:
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             # 连接池上限：0 表示按并发自动派生，保证 >= FORGE_MAX_CONCURRENT 且留余量
-            mc = max(1, config.deduction_max_concurrent)
+            mc = max(1, _reg.max_concurrent)
             max_conn = config.deduction_http_max_connections or max(100, mc * 2)
             max_keep = config.deduction_http_max_keepalive or max(20, mc)
             # [A] 双层超时：连接(短)/生成(长) 在 __init__ 已算好

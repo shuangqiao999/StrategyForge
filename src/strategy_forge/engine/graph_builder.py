@@ -83,6 +83,7 @@ async def build_graph(
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
     from strategy_forge.core.config import config
+    from strategy_forge.core.providers import registry as _reg
 
     client = LLMClient()
 
@@ -124,12 +125,22 @@ async def build_graph(
 
             # ── Phase 1（顺序·廉价）：混合检索 + 构建每实体抽取 prompt ──
             from strategy_forge.core.tokenizer import compress_to_keywords
-            hf_items = sorted(high_freq.items(), key=lambda x: -len(x[1]))[:25]  # top-25 高频
-            log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (top-25)")
+            # 超长文本：按实体在原文中的出现频次排序（而非别名数），确保被高频提及的角色
+            # 优先获得定向深度抽取；chunk 覆盖度作为次要排序键（跨章节角色更重要）。
+            freq_map = getattr(result, "entity_frequencies", {}) or {}
+            cov_map = getattr(result, "entity_chunk_coverage", {}) or {}
+            def _entity_rank(item):
+                name, aliases = item
+                return (freq_map.get(name, 0), cov_map.get(name, 0), len(aliases))
+            hf_sorted = sorted(high_freq.items(), key=_entity_rank, reverse=True)
+            # 动态上限：文本越长，定向抽取的实体越多（上限 50，下限 25）
+            dyn_cap = min(50, max(25, len(hf_sorted) // 5))
+            hf_items = hf_sorted[:dyn_cap]
+            log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (动态上限={dyn_cap})")
             prompts: list[str | None] = []
             for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
-                    std_name, config.deduction_retrieve_top_k, must_contain=aliases)
+                    std_name, _reg.retrieve_top_k, must_contain=aliases)
                 if not fragments:
                     prompts.append(None)
                     continue
@@ -139,7 +150,7 @@ async def build_graph(
                 prompts.append(_extract_base.replace("__TEXT__", fused[:3000] + keyword_tag))
 
             # ── Phase 2（并发·LLM 抽取，上限 = FORGE_MAX_CONCURRENT）──
-            sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
+            sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
 
             async def _extract_call(prompt: str) -> str | None:
                 async with sem:
@@ -250,6 +261,7 @@ async def _extract_from_chunks(
     total_entities: int = 0, total_relations: int = 0,
 ) -> None:
     from strategy_forge.core.config import config
+    from strategy_forge.core.providers import registry as _reg
     from strategy_forge.core.llm_client import Message
     system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
@@ -262,7 +274,7 @@ async def _extract_from_chunks(
     )
 
     # 并发抽取（上限 = FORGE_MAX_CONCURRENT），随后按原顺序写库
-    sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
+    sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
 
     async def _chunk_call(text: str) -> str | None:
         async with sem:

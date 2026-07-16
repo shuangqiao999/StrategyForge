@@ -284,10 +284,11 @@ class SimulationEngine:
         }
         self._spatial_state = None   # cached SpatialState, updated after each module run
         from strategy_forge.core.config import config
+        from strategy_forge.core.providers import registry as _reg
 
         self._max_concurrent = (
             max_concurrent if max_concurrent is not None
-            else config.deduction_max_concurrent
+            else _reg.max_concurrent
         )
 
         # ── 前瞻规划：Rollout 模式 ──
@@ -304,7 +305,7 @@ class SimulationEngine:
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
-            candidate_count=config.deduction_candidate_count,
+            candidate_count=_reg.candidate_count,
             preprocessor=preprocessor,
             chat_fn=chat_fn,
             immutable_goals=self._immutable_goals,
@@ -417,7 +418,8 @@ class SimulationEngine:
         默认关（FORGE_RECALL_REL_BOOST=0）时直接返回 base，行为与现状逐字一致。
         """
         from strategy_forge.core.config import config
-        if not config.deduction_recall_rel_boost:
+        from strategy_forge.core.providers import registry as _reg
+        if not _reg.recall_rel_boost:
             return base
         rel = self._rel_context.get(entity_id, {}) or {}
         names: list[str] = []
@@ -503,9 +505,10 @@ class SimulationEngine:
                 if self._cancel is not None and self._cancel.is_set():
                     return None
                 from strategy_forge.core.config import config
+                from strategy_forge.core.providers import registry as _reg
                 from strategy_forge.core.llm_client import LLMConnectionError
                 fails = 0
-                max_passes = max(0, config.deduction_llm_retry_passes)
+                max_passes = max(0, _reg.retry_passes)
                 while True:
                     try:
                         return await self._agent_decide(client, agent, round_number)
@@ -523,8 +526,9 @@ class SimulationEngine:
         conn_fails = sum(1 for r in results if isinstance(r, LLMConnectionError))
         if conn_fails > 0:
             from strategy_forge.core.config import config
+            from strategy_forge.core.providers import registry as _reg
             ratio = conn_fails / max(1, len(ordered))
-            if ratio >= config.deduction_sim_fail_ratio:
+            if ratio >= _reg.sim_fail_threshold:
                 first = next((r for r in results if isinstance(r, LLMConnectionError)), None)
                 raise ConnectionFailureError(str(first) if first else f"连接故障：{conn_fails}/{len(ordered)} agent 无法连接 LLM")
         for agent, action in zip(ordered, results, strict=False):
@@ -861,9 +865,10 @@ class SimulationEngine:
         static_text = "无特定背景"
         if self._preprocessor and self._preprocessor.result:
             try:
+                from strategy_forge.core.providers import registry as _reg
                 static_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_for_entity,
-                    agent.name, config.deduction_retrieve_top_k,
+                    agent.name, _reg.retrieve_top_k,
                     must_contain={agent.name} if agent.name else None,
                 )
                 if static_frags:
@@ -876,6 +881,7 @@ class SimulationEngine:
         if self._persist_events and self._preprocessor is not None:
             try:
                 from strategy_forge.core.config import config
+                from strategy_forge.core.providers import registry as _reg
                 aliases: set[str] = set()
                 if self._preprocessor.result:
                     aliases = self._preprocessor.result.high_freq_entities.get(agent.name, set())
@@ -885,7 +891,7 @@ class SimulationEngine:
                 query = self._augment_recall_query(query, agent.entity_id)
                 dynamic_frags = await asyncio.to_thread(
                     self._preprocessor.retrieve_dynamic_events,
-                    query, config.deduction_retrieve_top_k, config.deduction_similarity_threshold,
+                    query, _reg.retrieve_top_k, _reg.similarity_threshold,
                     agent.name,
                 )
                 if dynamic_frags:

@@ -285,7 +285,8 @@ def _apply_safety_net(result: list[dict[str, Any]]) -> int:
     返回被安全网降级的实体数量。
     """
     import os
-    safety_enabled = os.getenv("FORGE_INTEL_SAFETY_NET", "1") == "1"
+    from strategy_forge.core.providers import registry as _reg
+    safety_enabled = _reg.intel_safety_net
     if not safety_enabled:
         logger.warning("[IntelSorter] FORGE_INTEL_SAFETY_NET=0，安全网已关闭，完全依赖LLM判断")
         return 0

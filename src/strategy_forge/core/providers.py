@@ -240,6 +240,87 @@ class ProviderRegistry:
     @llm_temperature.setter
     def llm_temperature(self, v: float) -> None: self._data["llm_temperature"] = v
 
+    @property
+    def max_concurrent(self) -> int:
+        from .config import config
+        return int(self._data.get("max_concurrent", "") or config.deduction_max_concurrent)
+
+    # ── Engine config bridge properties (UI → forge_config.json → runtime) ──
+    # Each reads from registry._data first (UI setting), falls back to config.* (env/default).
+
+    @property
+    def default_rounds(self) -> int:
+        from .config import config
+        return int(self._data.get("default_rounds", "") or config.deduction_default_rounds)
+
+    @property
+    def max_agents(self) -> int:
+        from .config import config
+        return int(self._data.get("max_agents", "") or config.deduction_max_agents)
+
+    @property
+    def candidate_count(self) -> int:
+        from .config import config
+        return int(self._data.get("candidate_count", "") or config.deduction_candidate_count)
+
+    @property
+    def retrieve_top_k(self) -> int:
+        from .config import config
+        return int(self._data.get("retrieve_top_k", "") or config.deduction_retrieve_top_k)
+
+    @property
+    def similarity_threshold(self) -> float:
+        from .config import config
+        return float(self._data.get("similarity_threshold", "") or config.deduction_similarity_threshold)
+
+    @property
+    def recall_rel_boost(self) -> bool:
+        from .config import config
+        val = self._data.get("recall_rel_boost")
+        if val is not None:
+            return bool(int(val))
+        return config.deduction_recall_rel_boost
+
+    @property
+    def intel_safety_net(self) -> bool:
+        val = self._data.get("intel_safety_net")
+        if val is not None:
+            return bool(int(val))
+        return str(os.getenv("FORGE_INTEL_SAFETY_NET", "1")) == "1"
+
+    @property
+    def event_hybrid(self) -> bool:
+        from .config import config
+        val = self._data.get("event_hybrid")
+        if val is not None:
+            return bool(int(val))
+        return config.deduction_event_hybrid
+
+    @property
+    def llm_timeout(self) -> float:
+        from .config import config
+        return float(self._data.get("llm_timeout", "") or config.deduction_llm_timeout)
+
+    @property
+    def connect_timeout(self) -> float:
+        from .config import config
+        return float(self._data.get("connect_timeout", "") or config.deduction_llm_connect_timeout)
+
+    @property
+    def generation_timeout(self) -> float:
+        from .config import config
+        return float(self._data.get("generation_timeout", "") or config.deduction_llm_generation_timeout)
+
+    @property
+    def retry_passes(self) -> int:
+        from .config import config
+        return int(self._data.get("retry_passes", "") or config.deduction_llm_retry_passes)
+
+    @property
+    def sim_fail_threshold(self) -> float:
+        from .config import config
+        return float(self._data.get("sim_fail_threshold", "") or config.deduction_sim_fail_ratio)
+
     @staticmethod
     async def list_models(base_url: str, api_key: str) -> dict:
         if not base_url: return {"error": "未配置 API 地址", "models": []}

@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import re
+import statistics
 import uuid
 from collections.abc import Callable
 from string import Template
@@ -91,6 +92,7 @@ async def create_agents_from_graph(
     domain: str = "",
 ) -> list[DeductionAgentProfile]:
     from strategy_forge.core.config import config
+    from strategy_forge.core.providers import registry as _reg
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
@@ -153,6 +155,21 @@ async def create_agents_from_graph(
         before = len(persons)
         # Filter: cross-match graph entity names against IntelSorter canonical names via aliases
         filtered: list[dict] = []
+
+        # ── 频率兜底：sorter 遗漏的高频实体仍应纳入智能体 ──
+        # 超长文本（长篇小说等）的 sorter 可能因 token 限制漏掉核心角色；
+        # 以预处理器统计的全文频次作为兜底阈值，频次够高则不被 sorter 遗漏所杀。
+        freq_map: dict[str, int] = {}
+        if preprocessor and preprocessor.result:
+            freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
+        # 动态阈值：以 intel_list 中已标记为 include=true 的实体的频次中位数作为参照
+        included_freqs = [
+            freq_map.get(e["name"], 0) for e in intel_list if e.get("include_in_simulation")
+        ]
+        freq_threshold = int(statistics.median(included_freqs)) if included_freqs else 5
+        freq_threshold = max(3, freq_threshold)  # 至少出现 3 次才兜底
+        fallback_count = 0
+
         for p in persons:
             pname = p.get("name", "")
             # Resolve to canonical name via reverse alias map
@@ -160,11 +177,24 @@ async def create_agents_from_graph(
             # (entities NOT in intel_map are excluded by default — IntelSorter must have seen them)
             intel_entry = intel_map.get(canon) or intel_map.get(pname)
             if intel_entry is None:
-                continue  # IntelSorter没见过的实体 → 排除
+                # 频率兜底：sorter 未输出的实体，若全文频次足够高则仍纳入
+                f = freq_map.get(canon, freq_map.get(pname, 0))
+                if f >= freq_threshold:
+                    intel_entry = {
+                        "name": canon, "aliases": [],
+                        "include_in_simulation": True,
+                        "role": f"高频角色(频次={f})",
+                    }
+                    intel_map[canon] = intel_entry
+                    fallback_count += 1
+                else:
+                    continue
             if not intel_entry.get("include_in_simulation", False):
                 continue  # IntelSorter显式标记为非战略 → 排除
             filtered.append(p)
         persons = filtered
+        if fallback_count:
+            log_fn("agents", f"频率兜底: {fallback_count} 个高频实体（sorter 遗漏）已恢复为智能体，阈值≥{freq_threshold}")
         if len(persons) < before:
             log_fn("agents", f"情报过滤: {before} → {len(persons)} 个智能体（排除非战略实体）")
     else:
@@ -183,7 +213,7 @@ async def create_agents_from_graph(
         if len(persons) < before:
             log_fn("agents", f"叙事模式类型过滤: {before} → {len(persons)} 个智能体（排除非决策者类型）")
 
-    max_agents = min(len(persons), config.deduction_max_agents)
+    max_agents = min(len(persons), _reg.max_agents)
     log_fn("agents", f"从 {len(persons)} 个实体中生成最多 {max_agents} 个智能体")
 
     client = LLMClient()
@@ -191,7 +221,7 @@ async def create_agents_from_graph(
 
     expected_keys = {"persona", "background", "goals"}
 
-    sem = asyncio.Semaphore(max(1, config.deduction_max_concurrent))
+    sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
 
     _DOMAIN_ROLES: dict[str, str] = {
         "military": "军事力量或决策实体",
@@ -240,7 +270,7 @@ async def create_agents_from_graph(
             try:
                 fragments = await asyncio.to_thread(
                     preprocessor.retrieve_for_entity, person_name,
-                    max(config.deduction_retrieve_top_k, 10), {person_name})
+                    max(_reg.retrieve_top_k, 10), {person_name})
             except Exception as e:
                 logger.debug("[Deduction] persona retrieve failed for %s: %s", person_name, e)
         prompt = _build_prompt(person, person_name, fragments)
