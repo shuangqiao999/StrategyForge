@@ -96,12 +96,17 @@ class SessionStore:
     def create(self, session_id: str, title: str, source_material: str,
                config: dict[str, Any] | None = None) -> dict[str, Any]:
         now = datetime.now().isoformat()
+        cfg = config or {}
+        try:
+            total_rounds = int(cfg.get("total_rounds", 10)) or 10
+        except (TypeError, ValueError):
+            total_rounds = 10
         with self._get_conn() as conn:
             conn.execute(
                 "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "total_rounds, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (session_id, title, source_material,
-                 json.dumps(config or {}, ensure_ascii=False), now, now),
+                 json.dumps(cfg, ensure_ascii=False), total_rounds, now, now),
             )
             conn.commit()
         return self.get(session_id)
@@ -149,11 +154,25 @@ class SessionStore:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, title, status, phase, entity_count, relation_count, "
-                "agent_count, current_round, total_rounds, created_at, updated_at "
+                "agent_count, current_round, total_rounds, config_json, "
+                "created_at, updated_at "
                 "FROM deduction_sessions ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            # total_rounds 语义对齐 _row_to_session：config_json 优先，列值回退
+            # （历史会话只写了 config_json，独立列停留在默认值 10）
+            try:
+                cfg = json.loads(d.get("config_json", "{}") or "{}")
+                if cfg.get("total_rounds"):
+                    d["total_rounds"] = int(cfg["total_rounds"])
+            except (ValueError, TypeError, json.JSONDecodeError):
+                pass
+            d.pop("config_json", None)
+            out.append(d)
+        return out
 
     def append_log(self, session_id: str, phase: str, message: str) -> None:
         now = datetime.now().isoformat()
