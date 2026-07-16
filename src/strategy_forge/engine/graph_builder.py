@@ -115,11 +115,12 @@ async def build_graph(
             system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
             # Pre-format constant parts using Template (safe from { } in alias_map JSON)
+            white_count = min(len(candidate_names), max(200, dyn_cap * 2))
             _extract_base = Template(_EXTRACT_PROMPT).substitute(
                 text="__TEXT__",
                 entity_types=", ".join(entity_type_names),
                 relation_types=", ".join(relation_type_names),
-                candidate_entities=", ".join(candidate_names[:200]),
+                candidate_entities=", ".join(candidate_names[:white_count]),
                 alias_map=alias_map_str,
             )
 

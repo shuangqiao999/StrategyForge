@@ -626,9 +626,13 @@ class DeductionPreprocessor:
         entity_chunk_cov: dict[str, int] = {}
         for std_name, aliases in all_entities.items():
             count = len(re.findall(re.escape(std_name), source))
+            for alias in aliases:
+                if alias != std_name and alias not in std_name:
+                    count += len(re.findall(re.escape(alias), source))
             entity_freq[std_name] = count
             entity_chunk_cov[std_name] = sum(
-                1 for ct in chunk_texts if std_name in ct)
+                1 for ct in chunk_texts
+                if std_name in ct or any(a in ct for a in aliases))
             if count >= 2:
                 high_freq[std_name] = aliases
             else:
@@ -648,9 +652,14 @@ class DeductionPreprocessor:
                 entity_freq.clear(); entity_chunk_cov.clear()
                 for std_name, aliases in merged.items():
                     count = len(re.findall(re.escape(std_name), source))
+                    # 累加非子串别名频次：避免 "复兴党" 在 "国家复兴党" 内被重复计数
+                    for alias in aliases:
+                        if alias != std_name and alias not in std_name:
+                            count += len(re.findall(re.escape(alias), source))
                     entity_freq[std_name] = count
                     entity_chunk_cov[std_name] = sum(
-                        1 for ct in chunk_texts if std_name in ct)
+                        1 for ct in chunk_texts
+                        if std_name in ct or any(a in ct for a in aliases))
                     if count >= 2:
                         high_freq[std_name] = aliases
                     else:
