@@ -102,6 +102,8 @@ class DeductionPreprocessor:
         self._fts_ready: bool = False
         self._event_fts_ready: bool = False
         self._event_fts_dirty: bool = False
+        self._progress_cb: Any = None
+
         self.embed_cache_hits: int = 0
         self.recall_cache_hits: int = 0
 
@@ -481,7 +483,9 @@ class DeductionPreprocessor:
         sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
         system = "你是实体提取专家。只输出实体名，每行一个，不要编号、不要解释、不要重复。"
 
-        async def _discover_one(batch_text: str) -> dict[str, set[str]]:
+        n_batches = len(batches)
+
+        async def _discover_one(batch_text: str, bi: int) -> dict[str, set[str]]:
             async with sem:
                 try:
                     prompt = (
@@ -507,9 +511,16 @@ class DeductionPreprocessor:
                 except Exception as e:
                     logger.debug("[Preprocessor] LLM entity discovery batch failed: %s", e)
                     return {}
+                finally:
+                    if self._progress_cb and n_batches > 1:
+                        try:
+                            self._progress_cb(bi + 1, n_batches)
+                        except Exception:
+                            pass
 
         try:
-            results = await asyncio.gather(*(_discover_one(b) for b in batches))
+            results = await asyncio.gather(
+                *(_discover_one(b, bi) for bi, b in enumerate(batches)))
         except LLMConnectionError:
             logger.warning("[Preprocessor] LLM entity discovery aborted (connection error)")
             return {}
@@ -701,6 +712,10 @@ class DeductionPreprocessor:
             logger.info("[Preprocessor] Created LanceDB vector index (rows=%d)", n_rows)
         except Exception as e:
             logger.debug("[Preprocessor] Vector index skipped: %s", e)
+
+    def set_progress_callback(self, cb: Any) -> None:
+        """Set callback for long-running phases. Called as cb(current, total)."""
+        self._progress_cb = cb
 
     def close(self) -> None:
         self._http.close()

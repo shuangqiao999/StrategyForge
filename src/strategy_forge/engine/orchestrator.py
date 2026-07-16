@@ -348,6 +348,10 @@ class DeductionOrchestrator:
             workspace_root=config.project_root,
             session_id=self.session.id,
         )
+        preprocessor.set_progress_callback(
+            lambda cur, tot: self._log("preprocess",
+                                       f"LLM 实体发现进度 {cur}/{tot}")
+        )
         await preprocessor.preprocess(self.session.source_material)
         self._preprocessor = preprocessor
 

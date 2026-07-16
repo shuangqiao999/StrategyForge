@@ -166,7 +166,7 @@ async def create_agents_from_graph(
         included_freqs = [
             freq_map.get(e["name"], 0) for e in intel_list if e.get("include_in_simulation")
         ]
-        freq_threshold = int(statistics.median(included_freqs)) if included_freqs else 5
+        freq_threshold = int(statistics.median(included_freqs) // 3) if included_freqs else 5
         freq_threshold = max(3, freq_threshold)  # 至少出现 3 次才兜底
         fallback_count = 0
 
