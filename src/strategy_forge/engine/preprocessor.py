@@ -75,8 +75,9 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 class DeductionPreprocessor:
-    # 嵌入文本上限：放宽到与切片上限(1536)一致，避免长 chunk 只嵌入开头导致召回不全。
-    _INDEX_PREFIX_LEN = 1536
+    # 嵌入文本前缀长度：适配 2048-token 上下文窗口的嵌入模型（如 text-embedding-embeddinggemma-300m-qat）。
+    # 中文最坏情况下 ~2 tokens/char，1000 字 ≈ 2000 tokens，安全余量内。
+    _INDEX_PREFIX_LEN = 1000
 
     def __init__(self, workspace_root: str | Path, session_id: str) -> None:
         ws = Path(workspace_root)
@@ -436,8 +437,7 @@ class DeductionPreprocessor:
         from strategy_forge.core.providers import registry as _reg
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient, Message, LLMConnectionError
 
-        BATCH_CHARS = 5000
-        MAX_BATCHES = 60
+        BATCH_CHARS = 4000
         MIN_KNOWN = 5
 
         # ── 1. Filter: skip chunks already rich in jieba-discovered entities ──
@@ -470,22 +470,13 @@ class DeductionPreprocessor:
         if current:
             batches.append(current)
 
-        # ── 3. Cap: uniform sampling for extremely long texts ──
-        if len(batches) > MAX_BATCHES:
-            step = max(1, len(batches) // MAX_BATCHES)
-            sampled = []
-            for i in range(0, len(batches), step):
-                sampled.append(batches[i])
-                if len(sampled) >= MAX_BATCHES:
-                    break
-            logger.info("[Preprocessor] LLM entity discovery: %d batches -> sampled %d (cap=%d)",
-                        len(batches), len(sampled), MAX_BATCHES)
-            batches = sampled
-
+        # 全量处理：移除 MAX_BATCHES 采样上限，所有 batch 都送 LLM。
         if not batches:
             return {}
 
-        # ── 4. Concurrent LLM calls ──
+        logger.info("[Preprocessor] LLM entity discovery: %d batches (no cap)", len(batches))
+
+        # ── 3. Concurrent LLM calls ──
         client = LLMClient()
         sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
         system = "你是实体提取专家。只输出实体名，每行一个，不要编号、不要解释、不要重复。"

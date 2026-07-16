@@ -133,8 +133,9 @@ async def build_graph(
                 name, aliases = item
                 return (freq_map.get(name, 0), cov_map.get(name, 0), len(aliases))
             hf_sorted = sorted(high_freq.items(), key=_entity_rank, reverse=True)
-            # 动态上限：文本越长，定向抽取的实体越多（上限 50，下限 25）
-            dyn_cap = min(50, max(25, len(hf_sorted) // 5))
+            # 动态上限：按实体总数自适应缩放（长文本自动扩容，无硬上限）
+            # 1-10M 字文本可能有 1000+ 高频实体，必须给足够多定向抽取名额
+            dyn_cap = max(50, len(hf_sorted) // 4)
             hf_items = hf_sorted[:dyn_cap]
             log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (动态上限={dyn_cap})")
             prompts: list[str | None] = []
