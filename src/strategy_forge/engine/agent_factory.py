@@ -140,21 +140,6 @@ async def create_agents_from_graph(
         persons = deduped
 
     # Intelligence sorting: filter non-strategic entities
-    # 类型常量：用于区分"人物"和"组织/国家/政党"，在 intel_list 分支中按场景决定是否排除组织
-    _PERSON_TYPES = {"Person", "person", "人物", "角色", "人",
-                     "领导者", "领导", "agent", "Agent"}
-    _ORG_TYPES = {"组织", "Organization", "organization", "org",
-                  "国家", "Country", "country", "nation",
-                  "政党", "PoliticalParty", "party", "党派",
-                  "政府", "Government", "government",
-                  "媒体", "Media", "Newspaper", "newspaper",
-                  "机构", "Institution",
-                  "军队", "Military", "military",
-                  "团体", "Group", "联盟", "Alliance",
-                  "城市", "City", "地点", "Location", "Place",
-                  "地理区域", "地区", "Region",
-                  "政治实体", "PoliticalEntity",
-                  "公司", "Company", "企业", "Enterprise"}
     if intel_list:
         intel_map = {e["name"]: e for e in intel_list if e.get("name")}
         # Build reverse alias mapping from IntelSorter for cross-name matching
@@ -208,25 +193,6 @@ async def create_agents_from_graph(
                 continue  # IntelSorter显式标记为非战略 → 排除
 
             filtered.append(p)
-
-        # ── 两遍过滤：组织/国家/政党仅在"人物为主"场景下排除 ──
-        # 先分类候选：人物 vs 组织。仅当存在人物型智能体时，才排除其所属组织。
-        persons_in = []
-        orgs_in = []
-        for p in filtered:
-            etype = (p.get("type") or "").strip()
-            if etype and etype in _PERSON_TYPES:
-                persons_in.append(p)
-            elif etype and etype in _ORG_TYPES:
-                orgs_in.append(p)
-            else:
-                persons_in.append(p)  # 未知类型视为人物，保守保留
-        if persons_in and orgs_in:
-            _org_names = {p.get("name") for p in orgs_in}
-            log_fn("agents", f"组织类型过滤: 排除 {len(orgs_in)} 个组织/国家/政党")
-            filtered = persons_in
-        else:
-            filtered = persons_in + orgs_in
 
         persons = filtered
         persons = filtered
