@@ -33,17 +33,28 @@ class PreprocessResult:
 
 def _merge_entity_dicts(jieba_entities: dict[str, set[str]],
                         llm_entities: dict[str, set[str]]) -> dict[str, set[str]]:
-    """Merge LLM-discovered entities into jieba entity dict. Dedup by name with fuzzy matching."""
+    """Merge LLM-discovered entities into jieba entity dict. Dedup by name with fuzzy matching.
+
+    When substring containment is detected, prefers the LONGER name (more complete).
+    E.g. LLM finds "国家复兴党", jieba has "复兴党" → keeps "国家复兴党", aliases "复兴党".
+    E.g. jieba has "赖清德（台湾）", LLM finds "赖清德" → keeps "赖清德（台湾）", aliases "赖清德".
+    """
     merged = dict(jieba_entities)
     for name, _aliases in llm_entities.items():
         key = name.strip()
         if not key:
             continue
-        # Fuzzy dedup: check if this name is a near-match of any existing entity
         existing = _find_fuzzy_match(key, merged.keys())
         if existing:
-            merged[existing].update(_aliases or set())
-            logger.debug("[Preprocessor] fuzzy merge: %s → %s", key, existing)
+            if len(key) > len(existing):
+                # LLM name is longer/more complete → replace jieba fragment
+                merged[key] = merged.pop(existing) | (_aliases or set())
+                merged[key].add(existing)
+                logger.debug("[Preprocessor] fuzzy merge (reversed): %s → %s", existing, key)
+            else:
+                merged[existing].update(_aliases or set())
+                merged[existing].add(key)
+                logger.debug("[Preprocessor] fuzzy merge: %s → %s", key, existing)
         elif key not in merged:
             merged[key] = set()
     return merged
