@@ -191,6 +191,26 @@ async def create_agents_from_graph(
                     continue
             if not intel_entry.get("include_in_simulation", False):
                 continue  # IntelSorter显式标记为非战略 → 排除
+
+            # 排除组织/国家/政党类型的实体（与所属人物同台博弈会造成画蛇添足）。
+            # 图节点类型由 jieba POS 标注 + 图谱 LLM 抽取共同决定，覆盖中英文。
+            etype = (p.get("type") or "").strip()
+            if etype and etype not in ("Person", "person", "人物", "角色", "人",
+                                        "领导者", "领导", "agent", "Agent"):
+                non_person = {"组织", "Organization", "organization", "org",
+                              "国家", "Country", "country", "nation",
+                              "政党", "PoliticalParty", "party", "党派",
+                              "政府", "Government", "government",
+                              "媒体", "Media", "Newspaper", "newspaper",
+                              "机构", "Institution",
+                              "军队", "Military", "military",
+                              "团体", "Group", "联盟", "Alliance",
+                              "城市", "City", "地点", "Location", "Place",
+                              "地理区域", "地区", "Region",
+                              "政治实体", "PoliticalEntity",
+                              "公司", "Company", "企业", "Enterprise"}
+                if etype in non_person:
+                    continue  # 组织/国家类排除，不作为独立智能体
             filtered.append(p)
         persons = filtered
         if fallback_count:
