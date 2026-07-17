@@ -157,11 +157,15 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
                        conflict_n: int = 15, tail_n: int = 15) -> list[str]:
     """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。
 
-    替代"只取尾部N条"——保证指控/背叛/结盟等因果关键事件必然进入
-    收束视野，结局判定才有完整证据链。冲突事件按关键词命中数加权，
-    采样后恢复时间顺序。
+    事件总数 <= (head+conflict+tail) 时全量返回；超长推演（50轮+）自动
+    扩容比例——固定采样量在全本推演中会丢弃 95% 的事件，报告失去因果链。
     """
-    if len(events) <= head_n + conflict_n + tail_n:
+    # 超长推演：conflict_n 随事件量线性扩容（取总数 15%，保底 15）
+    total = len(events)
+    if total > 200:
+        conflict_n = max(15, int(total * 0.15))
+        tail_n = max(15, int(total * 0.10))
+    if total <= head_n + conflict_n + tail_n:
         return events
     head = events[:head_n]
     tail = events[-tail_n:]
@@ -419,8 +423,10 @@ async def generate_report(
             agents = graph.query(
                 f"MATCH (a:{graph.AGENT_TABLE}) RETURN a.name, a.persona ORDER BY a.name")
             if agents:
+                # 智能体概览上限随总数自适应：长篇推演 50+ 智能体时扩容
+                agent_limit = min(len(agents), max(12, session.agent_count // 2))
                 agent_overview = "\n".join(
-                    f"- {r[0]}: {r[1][:60]}" for r in agents[:12] if r[0])
+                    f"- {r[0]}: {r[1][:60]}" for r in agents[:agent_limit] if r[0])
                 log_fn("report", f"智能体总览 {len(agents)} 个注入报告")
         except Exception:
             pass
@@ -431,7 +437,9 @@ async def generate_report(
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
-    numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-20:])]
+    # 关键事件注入数量自适应：长推演需要更多上下文支撑因果链
+    event_limit = min(len(key_events), max(20, len(key_events) // 10))
+    numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-event_limit:])]
 
     # ── 模式选择：叙事模式 vs 量化模式 ──
     is_narrative = states is None or len(states) == 0
