@@ -412,6 +412,18 @@ class DeductionOrchestrator:
                 from strategy_forge.engine.narrative_sorter import sort_narrative_entities
                 from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
+                # 查询每个实体的图类型（Person/Location/Organization/Position 等），
+                # 传入 sorter 供 LLM 判断角色 vs 背景（地点/机构/职衔应排除）
+                entity_types: dict[str, str] = {}
+                try:
+                    rows = self.graph._conn.execute(
+                        f"MATCH (e:{self.graph.NODE_TABLE}) RETURN e.name, e.type")
+                    while rows.has_next():
+                        r = rows.get_next()
+                        if r[0] and r[1]:
+                            entity_types[str(r[0])] = str(r[1])
+                except Exception:
+                    pass
                 # 传递预处理器的实体统计和分块数据，供超长文本构建全局视图
                 pp = getattr(self, "_preprocessor", None)
                 pp_result = pp.result if pp else None
@@ -423,6 +435,7 @@ class DeductionOrchestrator:
                     entity_frequencies=entity_freq,
                     entity_chunk_coverage=entity_cov,
                     chunk_texts=chunk_texts,
+                    entity_types=entity_types,
                 )
                 if self._intel_list:
                     active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
@@ -436,7 +449,8 @@ class DeductionOrchestrator:
                             try:
                                 merged_total += self.graph.merge_alias_nodes(e.get("name", ""), aliases)
                             except Exception as ex:
-                                logger.debug("[Orchestrator] 别名合并失败 %s: %s", e.get("name"), ex)
+                                logger.warning("[Orchestrator] 别名合并失败 %s: %s",
+                                               e.get("name"), ex)
                     if merged_total:
                         e_count2 = self.graph.count_entities()
                         self.store.update(self.session.id, entity_count=e_count2)

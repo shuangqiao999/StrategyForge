@@ -667,6 +667,22 @@ class DeductionPreprocessor:
                 logger.info("[Preprocessor] Entities (jieba+LLM): %d total, %d high-freq, %d low-freq",
                             len(merged), len(high_freq), len(low_freq))
                 all_entities = merged
+
+            # ── 可疑实体检测：低频实体与高频实体 Levenshtein 距离 ≤2 且频次悬殊 → 可能是编码残留
+            _suspicious = []
+            hf_names = {n for n in high_freq if len(n) >= 2}
+            for n, f in sorted(entity_freq.items(), key=lambda x: x[1]):
+                if f >= 3 or len(n) < 2:
+                    continue
+                for h in hf_names:
+                    if len(h) == len(n) and n != h and _levenshtein(n, h) <= 2:
+                        hf_f = entity_freq.get(h, 0)
+                        if hf_f >= f * 3:
+                            _suspicious.append(f"'{n}'(freq={f}) vs '{h}'(freq={hf_f})")
+                            break
+            if _suspicious:
+                logger.warning("[Preprocessor] 可疑低频实体（疑似编码残留/误切）: %s",
+                               "; ".join(_suspicious[:5]))
         except Exception as e:
             logger.warning("[Preprocessor] LLM entity discovery failed, using jieba only: %s", e)
 

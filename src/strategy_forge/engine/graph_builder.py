@@ -228,8 +228,8 @@ async def build_graph(
             for std_name, _aliases in all_aliases_map.items():
                 try:
                     graph.merge_alias_nodes(std_name, _aliases)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("[Graph] alias merge failed for '%s': %s", std_name, e)
             log_fn("graph", f"图谱批量写入完成: {total_entities} 实体, {total_relations} 关系")
 
         # ── 低频实体 → 语义分块顺带抽取 ──
