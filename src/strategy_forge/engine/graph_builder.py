@@ -114,7 +114,19 @@ async def build_graph(
             log_fn("graph", f"实体驱动模式: {len(high_freq)} 个高频实体定向抽取")
             system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
-            # Pre-format constant parts using Template (safe from { } in alias_map JSON)
+            # ── Phase 1（顺序·廉价）：实体排名 + 动态上限 ──
+            from strategy_forge.core.tokenizer import compress_to_keywords
+            freq_map = getattr(result, "entity_frequencies", {}) or {}
+            cov_map = getattr(result, "entity_chunk_coverage", {}) or {}
+            def _entity_rank(item):
+                name, aliases = item
+                return (freq_map.get(name, 0), cov_map.get(name, 0), len(aliases))
+            hf_sorted = sorted(high_freq.items(), key=_entity_rank, reverse=True)
+            dyn_cap = max(50, len(hf_sorted) // 4)
+            hf_items = hf_sorted[:dyn_cap]
+            log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (动态上限={dyn_cap})")
+
+            # ── Phase 1.5: 构建抽取模板（白名单随 dyn_cap 自适应）──
             white_count = min(len(candidate_names), max(200, dyn_cap * 2))
             _extract_base = Template(_EXTRACT_PROMPT).substitute(
                 text="__TEXT__",
@@ -123,22 +135,6 @@ async def build_graph(
                 candidate_entities=", ".join(candidate_names[:white_count]),
                 alias_map=alias_map_str,
             )
-
-            # ── Phase 1（顺序·廉价）：混合检索 + 构建每实体抽取 prompt ──
-            from strategy_forge.core.tokenizer import compress_to_keywords
-            # 超长文本：按实体在原文中的出现频次排序（而非别名数），确保被高频提及的角色
-            # 优先获得定向深度抽取；chunk 覆盖度作为次要排序键（跨章节角色更重要）。
-            freq_map = getattr(result, "entity_frequencies", {}) or {}
-            cov_map = getattr(result, "entity_chunk_coverage", {}) or {}
-            def _entity_rank(item):
-                name, aliases = item
-                return (freq_map.get(name, 0), cov_map.get(name, 0), len(aliases))
-            hf_sorted = sorted(high_freq.items(), key=_entity_rank, reverse=True)
-            # 动态上限：按实体总数自适应缩放（长文本自动扩容，无硬上限）
-            # 1-10M 字文本可能有 1000+ 高频实体，必须给足够多定向抽取名额
-            dyn_cap = max(50, len(hf_sorted) // 4)
-            hf_items = hf_sorted[:dyn_cap]
-            log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (动态上限={dyn_cap})")
             prompts: list[str | None] = []
             for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
