@@ -165,15 +165,17 @@ async def build_graph(
             idxs = [k for k, p in enumerate(prompts) if p is not None]
             # 用 as_completed 替代 gather——每完成一个 LLM 调用立即 parse 并输出进度，
             # 避免 109 次调用全等完才开始显示进度（界面空等 27-55 分钟）
-            content_by_idx: dict[int, str | None] = {}
             _ent_pool: list[tuple[str, str, str, str]] = []
             _rel_pool: list[tuple[str, str, str, str]] = []
             all_aliases_map: dict[str, list[str]] = dict(high_freq)
-            tasks = {asyncio.ensure_future(_extract_call(prompts[i])): i for i in idxs}
+
+            async def _extract_with_idx(idx: int, prompt: str) -> tuple[int, str | None]:
+                return (idx, await _extract_call(prompt))
+
+            pending = [asyncio.ensure_future(_extract_with_idx(i, prompts[i])) for i in idxs]
             completed = 0
-            for coro in asyncio.as_completed(tasks):
-                i = tasks[coro]
-                content = await coro
+            for coro in asyncio.as_completed(pending):
+                i, content = await coro
                 completed += 1
                 if content:
                     try:
