@@ -163,36 +163,36 @@ async def build_graph(
                         return None
 
             idxs = [k for k, p in enumerate(prompts) if p is not None]
-            gathered = await asyncio.gather(*(_extract_call(prompts[k]) for k in idxs))
-            content_by_idx = dict(zip(idxs, gathered, strict=False))
-
-            # ── Phase 2.5（内存缓冲·解析 + 积累，不写 Kuzu）──
-            _ent_pool: list[tuple[str, str, str, str]] = []   # (id, name, type, desc)
-            _rel_pool: list[tuple[str, str, str, str]] = []   # (sid, tid, relation, ev)
+            # 用 as_completed 替代 gather——每完成一个 LLM 调用立即 parse 并输出进度，
+            # 避免 109 次调用全等完才开始显示进度（界面空等 27-55 分钟）
+            content_by_idx: dict[int, str | None] = {}
+            _ent_pool: list[tuple[str, str, str, str]] = []
+            _rel_pool: list[tuple[str, str, str, str]] = []
             all_aliases_map: dict[str, list[str]] = dict(high_freq)
-
-            for i, (std_name, _aliases) in enumerate(hf_items):
-                content = content_by_idx.get(i)
-                if not content:
-                    continue
-                try:
-                    entities, relations = _parse_extraction(content)
-                except Exception as e:
-                    logger.warning("[Graph] parse '%s' failed: %s", std_name, e)
-                    continue
-                for ent in entities:
-                    name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
-                    _ent_pool.append((_make_id(name, ""), name,
-                                      ent.get("type", ""), ent.get("description", "")))
-                for rel in relations:
-                    sid = _make_id(
-                        _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
-                    tid = _make_id(
-                        _reverse_alias.get(rel.get("target", ""), rel.get("target", "")), "")
-                    _rel_pool.append((sid, tid, rel.get("relation", ""), rel.get("evidence", "")))
-                if (i + 1) % 5 == 0 or i == len(hf_items) - 1:
-                    log_fn("graph", f"  实体 {i+1}/{len(hf_items)}: pool={len(_ent_pool)} 实体, {len(_rel_pool)} 关系")
-                # 内存保护：超过阈值触发中间写入防止内存膨胀
+            tasks = {asyncio.ensure_future(_extract_call(prompts[i])): i for i in idxs}
+            completed = 0
+            for coro in asyncio.as_completed(tasks):
+                i = tasks[coro]
+                content = await coro
+                completed += 1
+                if content:
+                    try:
+                        entities, relations = _parse_extraction(content)
+                    except Exception as e:
+                        logger.warning("[Graph] parse '%s' failed: %s", hf_items[i][0], e)
+                        continue
+                    for ent in entities:
+                        name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
+                        _ent_pool.append((_make_id(name, ""), name,
+                                          ent.get("type", ""), ent.get("description", "")))
+                    for rel in relations:
+                        sid = _make_id(
+                            _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
+                        tid = _make_id(
+                            _reverse_alias.get(rel.get("target", ""), rel.get("target", "")), "")
+                        _rel_pool.append((sid, tid, rel.get("relation", ""), rel.get("evidence", "")))
+                if completed % 5 == 0 or completed == len(idxs):
+                    log_fn("graph", f"  实体 {completed}/{len(idxs)}: pool={len(_ent_pool)} 实体, {len(_rel_pool)} 关系")
                 if len(_ent_pool) >= 50_000:
                     log_fn("graph", f"  内存阈值触发: pool={len(_ent_pool)} 实体, 执行中间批量写入")
                     seen_names: set[str] = set()
