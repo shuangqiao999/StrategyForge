@@ -446,7 +446,7 @@ async def generate_report(
     if is_narrative:
         # 叙事模式：故事化报告，temperature 更高鼓励创造性
         agent_count = session.agent_count
-        output_len = max(2000, min(8000, agent_count * 300 + len(key_events) * 80))
+        output_len = max(2000, min(30000, agent_count * 300 + len(key_events) * 80))
         # 语义召回事件单独注入，帮助 LLM 识别跨轮关键情节
         recall_events = [e for e in key_events if "[语义召回]" in e]
         non_recall = [e for e in key_events if "[语义召回]" not in e]

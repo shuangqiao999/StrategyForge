@@ -6,7 +6,7 @@ TEXT = r"E:\gongxiang\软件\资本论\维东国之变.txt"
 
 proc = subprocess.Popen([sys.executable, "run.py", "--port", "8000"],
     cwd=r"E:\gongxiang\StrategyForge", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-time.sleep(8)
+time.sleep(12)
 
 try:
     r = requests.get(f"{API}/domains", timeout=5); r.raise_for_status()
