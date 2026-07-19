@@ -20,6 +20,18 @@ from .token_counter import TokenStats
 
 logger = logging.getLogger(__name__)
 
+# 全局 LLM 并发信号量——所有 client.chat() 统一经过此锁，
+# 确保全推演（图构建/分类器/智能体/模拟/优化器）的总并发 ≤ 界面配置值
+_global_sem: asyncio.Semaphore | None = None
+
+
+def _ensure_global_sem() -> asyncio.Semaphore:
+    global _global_sem
+    if _global_sem is None:
+        mc = max(1, _reg.max_concurrent)
+        _global_sem = asyncio.Semaphore(mc)
+    return _global_sem
+
 
 @dataclass
 class Message:
@@ -134,7 +146,8 @@ class DeductionLLMClient:
 
         t0 = time.monotonic()
         try:
-            resp = await self._request_with_retry(payload)
+            async with _ensure_global_sem():
+                resp = await self._request_with_retry(payload)
             data = resp.json()
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             content = data["choices"][0]["message"]["content"]
