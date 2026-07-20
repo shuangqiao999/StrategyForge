@@ -228,6 +228,8 @@ class DeductionLLMClient:
                                    att_name, attempt + 1, max_retries, delay)
                     await asyncio.sleep(delay)
                     attempt += 1
+        finally:
+            pass
 
     @staticmethod
     def _retry_delay(attempt: int, base: float, cap: float,
