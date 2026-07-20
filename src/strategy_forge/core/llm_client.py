@@ -102,11 +102,12 @@ class DeductionLLMClient:
             mc = max(1, _reg.max_concurrent)
             max_conn = config.deduction_http_max_connections or max(100, mc * 2)
             max_keep = config.deduction_http_max_keepalive or max(20, mc)
-            # [A] 双层超时：连接(短)/生成(长) 在 __init__ 已算好
+            # [A] 双层超时：连接(短)/生成(长) 在 __init__ 已算好；gen=0 表示无上限
+            read_t = None if self._gen_timeout <= 0 else self._gen_timeout
             self._http = httpx.AsyncClient(
                 timeout=httpx.Timeout(connect=self._conn_timeout,
-                                      read=self._gen_timeout,
-                                      write=self._gen_timeout,
+                                      read=read_t,
+                                      write=read_t,
                                       pool=self._conn_timeout),
                 headers=headers,
                 limits=httpx.Limits(max_connections=max_conn,
@@ -188,8 +189,6 @@ class DeductionLLMClient:
         base = max(0.0, float(config.deduction_llm_retry_base))
         cap = max(base, float(config.deduction_llm_retry_cap))
         attempt = 0
-        # 保存原始超时配置，生成超时仅在重试窗口内临时放大，方法退出时恢复
-        _orig_timeout = self._http.timeout if self._http else None
         try:
             while True:
                 try:
@@ -216,19 +215,12 @@ class DeductionLLMClient:
                             raise LLMConnectionError(
                                 f"LLM 响应超时：{url}（{type(e).__name__}: {e}，"
                                 f"已等待 {self._gen_timeout:.0f}s 无数据，已重试 {max_retries} 次。"
-                                f"当前生成超时={self._gen_timeout:.0f}s，"
-                                f"可通过 FORGE_LLM_GENERATION_TIMEOUT 增大（如 3600/7200））",
+                                f"如需设上限可配 FORGE_LLM_GENERATION_TIMEOUT）",
                                 endpoint=url, retries=max_retries, cause=str(e)) from e
                         raise LLMConnectionError(
                             f"LLM 请求失败：{url}（{type(e).__name__}: {e}，"
                             f"已重试 {max_retries} 次仍失败）",
                             endpoint=url, retries=max_retries, cause=str(e)) from e
-                    # 生成超时：递增 read 超时，让重试有更大的等待窗口
-                    if is_gen:
-                        escalated = min(7200.0, self._gen_timeout * (1.5 ** (attempt + 1)))
-                        self._http.timeout = httpx.Timeout(
-                            connect=self._conn_timeout, read=escalated,
-                            write=escalated, pool=self._conn_timeout)
                     delay = self._retry_delay(attempt, base, cap, None)
                     att_name = type(e).__name__
                     logger.warning("[LLM] %s(%s)，第 %d/%d 次重试，%.1fs 后…",
@@ -236,9 +228,6 @@ class DeductionLLMClient:
                                    att_name, attempt + 1, max_retries, delay)
                     await asyncio.sleep(delay)
                     attempt += 1
-        finally:
-            if _orig_timeout is not None:
-                self._http.timeout = _orig_timeout
 
     @staticmethod
     def _retry_delay(attempt: int, base: float, cap: float,
