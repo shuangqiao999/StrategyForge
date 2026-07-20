@@ -87,11 +87,11 @@ class DeductionLLMClient:
         self.model = model or resolved.get("model", "")
         self._http: httpx.AsyncClient | None = None
         # 超时种子值在构造时确定（不依赖 _ensure_client），便于测试与环境注入
-        fallback_t = max(10.0, _reg.llm_timeout)
-        self._conn_timeout = max(10.0, _reg.connect_timeout
-                                 if os.getenv("FORGE_LLM_CONNECT_TIMEOUT") else fallback_t)
-        self._gen_timeout = max(10.0, _reg.generation_timeout
-                                if os.getenv("FORGE_LLM_GENERATION_TIMEOUT") else fallback_t)
+        # 优先级: FORGE_LLM_*_TIMEOUT env > UI保存值 > config默认值
+        _env_conn = os.getenv("FORGE_LLM_CONNECT_TIMEOUT")
+        self._conn_timeout = float(_env_conn) if _env_conn else max(10.0, _reg.connect_timeout)
+        _env_gen = os.getenv("FORGE_LLM_GENERATION_TIMEOUT")
+        self._gen_timeout = float(_env_gen) if _env_gen else _reg.generation_timeout
 
     async def _ensure_client(self):
         if self._http is None:
