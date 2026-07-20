@@ -93,11 +93,14 @@ class StrategyOptimizer:
         from strategy_forge.core.config import config
         from strategy_forge.core.providers import registry as _reg
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-        from strategy_forge.engine.agent_factory import create_agents_from_graph
-        from strategy_forge.engine.graph_builder import build_graph
-        from strategy_forge.engine.ontology import generate_ontology
-        from strategy_forge.engine.preprocessor import DeductionPreprocessor
+        from strategy_forge.core.token_counter import _current_session, _current_phase
         from strategy_forge.engine.simulator import SimulationEngine
+        from strategy_forge.engine.models import DeductionAgentProfile
+        import json as _json
+
+        # 设置 token 统计上下文
+        _current_session.set(session_id)
+        _current_phase.set("optimizer")
 
         def olog(msg: str) -> None:
             self.engine.log(session_id, "optimize", msg)
@@ -111,24 +114,40 @@ class StrategyOptimizer:
         total_rounds = session.total_rounds or _reg.default_rounds
         max_concurrent = max_concurrent or _reg.max_concurrent
 
-        # ── 1. 自建基线：一次 Phase1-3（失败必须传播） ──
-        olog("优化器启动：构建基线（本体 → 图谱 → 智能体）...")
+        # ── 1. 复用主会话基线（实体/图谱/智能体已由正常推演流程构建并经过 sorter 过滤）──
+        olog("优化器启动：复用主会话基线...")
+        graph = self.engine.get_graph(session_id)
+        # 从 Kuzu 读取已持久化的 Agent 节点（经过 agent_factory + intel_list 过滤）
+        stored_agents = []
         try:
-            ontology = await generate_ontology(source)
-            preprocessor = DeductionPreprocessor(config.project_root, session_id)
-            await preprocessor.preprocess(source)
-            graph = self.engine.get_graph(session_id)
-            await build_graph(
-                source=source, graph=graph, ontology=ontology,
-                log_fn=lambda _p, m: olog(m), preprocessor=preprocessor,
-            )
-            agents = await create_agents_from_graph(
-                graph=graph, source_material=source,
-                log_fn=lambda _p, m: olog(m), preprocessor=preprocessor,
-            )
+            stored_agents = graph.get_agents()
         except Exception as e:
-            logger.exception("[Optimizer] baseline build failed")
-            raise RuntimeError(f"优化器基线构建失败：{e}") from e
+            logger.warning("[Optimizer] 读取已存智能体失败: %s", e)
+            stored_agents = []
+        if stored_agents:
+            agents = []
+            type_map: dict[str, str] = {}
+            try:
+                erows = graph.query(f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.type")
+                type_map = {r[0]: r[1] for r in erows if r[0] and r[1]}
+            except Exception:
+                pass
+            for a in stored_agents:
+                try:
+                    goals = _json.loads(a.get("goals") or "[]")
+                except (ValueError, TypeError):
+                    goals = []
+                agents.append(DeductionAgentProfile(
+                    entity_id=a.get("id", ""),
+                    name=a.get("name", ""),
+                    persona=a.get("persona", ""),
+                    background=a.get("background", ""),
+                    goals=goals if isinstance(goals, list) else [],
+                    entity_type=type_map.get(a.get("id", ""), ""),
+                ))
+            olog(f"复用主会话基线: {len(agents)} 个智能体（已通过 sorter 过滤）")
+        else:
+            raise RuntimeError("主会话未完成智能体生成，请先完成一次推演再使用优化器")
 
         if not agents:
             raise RuntimeError("基线构建完成但未产生任何智能体，请检查种子材料是否包含人物(Person)实体")
@@ -196,7 +215,7 @@ class StrategyOptimizer:
                     states_copy = {eid: copy.deepcopy(st) for eid, st in base_states.items()}
                     sim = SimulationEngine(
                         agents=agents, graph=graph, total_rounds=total_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
@@ -212,7 +231,7 @@ class StrategyOptimizer:
                 else:
                     sim = SimulationEngine(
                         agents=agents, graph=graph, total_rounds=total_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                     )
@@ -278,7 +297,7 @@ class StrategyOptimizer:
                     rep_states = {eid: copy.deepcopy(st) for eid, st in base_states.items()}
                     rep_sim = SimulationEngine(
                         agents=agents, graph=graph, total_rounds=total_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=preprocessor,
+                        log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[rec_sc["directive"]] if rec_sc.get("directive") else [],
                         seed=20240101, temperature=0.6, persist_events=True, max_concurrent=None,
                         rule_engine=rule_engine, states=rep_states, enable_narrate=False,
@@ -292,7 +311,7 @@ class StrategyOptimizer:
                     session.current_round = total_rounds
                     rep = await generate_report(
                         session=session, graph=graph, rounds=rep_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=preprocessor)
+                        log_fn=lambda _p, _m: None, preprocessor=None)
                     payload = {
                         "summary": rep.summary,
                         "key_events": rep.key_events,
