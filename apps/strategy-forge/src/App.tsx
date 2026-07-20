@@ -956,7 +956,8 @@ export default function App() {
                     </button>
                   ) : (
                     <button className="btnSmall btnSmallPrimary" style={{ marginRight: 6 }} onClick={startOptimize}
-                      disabled={selected ? RUNNING_SET.has(selected.status) : false}>
+                      disabled={selected ? (RUNNING_SET.has(selected.status) || (selected.agent_count || 0) < 1) : true}
+                      title={!selected ? "请先选择会话" : (selected.agent_count || 0) < 1 ? "请先完成一次推演以生成智能体" : "启动策略优化"}>
                       启动优化
                     </button>
                   )
