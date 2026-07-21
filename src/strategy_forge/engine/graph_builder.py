@@ -171,10 +171,11 @@ async def build_graph(
             _seen_names: list[str] = []  # 已提取实体名——后续调用追加排除提示
 
             async def _extract_with_idx(idx: int, prompt: str) -> tuple[int, str | None]:
-                # 在 prompt 末尾追加已发现实体排除列表，避免 LLM 重复输出
+                # 在 prompt 末尾追加已发现实体列表——无需重复输出实体条目，
+                # 但涉及这些实体的新关系仍可提取
                 _max_exclude = min(200, len(_seen_names))
                 if _max_exclude > 0:
-                    prompt = f"{prompt}\n\n## 已在之前的提取中发现（请勿重复输出）\n{', '.join(_seen_names[:_max_exclude])}"
+                    prompt = f"{prompt}\n\n## 已在之前提取中发现的实体（无需输出条目，但涉及它们的新关系仍可提取）\n{', '.join(_seen_names[:_max_exclude])}"
                 return (idx, await _extract_call(prompt))
 
             pending = [asyncio.ensure_future(_extract_with_idx(i, prompts[i])) for i in idxs]
