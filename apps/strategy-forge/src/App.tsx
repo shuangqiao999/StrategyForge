@@ -217,7 +217,8 @@ export default function App() {
   const [cfgRecallBoost, setCfgRecallBoost] = useState(true);
    const [cfgEventHybrid, setCfgEventHybrid] = useState(true);
    const [cfgRetryPasses, setCfgRetryPasses] = useState(3);
-  const [cfgFailThreshold, setCfgFailThreshold] = useState(0.75);
+   const [cfgFailThreshold, setCfgFailThreshold] = useState(0.75);
+   const [cfgChunkSize, setCfgChunkSize] = useState(1000);
 
   // ── 模型类型甄别：嵌入模型关键词 ──
   const EMBED_MODEL_KW = ["embed", "embedding", "bge", "e5", "gte", "stella", "nomic", "jina"];
@@ -241,6 +242,7 @@ export default function App() {
         setCfgSafetyNet(eng.intel_safety_net ?? true); setCfgRecallBoost(eng.recall_rel_boost ?? true);
         setCfgEventHybrid(eng.event_hybrid ?? true);
         setCfgRetryPasses(eng.retry_passes ?? 3); setCfgFailThreshold(eng.sim_fail_threshold ?? 0.75);
+        setCfgChunkSize(eng.chunk_size ?? 1000);
       }
       return !!(pr && (pr.providers || []).length);
     } catch { return false; }
@@ -328,6 +330,7 @@ export default function App() {
           retrieve_top_k: cfgRetrieveTopK, similarity_threshold: cfgSimilarity,
           intel_safety_net: cfgSafetyNet, recall_rel_boost: cfgRecallBoost, event_hybrid: cfgEventHybrid,
           retry_passes: cfgRetryPasses, sim_fail_threshold: cfgFailThreshold,
+          chunk_size: cfgChunkSize,
         }),
       });
       await fetchConfig();
@@ -337,7 +340,7 @@ export default function App() {
   }, [cfgLLMBase, cfgLLMKey, cfgLLMModel, cfgLLMProvider, cfgLLMTemp, cfgEmbedBase, cfgEmbedKey, cfgEmbedModel, cfgEmbedProvider,
       cfgDefaultRounds, cfgMaxAgents, cfgCandidateCount, cfgMaxConcurrent, cfgRetrieveTopK, cfgSimilarity,
       cfgSafetyNet, cfgRecallBoost, cfgEventHybrid,
-      cfgRetryPasses, cfgFailThreshold, fetchConfig]);
+      cfgRetryPasses, cfgFailThreshold, cfgChunkSize, fetchConfig]);
 
   const fetchSessions = useCallback(async (): Promise<boolean> => {
     try {
@@ -1970,9 +1973,11 @@ export default function App() {
                 <input type="range" min={0} max={1} step={0.05} value={cfgSimilarity} onChange={e => setCfgSimilarity(parseFloat(e.target.value))} style={{ width: "100%" }} />
                 <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>混合检索 <span style={{ color: "#64748b" }}>— LanceDB 向量+全文混合</span><Toggle checked={cfgEventHybrid} onChange={setCfgEventHybrid} /></label>
                 <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>关系增强 <span style={{ color: "#64748b" }}>— Kuzu 邻居增强检索</span><Toggle checked={cfgRecallBoost} onChange={setCfgRecallBoost} /></label>
+                <label style={lbl}>分块大小: {cfgChunkSize} <span style={{ color: "#64748b" }}>— 语义分块上限（影响嵌入精度，默认1000）</span></label>
+                <input style={inp} type="number" min={256} max={2048} step={64} value={cfgChunkSize} onChange={e => setCfgChunkSize(Math.max(256, Number(e.target.value) || 1000))} />
 
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", marginTop: 12, marginBottom: 8, borderLeft: "3px solid #f59e0b", paddingLeft: 8 }}>实体</div>
-                <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>安全网 <span style={{ color: "#64748b" }}>— 过滤非独立决策实体(部门/职务)</span><Toggle checked={cfgSafetyNet} onChange={setCfgSafetyNet} /></label>
+                <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>安全网 <span style={{ color: "#64748b" }}>— 过滤非独立决策实体（仅量化模式有效）</span><Toggle checked={cfgSafetyNet} onChange={setCfgSafetyNet} /></label>
               </>
             )}
 
