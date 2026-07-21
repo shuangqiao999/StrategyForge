@@ -178,6 +178,12 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     scored.sort(key=lambda x: (-x[0], x[1]))
     picked = sorted(scored[:conflict_n], key=lambda x: x[1])
     conflict = [e for _, _, e in picked]
+    # 量化模式（diplomatic_engagement/tech_investment 等）不含冲突关键词，
+    # 冲突采样可能落空——兜底用均匀采样补齐到 conflict_n 条
+    if len(conflict) < conflict_n and middle:
+        step = max(1, len(middle) // conflict_n)
+        extra = [middle[i] for i in range(0, len(middle), step)][:conflict_n - len(conflict)]
+        conflict = sorted(conflict + extra, key=lambda e: events.index(e))
     seen: set[str] = set()
     out: list[str] = []
     for e in head + conflict + tail:
@@ -438,7 +444,8 @@ async def generate_report(
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
 
-    # ── 模式选择：叙事模式 vs 量化模式 ──
+    # ── 统一弧线采样（head + conflict + tail），量化/叙事双模式共用 ──
+    arc_events = _sample_arc_events(key_events)
     is_narrative = states is None or len(states) == 0
     if is_narrative:
         # 叙事模式：故事化报告，temperature 更高鼓励创造性
@@ -505,7 +512,7 @@ async def generate_report(
     default_report = DeductionReport(
         session_id=session.id,
         summary="推演完成，请查看详细事件记录。",
-        key_events=[{"description": e} for e in key_events[-20:]],
+        key_events=[{"description": e} for e in arc_events],,
         agent_trajectories=agent_trajectories,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
@@ -570,7 +577,7 @@ async def generate_report(
     return DeductionReport(
         session_id=session.id,
         summary=narrative,
-        key_events=[{"description": e} for e in key_events[-20:]],
+        key_events=[{"description": e} for e in arc_events],,
         agent_trajectories=default_report.agent_trajectories,
         risk_alerts=normalized_risks,
         recommendations=normalized_recs,
