@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 hiddenimports = []
 hiddenimports += collect_submodules('strategy_forge')
 hiddenimports += [
+    'strategy_forge.engine.reporter',
     'kuzu',
     'lancedb',
     'jieba',
