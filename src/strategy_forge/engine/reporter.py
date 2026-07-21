@@ -437,9 +437,6 @@ async def generate_report(
     immutable_goals = "；".join(pre_goals) if pre_goals else "（无）"
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
-    # 关键事件注入数量自适应：长推演需要更多上下文支撑因果链
-    event_limit = min(len(key_events), max(20, len(key_events) // 10))
-    numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(key_events[-event_limit:])]
 
     # ── 模式选择：叙事模式 vs 量化模式 ──
     is_narrative = states is None or len(states) == 0
@@ -475,6 +472,9 @@ async def generate_report(
         system = "你是叙事文学作家，撰写故事化推演叙事。只输出 JSON。"
         report_temp = 0.75
     else:
+        # 量化模式也使用弧线采样（与叙事模式一致），避免报告只引用尾轮事件
+        arc_events = _sample_arc_events(key_events)
+        numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(arc_events)]
         prompt_str = Template(_REPORT_PROMPT).substitute(
             title=session.title or "推演会话",
             domain=domain_text,
