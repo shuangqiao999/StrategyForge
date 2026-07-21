@@ -1792,8 +1792,8 @@ class SimulationEngine:
                     reason = f"环境剧变({k}{delta:+.0f})"
                     break
 
-            # 条件2：该 Agent 的关系网络发生变化
-            if reason is None:
+            # 条件2：该 Agent 的关系网络发生变化（最小间隔 3 轮，避免每轮触发）
+            if reason is None and (round_number - last_r) >= 3:
                 prev_rels = getattr(self, "_prev_rel_map", {})
                 curr_rels = self._rel_context.get(eid, {})
                 prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
@@ -1807,12 +1807,15 @@ class SimulationEngine:
             if reason is None and (round_number - last_r) > 6:
                 reason = "长期无反思保护"
 
-            if reason:
+            if reason is not None:
                 await self._reflect_narrative(agent, round_number, _rc)
                 self._reflection_baselines[eid] = dict(self._narrative_env)
                 self._last_reflection_round_n[eid] = round_number
                 self._log("simulation",
                     f"[人格演化] {agent.name}: {reason} (R{round_number})")
+
+        # 保存本轮关系网络快照供下轮对比
+        self._prev_rel_map = dict(getattr(self, "_rel_context", {}))
 
         # 轮末快照(供报告/趋势) + 可选叙事解读
         sim_round.state_delta["states"] = {

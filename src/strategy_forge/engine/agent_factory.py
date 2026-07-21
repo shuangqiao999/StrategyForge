@@ -236,7 +236,13 @@ async def create_agents_from_graph(
         "info_war": "信息舆论参与方",
         "geo_strategy": "地缘战略决策主体",
     }
-    _domain_role = _DOMAIN_ROLES.get(domain, "独立博弈者")
+    _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
+                      "公司", "企业", "组织", "机构"}
+    def _entity_role(person: dict) -> str:
+        etype = (person.get("type") or "").strip()
+        if etype in _COMPANY_TYPES:
+            return "科技企业或行业参与者"
+        return _DOMAIN_ROLES.get(domain, "独立博弈者")
 
     def _fallback(nm: str) -> dict:
         return {"persona": f"{nm}是一个参与事件的独立个体",
@@ -258,12 +264,12 @@ async def create_agents_from_graph(
                 parent_info=parent_info, sub_info=sub_info,
                 context=full_context[:8000],
                 keywords=", ".join(keywords) if keywords else "无",
-                user_expectations=ue, domain_role=_domain_role)
+                user_expectations=ue, domain_role=_entity_role(person))
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
             parent_info=parent_info, sub_info=sub_info,
-            context=source_material[:2000], user_expectations=ue, domain_role=_domain_role)
+            context=source_material[:2000], user_expectations=ue, domain_role=_entity_role(person))
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")

@@ -168,8 +168,13 @@ async def build_graph(
             _ent_pool: list[tuple[str, str, str, str]] = []
             _rel_pool: list[tuple[str, str, str, str]] = []
             all_aliases_map: dict[str, list[str]] = dict(high_freq)
+            _seen_names: list[str] = []  # 已提取实体名——后续调用追加排除提示
 
             async def _extract_with_idx(idx: int, prompt: str) -> tuple[int, str | None]:
+                # 在 prompt 末尾追加已发现实体排除列表，避免 LLM 重复输出
+                _max_exclude = min(200, len(_seen_names))
+                if _max_exclude > 0:
+                    prompt = f"{prompt}\n\n## 已在之前的提取中发现（请勿重复输出）\n{', '.join(_seen_names[:_max_exclude])}"
                 return (idx, await _extract_call(prompt))
 
             pending = [asyncio.ensure_future(_extract_with_idx(i, prompts[i])) for i in idxs]
@@ -187,6 +192,8 @@ async def build_graph(
                         name = _reverse_alias.get(ent.get("entity", ""), ent.get("entity", ""))
                         _ent_pool.append((_make_id(name, ""), name,
                                           ent.get("type", ""), ent.get("description", "")))
+                        if name and name not in _seen_names:
+                            _seen_names.append(name)
                     for rel in relations:
                         sid = _make_id(
                             _reverse_alias.get(rel.get("source", ""), rel.get("source", "")), "")
