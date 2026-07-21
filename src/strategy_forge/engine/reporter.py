@@ -512,7 +512,7 @@ async def generate_report(
     default_report = DeductionReport(
         session_id=session.id,
         summary="推演完成，请查看详细事件记录。",
-        key_events=[{"description": e} for e in arc_events],,
+        key_events=[{"description": e} for e in arc_events],
         agent_trajectories=agent_trajectories,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
@@ -577,7 +577,7 @@ async def generate_report(
     return DeductionReport(
         session_id=session.id,
         summary=narrative,
-        key_events=[{"description": e} for e in arc_events],,
+        key_events=[{"description": e} for e in arc_events],
         agent_trajectories=default_report.agent_trajectories,
         risk_alerts=normalized_risks,
         recommendations=normalized_recs,

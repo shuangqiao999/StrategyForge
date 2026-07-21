@@ -22,6 +22,7 @@ from .models import (
     SessionStatus,
     SimulationRound,
 )
+from .reporter import generate_report  # 模块级导入：PyInstaller静态分析需追踪此路径
 
 logger = logging.getLogger(__name__)
 
@@ -699,7 +700,6 @@ class DeductionOrchestrator:
         _current_phase.set("report")
         self._log("report", "阶段5: 报告生成开始")
 
-        from .reporter import generate_report
         report = await generate_report(
             session=self.session,
             graph=self.graph,
