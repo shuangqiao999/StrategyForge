@@ -1768,25 +1768,51 @@ class SimulationEngine:
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
 
-        # ── 人格动态化：每 REFLECT_INTERVAL 轮或重大指标变化时触发反思 ──
+        # ── 人格动态化：量化/叙事统一使用叙事模式反射逻辑 ──
+        # 条件1：环境累积剧变 / 条件2：关系网络变化 / 条件3：超过6轮无反思
+        if not hasattr(self, "_reflection_baselines"):
+            self._reflection_baselines: dict[str, dict[str, float]] = {}
+            self._last_reflection_round_n: dict[str, int] = {}
+            import random as _random
+            for agent in self.agents:
+                self._last_reflection_round_n[agent.entity_id] = _random.randint(0, 2)
+
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        _rc = LLMClient()
         for agent in self.agents:
-            if agent.entity_id not in states:
-                continue
-            last_rf = self._last_reflection_round.get(agent.entity_id, 0)
-            should_reflect = (round_number - last_rf >= self.REFLECT_INTERVAL)
-            if not should_reflect:
-                # 检查是否有指标累计变化超过阈值
-                st = states[agent.entity_id]
-                history = getattr(st, "history", []) or []
-                recent = [h for h in history if h.get("round", 0) > last_rf]
-                cumsum: dict[str, float] = {}
-                for h in recent:
-                    cumsum[h.get("metric", "")] = cumsum.get(h.get("metric", ""), 0) + abs(float(h.get("delta", 0)))
-                if any(v >= self.REFLECT_DELTA_THRESHOLD for v in cumsum.values()):
-                    should_reflect = True
-            if should_reflect:
-                await self._reflect_and_adapt(agent, round_number, client)
-                self._last_reflection_round[agent.entity_id] = round_number
+            eid = agent.entity_id
+            baseline = self._reflection_baselines.get(eid, dict(self._narrative_env))
+            last_r = self._last_reflection_round_n.get(eid, 0)
+            reason = None
+
+            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >8）
+            for k in self._narrative_env:
+                delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
+                if abs(delta) > 8:
+                    reason = f"环境剧变({k}{delta:+.0f})"
+                    break
+
+            # 条件2：该 Agent 的关系网络发生变化
+            if reason is None:
+                prev_rels = getattr(self, "_prev_rel_map", {})
+                curr_rels = self._rel_context.get(eid, {})
+                prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
+                curr_allies = set(curr_rels.get("allies", []))
+                prev_opps = set(prev_rels.get(eid, {}).get("opponents", []))
+                curr_opps = set(curr_rels.get("opponents", []))
+                if prev_allies != curr_allies or prev_opps != curr_opps:
+                    reason = "关系网络变化"
+
+            # 条件3：长时间无反思保护（超过 6 轮）
+            if reason is None and (round_number - last_r) > 6:
+                reason = "长期无反思保护"
+
+            if reason:
+                await self._reflect_narrative(agent, round_number, _rc)
+                self._reflection_baselines[eid] = dict(self._narrative_env)
+                self._last_reflection_round_n[eid] = round_number
+                self._log("simulation",
+                    f"[人格演化] {agent.name}: {reason} (R{round_number})")
 
         # 轮末快照(供报告/趋势) + 可选叙事解读
         sim_round.state_delta["states"] = {
