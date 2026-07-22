@@ -33,6 +33,7 @@ $user_expectations
 - 战略定位: $role
 - 所属组织: $parent_info
 - 下属机构: $sub_info
+- 实体统计: $entity_stats
 
 ## 原文关键片段（LanceDB 语义检索）
 $context
@@ -67,6 +68,7 @@ $user_expectations
 - 战略定位: $role
 - 所属组织: $parent_info
 - 下属机构: $sub_info
+- 实体统计: $entity_stats
 
 ## 原文背景
 $context
@@ -77,6 +79,12 @@ $context
   "background": "背景故事 (50-100字), 包括关键经历、社会关系、动机",
   "goals": ["目标1", "目标2"]
 }
+
+## persona 质量标准
+好的 persona（具体、有辨识度、可推演行为）：
+  "极端务实的成本控制者，将供应链安全视为信仰。因一次芯片断供导致生产线停滞72小时，此后对供应商采取'三择一'策略——任何关键部件必须同时维护至少三个来源。公开场合低调寡言，私下谈判时极具攻击性。"
+不好的 persona（模板化、无辨识度，不推荐）：
+  "他是一位优秀的领导者，善于团队合作，重视技术创新，致力于推动组织发展。"
 
 【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
 
@@ -254,6 +262,10 @@ async def create_agents_from_graph(
         role = im.get("role", "独立博弈者")
         parent_info = str(im.get("parent") or "无")
         sub_info = ", ".join(str(s) for s in im.get("sub_entities", [])) or "无"
+        # 实体统计：频次+覆盖度帮助LLM区分差异，即使短文本LanceDB片段相同
+        f = freq_map.get(person_name, 0) if freq_map.get(person_name, 0) > 0 else "?"
+        c = preprocessor.result.entity_chunk_coverage.get(person_name, 0) if preprocessor and preprocessor.result else "?"
+        entity_stats = f"频次={f}, 覆盖={c}个分块"
         if fragments:
             from strategy_forge.core.tokenizer import compress_to_keywords
             full_context = "\n---\n".join(fragments)
@@ -264,12 +276,14 @@ async def create_agents_from_graph(
                 parent_info=parent_info, sub_info=sub_info,
                 context=full_context[:8000],
                 keywords=", ".join(keywords) if keywords else "无",
-                user_expectations=ue, domain_role=_entity_role(person))
+                user_expectations=ue, domain_role=_entity_role(person),
+                entity_stats=entity_stats)
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
             parent_info=parent_info, sub_info=sub_info,
-            context=source_material[:2000], user_expectations=ue, domain_role=_entity_role(person))
+            context=source_material[:2000], user_expectations=ue, domain_role=_entity_role(person),
+            entity_stats=entity_stats)
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")
