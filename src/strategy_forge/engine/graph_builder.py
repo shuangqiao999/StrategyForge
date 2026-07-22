@@ -288,6 +288,7 @@ async def _extract_from_chunks(
 
     _chunk_base = Template(_EXTRACT_PROMPT).substitute(
         text="__TEXT__",
+        text_overview="(无概览)",
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
         candidate_entities="(无限制)",
