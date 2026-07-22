@@ -147,6 +147,28 @@ async def create_agents_from_graph(
             log_fn("agents", f"实体去重: {len(persons)} → {len(deduped)}")
         persons = deduped
 
+        # 子串合并兜底：短名是长名的前缀/后缀 → 合并到长名（如"爱德华"→"爱德华·哈珀"）
+        if len(persons) > 1:
+            names = [p.get("name", "") for p in persons]
+            name_to_person = {p.get("name", ""): p for p in persons}
+            merged: dict[str, str] = {}
+            for i, short in enumerate(names):
+                if not short or short in merged:
+                    continue
+                for j, long in enumerate(names):
+                    if i == j or not long or long in merged:
+                        continue
+                    if len(long) - len(short) < 2:
+                        continue
+                    if short in long and (long.startswith(short) or long.endswith(short)):
+                        merged[short] = long
+                        break
+            if merged:
+                persons = [name_to_person[merged.get(n, n)] for n in names
+                           if n not in merged or merged[n] not in merged]
+                persons = list({p.get("name", ""): p for p in persons}.values())
+                log_fn("agents", f"子串去重: {len(merged)} 对合并 → {len(persons)} 个智能体")
+
     # freq_map 初始化前置：_build_prompt 在两种分支都需要
     freq_map: dict[str, int] = {}
     if preprocessor and preprocessor.result:
@@ -236,23 +258,14 @@ async def create_agents_from_graph(
 
     sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
 
-    _DOMAIN_ROLES: dict[str, str] = {
-        "military": "军事力量或决策实体",
-        "business": "企业或行业参与者",
-        "politics": "政治实体或政策制定者",
-        "ecology": "生态主体或环境利益方",
-        "urban": "城市管理机构或市政实体",
-        "tech": "科技企业或研究机构",
-        "info_war": "信息舆论参与方",
-        "geo_strategy": "地缘战略决策主体",
-    }
-    _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
-                      "公司", "企业", "组织", "机构"}
+    _DOMAIN_ROLES: dict[str, str] = {}
     def _entity_role(person: dict) -> str:
+        from strategy_forge.core.rule_templates import get_domain_prompt
         etype = (person.get("type") or "").strip()
         if etype in _COMPANY_TYPES:
             return "科技企业或行业参与者"
-        return _DOMAIN_ROLES.get(domain, "独立博弈者")
+        domain_role = get_domain_prompt(domain, "agent_domain_role")
+        return domain_role or "独立博弈者"
 
     def _fallback(nm: str) -> dict:
         return {"persona": f"{nm}是一个参与事件的独立个体",

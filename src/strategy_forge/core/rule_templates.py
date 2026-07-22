@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -237,10 +238,7 @@ def get_template(domain: str) -> dict[str, Any] | None:
 
 
 def list_domains() -> list[dict[str, str]]:
-    """供前端下拉使用的领域清单（仅返回从 JSON 文件加载成功的规则包）。
-
-    _rules_loaded_from_file 为 False 时返回空列表——前端如实显示"无规则包"。
-    """
+    """供前端下拉使用的领域清单（仅返回从 JSON 文件加载成功的规则包）。"""
     if not _rules_loaded_from_file:
         return []
     def _safe(s: str) -> str:
@@ -249,5 +247,38 @@ def list_domains() -> list[dict[str, str]]:
             for k, v in _RULE_CACHE.items()]
 
 
+_DOMAIN_PROMPTS: dict[str, dict[str, str]] = {}
+
+
+def reload_domain_prompts() -> None:
+    global _DOMAIN_PROMPTS
+    rule_dir = os.environ.get("FORGE_RULE_DIR")
+    if rule_dir:
+        path = Path(rule_dir) / "domain_prompts.json"
+    else:
+        path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule" / "domain_prompts.json"
+    if not path.exists():
+        alt = Path(_get_data_dir()) / "rule" / "domain_prompts.json"
+        if alt.exists():
+            path = alt
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        if isinstance(data, dict):
+            # Filter out metadata keys like "_comment"
+            prompts = {k: v for k, v in data.items()
+                       if not k.startswith("_") and isinstance(v, dict)}
+            if prompts:
+                _DOMAIN_PROMPTS.clear()
+                _DOMAIN_PROMPTS.update(prompts)
+                logger.info("[RuleTemplates] Loaded domain prompts: %d domains", len(_DOMAIN_PROMPTS))
+    except Exception as e:
+        logger.warning("[RuleTemplates] Failed to load domain_prompts.json: %s", e)
+
+
+def get_domain_prompt(domain: str, key: str) -> str:
+    return _DOMAIN_PROMPTS.get(domain, {}).get(key, "")
+
+
 # ── 模块加载即初始化 ──
 reload_rules()
+reload_domain_prompts()

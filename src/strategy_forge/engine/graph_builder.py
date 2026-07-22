@@ -155,10 +155,27 @@ async def build_graph(
                 if not fragments:
                     prompts.append(None)
                     continue
-                fused = "\n---\n".join(fragments)
+                # 片段去重 + 按长度降序排列（长片段优先，信息密度高）
+                seen: set[str] = set()
+                deduped: list[str] = []
+                for frag in fragments:
+                    norm = frag.strip()
+                    if not norm or norm in seen:
+                        continue
+                    seen.add(norm)
+                    deduped.append(norm)
+                deduped.sort(key=len, reverse=True)
+                fused = "\n---\n".join(deduped)
                 keywords = compress_to_keywords(fused, top_k=10)
                 keyword_tag = f"\n\n## 关键词标签\n{', '.join(keywords)}" if keywords else ""
-                prompts.append(_extract_base.replace("__TEXT__", fused[:3000] + keyword_tag))
+                # 累计拼接而非硬截断：避免关键信息在 3000 字符处被截掉
+                prompt_text = deduped[0][:3000]
+                for extra in deduped[1:]:
+                    if len(prompt_text) + len(extra) + 5 <= 3000:
+                        prompt_text += "\n---\n" + extra
+                    else:
+                        break
+                prompts.append(_extract_base.replace("__TEXT__", prompt_text + keyword_tag))
 
             # ── Phase 2（并发·LLM 抽取，上限 = FORGE_MAX_CONCURRENT）──
             sem = asyncio.Semaphore(max(1, _reg.max_concurrent))

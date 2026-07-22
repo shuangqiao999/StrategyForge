@@ -447,6 +447,20 @@ class DeductionOrchestrator:
             e_count2 = self.graph.count_entities()
             self.store.update(self.session.id, entity_count=e_count2)
             self._log("graph", f"别名合并: 并入 {merged_total} 个别名节点，实体数→{e_count2}")
+            # 刷新 intel_list：合并后某些名称可能消失，用图中实际存在的名称替换
+            graph_names = set(self.graph.get_entity_names())
+            for e in self._intel_list:
+                if e.get("name", "") in graph_names:
+                    continue
+                for alias in e.get("aliases", []):
+                    if alias in graph_names:
+                        old = e["name"]
+                        e["name"] = alias
+                        aliases = e.get("aliases", [])
+                        if isinstance(aliases, list):
+                            aliases = [a for a in aliases if a != alias] + [old]
+                        e["aliases"] = aliases
+                        break
 
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")

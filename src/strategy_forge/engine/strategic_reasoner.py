@@ -54,6 +54,9 @@ $relationship_context
 - 行动手段必须限于你当前身份在现实中可用的手段（职权、人脉、资金、信息），禁止超现实桥段：黑客奇迹、凭空巨额资金、一夜掌控他人系统等。
 - 行动只能表达"你做了什么"，不能宣称单方面完成需要多方配合的结果（如接管、罢免、收购需经程序，只能"推动/发起"）。
 - 已死亡或已退场的人物不得作为行动者或对话对象出现。
+
+## 领域行动指引
+$strategic_context
 - observe 仅在没有明确威胁且局势不明时使用——如核心目标未达成，应选择低风险主动行动（collaborate/respond）而非被动观察。
 
 ## 行动示例
@@ -271,6 +274,7 @@ class StrategicReasoner:
             recent_events=str(recent)[:500],
             trust_summary=trust,
             relationship_context=world_state.get("relationship_context", "") or "（无已知关系）",
+            strategic_context="根据你的角色和人格自主决策。",
         ))]
 
         candidates: list[dict[str, Any]] = []
@@ -458,6 +462,12 @@ class StrategicReasoner:
             agent_parts.append(f"## 历史记忆（语义召回）\n{dynamic_memory}\n")
         if spatial_context:
             agent_parts.append(f"## 空间环境\n{spatial_context}\n")
+        domain = getattr(rule_engine, "domain", "")
+        if domain:
+            from strategy_forge.core.rule_templates import get_domain_prompt
+            sc = get_domain_prompt(domain, "strategic_context")
+            if sc:
+                agent_parts.append(f"## 领域行动指引\n{sc}\n")
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"
