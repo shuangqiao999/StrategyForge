@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 _EXTRACT_PROMPT = """从以下文本中抽取实体和关系的三元组，返回 JSON 数组。
 
+## 全文概览（多处采样，供你感知文本主题与角色关系）
+$text_overview
+
 ## 实体类型（仅使用以下类型）
 $entity_types
 
@@ -113,9 +116,33 @@ async def build_graph(
             log_fn("graph", f"实体驱动模式: {len(hf_items)} 个高频实体定向抽取 (动态上限={dyn_cap})")
 
             # ── Phase 1.5: 构建抽取模板（白名单随 dyn_cap 自适应）──
+            # 构建全文概览：从 chunks 多处采样，帮助 LLM 区分主角 vs 背景
+            text_overview = ""
+            if result.chunks:
+                chunks_list = [c.content if hasattr(c, "content") else str(c)
+                               for c in result.chunks]
+                n = len(chunks_list)
+                samples = [chunks_list[0]]
+                if n >= 4:
+                    samples.extend([chunks_list[n // 4],
+                                    chunks_list[n // 2],
+                                    chunks_list[3 * n // 4]])
+                if n > 1 and n - 1 not in (0, n // 4, n // 2, 3 * n // 4):
+                    samples.append(chunks_list[-1])
+                text_overview = "\n\n---\n\n".join(s[:800] for s in samples if s.strip())
+            elif len(source) > 10000:
+                L = len(source)
+                samples = [source[:1000], source[L // 4: L // 4 + 1000],
+                           source[L // 2: L // 2 + 1000],
+                           source[3 * L // 4: 3 * L // 4 + 1000]]
+                text_overview = "\n\n---\n\n".join(samples)
+            else:
+                text_overview = source[:1500]
+
             white_count = min(len(candidate_names), max(200, dyn_cap * 2))
             _extract_base = Template(_EXTRACT_PROMPT).substitute(
                 text="__TEXT__",
+                text_overview=text_overview[:2000],
                 entity_types=", ".join(entity_type_names),
                 relation_types=", ".join(relation_type_names),
                 candidate_entities=", ".join(candidate_names[:white_count]),
@@ -124,7 +151,7 @@ async def build_graph(
             prompts: list[str | None] = []
             for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
-                    std_name, _reg.retrieve_top_k, must_contain=aliases)
+                    std_name, _reg.retrieve_top_k * 2, must_contain=aliases)
                 if not fragments:
                     prompts.append(None)
                     continue

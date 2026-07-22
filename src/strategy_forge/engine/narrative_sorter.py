@@ -146,7 +146,7 @@ async def sort_narrative_entities(
             resp = await client.chat(
                 [Message(role="user", content=prompt)],
                 system="你是故事编辑，输出结构化 JSON。只输出 JSON。",
-                temperature=0.3,
+                temperature=0.1,
                 max_tokens=config.deduction_intel_max_tokens,
             )
             raw = _extract_text(resp)

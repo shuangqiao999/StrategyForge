@@ -573,6 +573,7 @@ class DeductionOrchestrator:
             cancel_event=self._cancel,
             max_concurrent=getattr(self, "_max_concurrent", None),
             temperature=_sim_temp,
+            seed=abs(hash(self.session.id)) % (2**31),
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
         )

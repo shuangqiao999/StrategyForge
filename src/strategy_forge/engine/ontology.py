@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 from string import Template
@@ -10,6 +11,8 @@ from ._utils import extract_text
 from .models import EntityTypeDef, Ontology, RelationTypeDef
 
 logger = logging.getLogger(__name__)
+
+_ontology_cache: dict[str, Ontology] = {}
 
 _PROMPT = """你是一个知识本体专家。请分析以下文本，定义其中涉及的实体类型和关系类型。
 
@@ -47,6 +50,11 @@ $text"""
 
 
 async def generate_ontology(text: str) -> Ontology:
+    text_hash = hashlib.sha256(text[:8000].encode()).hexdigest()
+    if text_hash in _ontology_cache:
+        logger.info("[Ontology] 缓存命中 (hash=%s...)", text_hash[:8])
+        return _ontology_cache[text_hash]
+
     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
     from strategy_forge.core.llm_client import Message
 
@@ -57,10 +65,13 @@ async def generate_ontology(text: str) -> Ontology:
     try:
         response = await client.chat(messages, system=system, temperature=0.1)
         content = extract_text(response)
-        return _parse_ontology(content)
+        result = _parse_ontology(content)
     except Exception as e:
         logger.warning("[Deduction] Ontology LLM failed, using defaults: %s", e)
-        return _default_ontology()
+        result = _default_ontology()
+
+    _ontology_cache[text_hash] = result
+    return result
 
 
 def _parse_ontology(raw: str) -> Ontology:
