@@ -147,6 +147,11 @@ async def create_agents_from_graph(
             log_fn("agents", f"实体去重: {len(persons)} → {len(deduped)}")
         persons = deduped
 
+    # freq_map 初始化前置：_build_prompt 在两种分支都需要
+    freq_map: dict[str, int] = {}
+    if preprocessor and preprocessor.result:
+        freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
+
     # Intelligence sorting: filter non-strategic entities
     if intel_list:
         intel_map = {e["name"]: e for e in intel_list if e.get("name")}
@@ -167,9 +172,6 @@ async def create_agents_from_graph(
         # ── 频率兜底：sorter 遗漏的高频实体仍应纳入智能体 ──
         # 超长文本（长篇小说等）的 sorter 可能因 token 限制漏掉核心角色；
         # 以预处理器统计的全文频次作为兜底阈值，频次够高则不被 sorter 遗漏所杀。
-        freq_map: dict[str, int] = {}
-        if preprocessor and preprocessor.result:
-            freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
         # 动态阈值：以 intel_list 中已标记为 include=true 的实体的频次中位数作为参照
         included_freqs = [
             freq_map.get(e["name"], 0) for e in intel_list if e.get("include_in_simulation")
@@ -324,6 +326,9 @@ async def create_agents_from_graph(
         raise conn_fails[0]
 
     for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.warning("[Deduction] Agent persona gen failed (unexpected): %s", r)
+            continue
         person, person_name, profile_data = r["person"], r["name"], r["data"]
         agent_profile = DeductionAgentProfile(
             entity_id=person.get("id", uuid.uuid4().hex[:8]),
