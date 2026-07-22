@@ -353,7 +353,8 @@ async def create_agents_from_graph(
 
 
 def _parse_persona_json(raw: str) -> dict[str, Any]:
-    data = _try_extract_json(raw)
+    from ._utils import extract_json
+    data = extract_json(raw)
     if not isinstance(data, dict):
         # LLM returned array — take first element
         if isinstance(data, list) and data and isinstance(data[0], dict):
@@ -367,28 +368,3 @@ def _parse_persona_json(raw: str) -> dict[str, Any]:
     }
 
 
-def _try_extract_json(raw: str):
-    raw = raw.strip()
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    cleaned = re.sub(r'```(?:json)?\s*\n?', '', raw)
-    cleaned = re.sub(r'\n?```', '', cleaned).strip()
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    for pat in (r'\{[\s\S]*\}', r'\[[\s\S]*\]'):
-        m = re.search(pat, cleaned)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except (json.JSONDecodeError, ValueError):
-                continue
-    if raw.strip().startswith('"'):
-        try:
-            return json.loads("{" + raw.strip() + "}")
-        except (json.JSONDecodeError, ValueError):
-            pass
-    return {} if raw.startswith("{") else []

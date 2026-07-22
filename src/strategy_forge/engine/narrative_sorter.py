@@ -112,7 +112,7 @@ async def sort_narrative_entities(
 
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
-    from strategy_forge.engine.intel_sorter import _extract_text, _parse_json
+    from ._utils import extract_text as _extract_text, parse_json as _parse_json
     from strategy_forge.core.providers import registry as _reg
 
     async def _sort_one_batch(batch_names: list[str]) -> list[dict[str, Any]]:
@@ -169,6 +169,8 @@ async def sort_narrative_entities(
                     "aliases": aliases,
                     "include_in_simulation": bool(e.get("include", True)),
                     "role": str(e.get("reason", ""))[:80],
+                    "parent": e.get("parent"),
+                    "sub_entities": e.get("sub_entities", []),
                 })
             return result
         except Exception as e:
@@ -186,6 +188,36 @@ async def sort_narrative_entities(
     for r in gathered:
         if r:
             all_results.extend(r)
+
+    # ── 安全网：规则层兜底分类 ──
+    _NON_AGENT_TYPES = {"地理区域", "地理位置", "地点", "天气", "气象",
+                        "文档", "协议", "合同", "批文", "文件",
+                        "概念", "现象", "事件", "日期", "时间",
+                        "设施", "基础设施", "建筑",
+                        "自然景观", "自然现象", "环境要素",
+                        "Location", "Document", "Concept", "Event",
+                        "Date", "Time", "Facility", "NaturalFeature"}
+    for e in all_results:
+        etype = etypes.get(e["name"], "")
+        if etype in _NON_AGENT_TYPES and e.get("include_in_simulation") and not e.get("_safety_override"):
+            e["include_in_simulation"] = False
+            e["role"] = (e.get("role", "") or "") + "｜安全网：非决策者类型"
+
+    # 频率兜底：若 LLM 静默失败（全部为 false 或空），强制保底高覆盖实体
+    active = sum(1 for e in all_results if e.get("include_in_simulation"))
+    if active == 0 and entity_names and freq:
+        import math as _math
+        ranked = sorted(entity_names, key=lambda n: (freq.get(n, 0), cov.get(n, 0)), reverse=True)
+        top_n = min(max(3, len(ranked) // 3), 12)
+        for name in ranked[:top_n]:
+            for e in all_results:
+                if e["name"] == name:
+                    e["include_in_simulation"] = True
+                    e["_safety_override"] = True
+                    if not e.get("role"):
+                        e["role"] = f"安全网保底：高频实体(频次={freq.get(name,'?')})"
+                    break
+        logger.warning("[NarrativeSorter] LLM 返回 0 个角色，安全网保底 %d 个高频实体", top_n)
 
     if len(batches) > 1:
         logger.info("[NarrativeSorter] %d batches → %d entities classified",

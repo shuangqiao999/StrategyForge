@@ -18,25 +18,10 @@ from strategy_forge.storage.graph_store import DeductionGraphStore
 
 from .models import Ontology
 from .preprocessor import DeductionPreprocessor
+from ._utils import extract_text as _extract_text, extract_json
 from strategy_forge.core.llm_client import LLMConnectionError
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_text(response) -> str:
-    if hasattr(response, "text"):
-        return response.text
-    if hasattr(response, "content"):
-        c = response.content
-        if isinstance(c, list):
-            from strategy_forge.core.llm_client import TextBlock
-            return "".join(b.text for b in c if isinstance(b, TextBlock))
-        return str(c)
-    if isinstance(response, dict):
-        if "choices" in response:
-            return response["choices"][0]["message"]["content"]
-        return str(response)
-    return str(response)
 
 
 _EXTRACT_PROMPT = """从以下文本中抽取实体和关系的三元组，返回 JSON 数组。
@@ -334,7 +319,7 @@ def _build_reverse_alias(alias_map: dict[str, set[str]]) -> dict[str, str]:
 
 
 def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    data = try_extract_json(raw)
+    data = extract_json(raw)
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
     if isinstance(data, dict):
@@ -348,47 +333,6 @@ def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, An
                 elif "source" in item:
                     relations.append(item)
     return entities, relations
-
-
-def try_extract_json(raw: str):
-    """容错 JSON 解析: 直接解析 → 去markdown → 提取首个JSON块 → 裸key包裹。
-
-    Handles Qwen's unstable JSON output formats.
-    """
-    raw = raw.strip()
-
-    # 1. Direct parse
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # 2. Strip markdown code fences
-    cleaned = re.sub(r'```(?:json)?\s*\n?', '', raw)
-    cleaned = re.sub(r'\n?```', '', cleaned).strip()
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # 3. Extract first complete JSON block (object or array)
-    for pat in (r'\{[\s\S]*\}', r'\[[\s\S]*\]'):
-        m = re.search(pat, cleaned)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except (json.JSONDecodeError, ValueError):
-                continue
-
-    # 4. Fallback: wrap bare key-value in braces (Qwen sometimes outputs raw)
-    if raw.strip().startswith('"'):
-        try:
-            return json.loads("{" + raw.strip() + "}")
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # 5. Total failure
-    return {} if raw.startswith("{") else []
 
 
 def _make_id(name: str, etype: str) -> str:

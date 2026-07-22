@@ -249,3 +249,13 @@ class DeductionLLMClient:
         if self._http:
             await self._http.aclose()
             self._http = None
+
+
+_client_instance: DeductionLLMClient | None = None
+
+
+def get_client() -> DeductionLLMClient:
+    global _client_instance
+    if _client_instance is None:
+        _client_instance = DeductionLLMClient()
+    return _client_instance

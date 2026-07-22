@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ._utils import extract_text as _extract_text, parse_json as _parse_json
+
 logger = logging.getLogger(__name__)
 
 # 指标刻度锚点：帮助 LLM 将定性描述映射到 0-100 的具体数值
@@ -164,25 +166,3 @@ async def extract_seed_metrics(
 
     logger.info("[SeedExtractor] Extracted %d entities with custom initial metrics", len(result))
     return result
-
-
-def _extract_text(resp: Any) -> str:
-    if hasattr(resp, "text"):
-        return resp.text
-    if hasattr(resp, "content"):
-        c = resp.content
-        if isinstance(c, list):
-            from strategy_forge.core.llm_client import TextBlock
-            return "".join(b.text for b in c if isinstance(b, TextBlock))
-        return str(c)
-    if isinstance(resp, dict):
-        choices = resp.get("choices", [])
-        if choices:
-            return str(choices[0].get("message", {}).get("content", ""))
-        return str(resp)
-    return str(resp)
-
-
-def _parse_json(raw: str) -> Any:
-    from ._utils import extract_json
-    return extract_json(raw)

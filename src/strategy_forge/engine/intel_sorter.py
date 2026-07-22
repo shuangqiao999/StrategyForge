@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from strategy_forge.core.llm_client import LLMConnectionError
+from ._utils import extract_text as _extract_text, parse_json as _parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -316,25 +317,3 @@ def _apply_safety_net(result: list[dict[str, Any]]) -> int:
             demoted += _demote(e, "军队编制归上级")
 
     return demoted
-
-
-def _extract_text(resp: Any) -> str:
-    if hasattr(resp, "text"):
-        return resp.text
-    if hasattr(resp, "content"):
-        c = resp.content
-        if isinstance(c, list):
-            from strategy_forge.core.llm_client import TextBlock
-            return "".join(b.text for b in c if isinstance(b, TextBlock))
-        return str(c)
-    if isinstance(resp, dict):
-        choices = resp.get("choices", [])
-        if choices:
-            return str(choices[0].get("message", {}).get("content", ""))
-        return str(resp)
-    return str(resp)
-
-
-def _parse_json(raw: str) -> Any:
-    from ._utils import extract_json
-    return extract_json(raw)

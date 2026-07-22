@@ -374,8 +374,7 @@ class StrategicReasoner:
           解析后归一化并裁剪到 max_actions；统一返回时附带 action_type/target/intensity（取主导动作），
           以兼容下游 SimulationAction 构造与叙事。
         """
-        from ._utils import extract_text
-        from .graph_builder import try_extract_json
+        from ._utils import extract_text, extract_json
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         from strategy_forge.core.llm_client import Message
 
@@ -471,7 +470,7 @@ class StrategicReasoner:
                 resp = await llm.chat([Message(role="user", content=prompt)],
                                       system=system, temperature=self._temperature)
                 content = extract_text(resp)
-            data = try_extract_json(content)
+            data = extract_json(content)
             if not isinstance(data, dict):
                 data = {}
         except Exception as e:

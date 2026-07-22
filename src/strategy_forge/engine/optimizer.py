@@ -384,8 +384,7 @@ class StrategyOptimizer:
         self, client: Any, win_condition: str, directive: str, actions: list[Any],
     ) -> SimulationOutcome:
         from strategy_forge.core.llm_client import Message
-        from strategy_forge.engine._utils import extract_text
-        from strategy_forge.engine.graph_builder import try_extract_json
+        from ._utils import extract_text, extract_json
 
         events = "\n".join(
             f"- {getattr(a, 'agent_id', '')[:8]} {getattr(a, 'action_type', '')}: "
@@ -404,7 +403,7 @@ class StrategyOptimizer:
                 system="你是推演结果评估专家，只输出 JSON。",
                 temperature=0.1,
             )
-            data = try_extract_json(extract_text(resp))
+            data = extract_json(extract_text(resp))
             if isinstance(data, dict):
                 return SimulationOutcome(
                     success=bool(data.get("success", False)),

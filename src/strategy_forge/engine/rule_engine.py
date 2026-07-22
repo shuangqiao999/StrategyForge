@@ -362,8 +362,7 @@ class RuleEngine:
     # ── 领域识别（LLM） ──
     @staticmethod
     async def detect_domain(text: str, chat_client: Any, confidence_floor: float = 0.6) -> str:
-        from ._utils import extract_text
-        from .graph_builder import try_extract_json
+        from ._utils import extract_text, extract_json
         from strategy_forge.core.llm_client import Message
 
         options = "\n".join(
@@ -380,7 +379,7 @@ class RuleEngine:
         try:
             resp = await chat_client.chat([Message(role="user", content=prompt)],
                                           system="你是领域分类器，只输出 JSON。", temperature=0.1)
-            data = try_extract_json(extract_text(resp))
+            data = extract_json(extract_text(resp))
             if isinstance(data, dict):
                 dom = str(data.get("domain", "narrative"))
                 conf = float(data.get("confidence", 0.0))

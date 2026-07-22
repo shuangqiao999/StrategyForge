@@ -128,7 +128,13 @@ def extract_text(response) -> str:
             return "".join(b.text for b in c if isinstance(b, TextBlock))
         return str(c)
     if isinstance(response, dict):
-        if "choices" in response:
-            return response["choices"][0]["message"]["content"]
+        choices = response.get("choices", [])
+        if choices:
+            return str(choices[0].get("message", {}).get("content", ""))
         return str(response)
     return str(response)
+
+
+def parse_json(raw: str) -> Any:
+    """通用 JSON 解析入口（extract_json 的别名，向后兼容）。"""
+    return extract_json(raw)
