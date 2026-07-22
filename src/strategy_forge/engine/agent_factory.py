@@ -259,6 +259,8 @@ async def create_agents_from_graph(
     sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
 
     _DOMAIN_ROLES: dict[str, str] = {}
+    _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
+                      "公司", "企业", "组织", "机构"}
     def _entity_role(person: dict) -> str:
         from strategy_forge.core.rule_templates import get_domain_prompt
         etype = (person.get("type") or "").strip()
