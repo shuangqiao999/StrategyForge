@@ -314,7 +314,6 @@ class SimulationEngine:
         # ── 谍报：每 agent 对特定目标的信息优势 ──
         self._intel_bonuses: dict[str, dict[str, float]] = {}  # {source_id: {target_name: bonus}}
         # ── 人格动态化：每 agent 的反思轮次追踪 ──
-        self._last_reflection_round: dict[str, int] = {}
         self._personality_log: list[dict[str, Any]] = []  # [{round, agent, old_extra, new_extra}]
 
         from .strategic_reasoner import StrategicReasoner

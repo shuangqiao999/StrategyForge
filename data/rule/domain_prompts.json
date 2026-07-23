@@ -1,43 +1,107 @@
 {
-  "_comment": "StrategyForge 领域专用提示词配置。每个领域可覆盖 intel_sorter 规则、agent persona 角色指南、模拟决策上下文。",
+  "_comment": "StrategyForge 领域专用提示词配置。每个领域含 intel规则/示例、agent角色指南、模拟决策上下文。",
   "politics": {
     "intel_extra_rules": "在政治领域，政党领袖、民选官员、反对党代表人物均为独立战略决策者（include_in_simulation=true）。政府职能部门（财政部、外交部、国防部）、立法司法机构（参议院、法院）为下属机构（include_in_simulation=false，parent=所属国家）。国际组织代表若具有独立政策影响力则保留。集合概念（选民群体、舆论阵营）不独立决策。",
+    "intel_examples": [
+      {"name": "某政党领袖", "type": "Person", "include_in_simulation": true, "parent": "所属政党", "role": "核心决策者，具有独立政治影响力"},
+      {"name": "财政部", "type": "政府部门", "include_in_simulation": false, "parent": "所属国家", "role": "政府职能部门"},
+      {"name": "某政党", "type": "Party", "include_in_simulation": true, "sub_entities": ["领袖姓名"], "role": "独立战略博弈者"},
+      {"name": "宪法法院", "type": "司法机构", "include_in_simulation": false, "parent": "所属国家", "role": "司法部门，非独立决策者"},
+      {"name": "选民群体", "type": "集合概念", "include_in_simulation": false, "role": "集合概念，具体选民个体不需建模"},
+      {"name": "民意调查", "type": "统计工具", "include_in_simulation": false, "role": "数据工具，非决策者"}
+    ],
     "agent_domain_role": "政治实体或政策制定者。关注选举周期、民意支持率、联盟构建、议会博弈、国际舆论。典型行为：谈判、施压、结盟、竞选、立法提案、调查启动。冲突模式：派系斗争、信任投票、弹劾程序、外交孤立。",
     "strategic_context": "作为政治博弈者，你的决策影响政党地位、公众信任和权力平衡。评估行动时考虑：选举时间窗口、舆论风向变化、盟友可靠性、对手的反制能力。"
   },
   "business": {
     "intel_extra_rules": "在商业领域，母公司/集团本身为决策者（include_in_simulation=true）。子公司、部门、工厂、产品线为下属（include_in_simulation=false，parent=母公司）。CEO/创始人如代表公司意志则归入公司（include_in_simulation=false，parent=公司），公司本身作为决策者。行业协会、评级机构、监管机构为非决策者。集合概念（行业群体、市场板块）不独立决策。",
-    "agent_domain_role": "企业或行业参与者。关注市场份额、供应链安全、技术创新、融资能力、监管合规。典型行为：价格战、并购谈判、新品发布、供应链重组、游说监管、专利攻防。冲突模式：反垄断调查、恶意收购、技术封锁、渠道争夺。",
+    "intel_examples": [
+      {"name": "特斯拉", "type": "Company", "include_in_simulation": true, "role": "核心竞争企业，独立战略决策者"},
+      {"name": "比亚迪研发中心", "type": "部门", "include_in_simulation": false, "parent": "比亚迪", "role": "下属部门"},
+      {"name": "某CEO", "type": "Person", "include_in_simulation": false, "parent": "所属公司", "role": "代表人物，归入公司"},
+      {"name": "汽车行业协会", "type": "Organization", "include_in_simulation": false, "role": "行业协会，非独立决策者"},
+      {"name": "新能源汽车市场", "type": "集合概念", "include_in_simulation": false, "role": "市场板块，具体企业已单列"},
+      {"name": "标普评级", "type": "评级机构", "include_in_simulation": false, "role": "外部评级，非博弈者"}
+    ],
+    "agent_domain_role": "企业或行业参与者。关注市场份额、供应链安全、技术创新、融资能力、监管合规。典型行为：价格战、并购谈判、新品发布、供应链重组、游说监管、专利攻防。",
     "strategic_context": "作为商业决策者，你的行动影响股价、市场地位和行业格局。评估时考虑：竞争对手反应、监管环境变化、消费者偏好迁移、资本市场窗口期。"
   },
   "military": {
     "intel_extra_rules": "在军事领域，国家/军队整体为决策者（include_in_simulation=true）。下属编制（舰队、集团军、战区司令部）为下属（include_in_simulation=false，parent=上级军队）。军队编制后缀（第X舰队、X战区、X营/X团）归入上级。军事领导人如具有独立指挥权则保留。",
-    "agent_domain_role": "军事力量或国防决策实体。关注战力对比、后勤保障、地形优势、士气、国际军事联盟。典型行为：战略部署、火力打击、电子战、情报侦察、军事演习、停火谈判。冲突模式：兵力对峙、制空权争夺、补给线切断、代理人战争。",
-    "strategic_context": "作为军事决策者，你的每项行动消耗资源并改变力量对比。评估时考虑：兵力消耗、装备损失、盟友支援意愿、敌方意图误判风险。避免单方面宣告胜利——军事行动需要持续的资源投入。"
+    "intel_examples": [
+      {"name": "俄罗斯", "type": "Country", "include_in_simulation": true, "role": "主权国家，战略决策者"},
+      {"name": "北约", "type": "Organization", "include_in_simulation": true, "role": "军事联盟，独立决策者"},
+      {"name": "第7舰队", "type": "军队编制", "include_in_simulation": false, "parent": "所属国家", "role": "下属舰队，归入国家"},
+      {"name": "东部战区", "type": "军队编制", "include_in_simulation": false, "parent": "所属国家", "role": "战区司令部，归上级"},
+      {"name": "某上将", "type": "Person", "include_in_simulation": true, "parent": "所属国家", "role": "军事领导人，具有独立指挥权"},
+      {"name": "某步兵团", "type": "军队编制", "include_in_simulation": false, "parent": "上级军区", "role": "团级编制，归上级"}
+    ],
+    "agent_domain_role": "军事力量或国防决策实体。关注战力对比、后勤保障、地形优势、士气、国际军事联盟。典型行为：战略部署、火力打击、电子战、情报侦察、军事演习、停火谈判。",
+    "strategic_context": "作为军事决策者，你的每项行动消耗资源并改变力量对比。评估时考虑：兵力消耗、装备损失、盟友支援意愿、敌方意图误判风险。"
   },
   "ecology": {
     "intel_extra_rules": "在生态领域，环保组织、政府环保部门为主要决策者。地理区域（雨林、流域）为背景（include_in_simulation=false）。环境指标（碳排放、生物多样性指数）为非实体。物种、生态系统为非决策实体。",
-    "agent_domain_role": "生态主体或环境利益方。关注碳排放配额、政策法规、公众环保意识、可再生能源技术。典型行为：环保诉讼、碳交易、生态修复、绿色技术推广、公众倡议、政策游说。",
+    "intel_examples": [
+      {"name": "绿色和平组织", "type": "Organization", "include_in_simulation": true, "role": "环保组织，独立决策者"},
+      {"name": "国家环保署", "type": "政府部门", "include_in_simulation": true, "role": "政府环保部门，决策者"},
+      {"name": "亚马逊雨林", "type": "地理区域", "include_in_simulation": false, "role": "地理区域，非独立决策者"},
+      {"name": "碳排放量", "type": "环境指标", "include_in_simulation": false, "role": "测量指标，非实体"},
+      {"name": "长江流域", "type": "地理区域", "include_in_simulation": false, "role": "地理区域，非决策实体"},
+      {"name": "某石油公司", "type": "Company", "include_in_simulation": true, "role": "污染排放企业，博弈参与者"}
+    ],
+    "agent_domain_role": "生态主体或环境利益方。关注碳排放配额、政策法规、公众环保意识、可再生能源技术。",
     "strategic_context": "作为生态利益方，你的目标是在经济发展与环境保护之间寻找平衡。评估时考虑：政策支持度、公众舆论、技术可行性、经济利益攸关方的反对力度。"
   },
   "urban": {
     "intel_extra_rules": "在城市管理领域，市政府/城市规划部门为决策者。基础设施项目、交通线路为下属（include_in_simulation=false）。地理位置（学区、商圈）为背景。房地产企业保留为独立决策者。",
-    "agent_domain_role": "城市管理机构或市政实体。关注土地规划、交通设施、住房供给、公共财政、市民满意度。典型行为：规划审批、基建投资、限购政策、公共交通定价、招商引资。",
+    "intel_examples": [
+      {"name": "某市政府", "type": "Organization", "include_in_simulation": true, "role": "城市管理机构，独立决策者"},
+      {"name": "地铁5号线项目", "type": "基础设施", "include_in_simulation": false, "parent": "某市政府", "role": "基建项目，归入城市"},
+      {"name": "万科地产", "type": "Company", "include_in_simulation": true, "role": "房地产开发企业，博弈参与者"},
+      {"name": "中央商务区", "type": "地理位置", "include_in_simulation": false, "role": "商圈概念，非决策实体"},
+      {"name": "城市规划委员会", "type": "Organization", "include_in_simulation": true, "role": "规划决策部门"},
+      {"name": "学区房", "type": "市场概念", "include_in_simulation": false, "role": "市场概念，非实体决策者"}
+    ],
+    "agent_domain_role": "城市管理机构或市政实体。关注土地规划、交通设施、住房供给、公共财政、市民满意度。",
     "strategic_context": "作为城市规划者，你的决策影响数百万居民的生活质量。评估时考虑：财政预算约束、市民反对声音、开发商利益平衡、上级政府政策导向。"
   },
   "tech": {
     "intel_extra_rules": "在科技领域，科技企业、研究机构为决策者。技术标准、开源社区为非决策实体（include_in_simulation=false）。产品、应用、算法为非实体。创始人如代表公司意志则归入公司。行业协会为非决策者。",
-    "agent_domain_role": "科技企业或研究机构。关注技术路线选择、人才储备、专利布局、开源生态、合规风险。典型行为：技术开源、收购初创公司、制定行业标准、AI伦理承诺、数据安全审计、芯片供应链重构。",
-    "strategic_context": "作为科技决策者，你的行动塑造技术发展方向和产业格局。评估时考虑：技术成熟度曲线、人才市场供需、地缘政治对供应链的影响、用户隐私意识觉醒。"
+    "intel_examples": [
+      {"name": "OpenAI", "type": "Company", "include_in_simulation": true, "role": "核心科技企业，独立决策者"},
+      {"name": "某创始人", "type": "Person", "include_in_simulation": false, "parent": "所属公司", "role": "代表人物，归入公司"},
+      {"name": "5G标准", "type": "技术标准", "include_in_simulation": false, "role": "技术标准规范，非决策实体"},
+      {"name": "DeepSeek研究院", "type": "研究机构", "include_in_simulation": true, "role": "科研机构，独立决策者"},
+      {"name": "开源社区", "type": "社区集合", "include_in_simulation": false, "role": "开发者社区，非单一实体"},
+      {"name": "AI伦理委员会", "type": "Organization", "include_in_simulation": false, "role": "行业协会，非独立博弈者"}
+    ],
+    "agent_domain_role": "科技企业或研究机构。关注技术路线选择、人才储备、专利布局、开源生态、合规风险。",
+    "strategic_context": "作为科技决策者，你的行动塑造技术发展方向和产业格局。评估时考虑：技术成熟度曲线、人才市场供需、地缘政治对供应链的影响。"
   },
   "info_war": {
     "intel_extra_rules": "在信息战领域，媒体机构、政府宣传部门为主要决策者。社交平台、信息传播渠道为工具（include_in_simulation=false）。新闻事件、信息产物（假新闻、谣言）为非实体。记者、意见领袖如独立发声则保留。",
-    "agent_domain_role": "信息舆论参与方。关注舆论风向、媒体信任度、信息传播速度、受众情绪。典型行为：信息发布、舆论引导、事实核查、议程设置、社交平台封禁、逆向信息战。",
-    "strategic_context": "作为信息战参与者，你的核心资源是公众注意力和信任。评估时考虑：信息传播的病毒系数、受众认知惰性、对手的信息战反制能力、平台算法的推流偏向。"
+    "intel_examples": [
+      {"name": "某国家通讯社", "type": "Organization", "include_in_simulation": true, "role": "官方媒体机构，独立决策者"},
+      {"name": "微博热搜", "type": "媒体平台", "include_in_simulation": false, "role": "信息传播渠道，非独立决策者"},
+      {"name": "某调查记者", "type": "Person", "include_in_simulation": true, "role": "独立发声记者，信息战参与者"},
+      {"name": "假新闻事件", "type": "信息产物", "include_in_simulation": false, "role": "信息产物，非实体决策者"},
+      {"name": "网络水军", "type": "集合概念", "include_in_simulation": false, "role": "操纵工具，非单一实体"},
+      {"name": "某社交媒体平台", "type": "Company", "include_in_simulation": true, "role": "平台运营商，信息管理决策者"}
+    ],
+    "agent_domain_role": "信息舆论参与方。关注舆论风向、媒体信任度、信息传播速度、受众情绪。典型行为：信息发布、舆论引导、事实核查、议程设置。",
+    "strategic_context": "作为信息战参与者，你的核心资源是公众注意力和信任。评估时考虑：信息传播的病毒系数、受众认知惰性、对手的信息战反制能力。"
   },
   "geo_strategy": {
     "intel_extra_rules": "在地缘战略领域，主权国家、国际组织为主要决策者。多边论坛、区域合作机制（G7/G20/APEC等）为协调平台（include_in_simulation=false）。经济指标（GDP、通胀率）为非实体。国家领导人和外交代表保留为独立决策者。集合概念（西方阵营、全球南）不独立决策。",
-    "agent_domain_role": "地缘战略决策主体。关注权力平衡、联盟关系、贸易路线、军事存在、能源安全。典型行为：外交斡旋、制裁实施、军演威慑、贸易协定、援助承诺、代理人扶持。",
-    "strategic_context": "作为地缘战略决策者，你的行动改变国际权力格局。评估时考虑：大国博弈的连锁反应、同盟国承诺的可信度、经济制裁的双刃剑效应、军事冒险的升级风险。"
+    "intel_examples": [
+      {"name": "美国", "type": "Country", "include_in_simulation": true, "role": "主权国家，地缘战略决策者"},
+      {"name": "G20峰会", "type": "多边论坛", "include_in_simulation": false, "role": "多边协调平台，非独立决策者"},
+      {"name": "某国总统", "type": "Person", "include_in_simulation": true, "parent": "所属国家", "role": "国家领导人，独立决策核心"},
+      {"name": "西方阵营", "type": "集合概念", "include_in_simulation": false, "role": "泛指集合，具体国家已单列"},
+      {"name": "国际能源署", "type": "Organization", "include_in_simulation": true, "role": "国际组织，具有独立政策影响力"},
+      {"name": "GDP增长率", "type": "经济指标", "include_in_simulation": false, "role": "统计指标，非实体决策者"}
+    ],
+    "agent_domain_role": "地缘战略决策主体。关注权力平衡、联盟关系、贸易路线、军事存在、能源安全。",
+    "strategic_context": "作为地缘战略决策者，你的行动改变国际权力格局。评估时考虑：大国博弈的连锁反应、同盟国承诺的可信度、经济制裁的双刃剑效应。"
   }
 }

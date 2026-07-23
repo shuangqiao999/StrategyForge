@@ -177,14 +177,12 @@ async def build_graph(
                         break
                 prompts.append(_extract_base.replace("__TEXT__", prompt_text + keyword_tag))
 
-            # ── Phase 2（并发·LLM 抽取，上限 = FORGE_MAX_CONCURRENT）──
-            sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
+            # ── Phase 2（并发·LLM 抽取，上限由全局 Semaphore 控制）──
 
             async def _extract_call(prompt: str) -> str | None:
-                async with sem:
-                    try:
+                try:
                         resp = await client.chat(
-                            [Message(role="user", content=prompt)], system=system, temperature=0.1)
+                            [Message(role="user", content=prompt)], system=system, temperature=0)
                         return _extract_text(resp)
                     except LLMConnectionError:
                         raise
@@ -312,15 +310,13 @@ async def _extract_from_chunks(
         alias_map="{}",
     )
 
-    # 并发抽取（上限 = FORGE_MAX_CONCURRENT），随后按原顺序写库
-    sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
+    # 并发抽取（上限由全局 Semaphore 控制），随后按原顺序写库
 
     async def _chunk_call(text: str) -> str | None:
-        async with sem:
-            try:
+        try:
                 resp = await client.chat(
                     [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
-                    system=system, temperature=0.1)
+                    system=system, temperature=0)
                 return _extract_text(resp)
             except LLMConnectionError:
                 raise

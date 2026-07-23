@@ -256,8 +256,6 @@ async def create_agents_from_graph(
 
     expected_keys = {"persona", "background", "goals"}
 
-    sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
-
     _DOMAIN_ROLES: dict[str, str] = {}
     _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
                       "公司", "企业", "组织", "机构"}
@@ -316,21 +314,20 @@ async def create_agents_from_graph(
         prompt = _build_prompt(person, person_name, fragments)
         system = "你是角色档案生成专家，只输出 JSON 对象。不要 markdown，不要解释。"
         messages = [Message(role="user", content=prompt)]
-        async with sem:  # 并发上限 = FORGE_MAX_CONCURRENT
-            try:
-                if chat_fn is not None:
-                    content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
-                else:
-                    response = await client.chat(messages, system=system, temperature=0.7)
-                    content = extract_text(response)
-                profile_data = _parse_persona_json(content)
-                if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
-                    profile_data = _fallback(person_name)
-            except LLMConnectionError:
-                raise  # 连接故障直接传播
-            except Exception as e:
-                logger.warning("[Deduction] Agent persona gen failed for %s: %s", person_name, e)
+        try:
+            if chat_fn is not None:
+                content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
+            else:
+                response = await client.chat(messages, system=system, temperature=0.7)
+                content = extract_text(response)
+            profile_data = _parse_persona_json(content)
+            if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
                 profile_data = _fallback(person_name)
+        except LLMConnectionError:
+            raise  # 连接故障直接传播
+        except Exception as e:
+            logger.warning("[Deduction] Agent persona gen failed for %s: %s", person_name, e)
+            profile_data = _fallback(person_name)
         return {"person": person, "name": person_name, "data": profile_data}
 
     # 并发生成人设（上限 = FORGE_MAX_CONCURRENT），随后按原顺序构造+写 Kuzu 以保持确定性

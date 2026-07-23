@@ -146,7 +146,7 @@ async def sort_narrative_entities(
             resp = await client.chat(
                 [Message(role="user", content=prompt)],
                 system="你是故事编辑，输出结构化 JSON。只输出 JSON。",
-                temperature=0.1,
+                temperature=0,
                 max_tokens=config.deduction_intel_max_tokens,
             )
             raw = _extract_text(resp)
@@ -184,14 +184,12 @@ async def sort_narrative_entities(
             logger.warning("%s failed: %s", batch_label, e)
             return []
 
-    # ── Run all batches concurrently (shared overview, independent calls) ──
-    sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
+    # ── Run all batches concurrently (上限由全局 Semaphore 控制) ──
     async def _guarded(batch_names):
-        async with sem:
-            return await _sort_one_batch(batch_names)
+        return await _sort_one_batch(batch_names)
 
     all_results: list[dict[str, Any]] = []
-    gathered = await asyncio.gather(*(_guarded(b) for b in batches))
+    gathered = await asyncio.gather(*(_sort_one_batch(b) for b in batches))
     for r in gathered:
         if r:
             all_results.extend(r)

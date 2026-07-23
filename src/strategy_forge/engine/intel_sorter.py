@@ -167,6 +167,20 @@ async def sort_entities(
     domain_examples = _INTEL_DOMAIN_EXAMPLES.get(domain, "")
     from strategy_forge.core.rule_templates import get_domain_prompt
     extra_rules = get_domain_prompt(domain, "intel_extra_rules")
+    # 从 domain_prompts.json 读取领域格式化示例
+    import json as _json
+    raw_examples = get_domain_prompt(domain, "intel_examples")
+    if isinstance(raw_examples, str) and raw_examples.strip():
+        try:
+            parsed = _json.loads(raw_examples)
+            if isinstance(parsed, list):
+                formatted = ",\n".join(_json.dumps(e, ensure_ascii=False) for e in parsed[:6])
+                if domain_examples:
+                    domain_examples += "\n" + formatted
+                else:
+                    domain_examples = formatted
+        except (_json.JSONDecodeError, ValueError):
+            pass
     prompt = _INTEL_PROMPT.format(
         entity_names=", ".join(entity_names),
         source=source[:max_source_chars],
@@ -180,7 +194,7 @@ async def sort_entities(
         resp = await client.chat(
             [Message(role="user", content=prompt)],
             system="你是情报分析师，输出结构化 JSON。只输出 JSON。",
-            temperature=0.1,
+            temperature=0,
             max_tokens=config.deduction_intel_max_tokens,
         )
     except LLMConnectionError:

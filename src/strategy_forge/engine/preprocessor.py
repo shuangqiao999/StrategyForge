@@ -489,45 +489,43 @@ class DeductionPreprocessor:
 
         logger.info("[Preprocessor] LLM entity discovery: %d batches (no cap)", len(batches))
 
-        # ── 3. Concurrent LLM calls ──
+        # ── 3. Concurrent LLM calls (上限由全局 Semaphore 控制) ──
         client = LLMClient()
-        sem = asyncio.Semaphore(max(1, _reg.max_concurrent))
         system = "你是实体提取专家。只输出实体名，每行一个，不要编号、不要解释、不要重复。"
 
         n_batches = len(batches)
 
         async def _discover_one(batch_text: str, bi: int) -> dict[str, set[str]]:
-            async with sem:
-                try:
-                    prompt = (
-                        "列出以下文本中出现的所有专有名词实体（人名、地名、机构名、组织名、国家名、事件名、缩写）。"
-                        "每行输出一个实体名，不要编号，不要解释，不要重复。\n\n"
-                        f"文本：\n{batch_text[:BATCH_CHARS]}"
-                    )
-                    resp = await client.chat(
-                        [Message(role="user", content=prompt)],
-                        system=system, temperature=0.1, max_tokens=4000)
-                    content = resp if isinstance(resp, str) else str(resp)
-                    lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
-                    result: dict[str, set[str]] = {}
-                    for line in lines:
-                        line = re.sub(r'^[\d\-·.\s]+', '', line)
-                        line = line.strip()
-                        if len(line) < 2 or len(line) > 50:
-                            continue
-                        result.setdefault(line, set())
-                    return result
-                except LLMConnectionError:
-                    raise
-                except Exception as e:
-                    logger.debug("[Preprocessor] LLM entity discovery batch failed: %s", e)
-                    return {}
-                finally:
-                    if self._progress_cb and n_batches > 1:
-                        try:
-                            self._progress_cb(bi + 1, n_batches)
-                        except Exception:
-                            pass
+            try:
+                prompt = (
+                    "列出以下文本中出现的所有专有名词实体（人名、地名、机构名、组织名、国家名、事件名、缩写）。"
+                    "每行输出一个实体名，不要编号，不要解释，不要重复。\n\n"
+                    f"文本：\n{batch_text[:BATCH_CHARS]}"
+                )
+                resp = await client.chat(
+                    [Message(role="user", content=prompt)],
+                    system=system, temperature=0.1, max_tokens=4000)
+                content = resp if isinstance(resp, str) else str(resp)
+                lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
+                result: dict[str, set[str]] = {}
+                for line in lines:
+                    line = re.sub(r'^[\d\-·.\s]+', '', line)
+                    line = line.strip()
+                    if len(line) < 2 or len(line) > 50:
+                        continue
+                    result.setdefault(line, set())
+                return result
+            except LLMConnectionError:
+                raise
+            except Exception as e:
+                logger.debug("[Preprocessor] LLM entity discovery batch failed: %s", e)
+                return {}
+            finally:
+                if self._progress_cb and n_batches > 1:
+                    try:
+                        self._progress_cb(bi + 1, n_batches)
+                    except Exception:
+                        pass
 
         try:
             results = await asyncio.gather(
