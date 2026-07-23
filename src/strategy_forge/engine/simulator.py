@@ -613,7 +613,7 @@ class SimulationEngine:
             self._narrative_env[key] = max(0.0, min(100.0,
                 round(self._narrative_env[key] * 0.95, 1)))
 
-        # ── 叙事模式人格动态化（纯事件驱动）──
+            # ── 叙事模式人格动态化（纯事件驱动）──
         # 每个 Agent 维护独立的上次反思环境基线 + 轮次记录
         if not hasattr(self, "_reflection_baselines"):
             self._reflection_baselines: dict[str, dict[str, float]] = {}
@@ -631,12 +631,16 @@ class SimulationEngine:
             last_r = self._last_reflection_round_n.get(eid, 0)
             reason = None
 
-            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >8）
+            # 条件1：环境累积剧变（任一维度漂移>5 或 累计漂移>12）
+            total_drift = 0.0
             for k in self._narrative_env:
                 delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
-                if abs(delta) > 8:
+                total_drift += abs(delta)
+                if abs(delta) > 5:
                     reason = f"环境剧变({k}{delta:+.0f})"
                     break
+            if reason is None and total_drift > 12:
+                reason = f"环境累计漂移({total_drift:.0f})"
 
             # 条件2：该 Agent 的关系网络发生变化
             if reason is None:
@@ -699,11 +703,18 @@ class SimulationEngine:
             if e.get("agent") == agent.entity_id or e.get("agent_name") == agent.name
         ]
         if not my_events:
-            return
-        events_text = "\n".join(
-            f"- [R{e.get('round','?')}] {e.get('content','')[:100]}"
-            for e in my_events[-8:]
-        )
+            # observe 型 agent 无事件记录 → 基于环境状态构建反思上下文
+            env_state = "\n".join(
+                f"- {k}: {v:.0f}" for k, v in self._narrative_env.items())
+            events_text = (
+                f"（你在本轮未采取行动，处于观察状态）\n"
+                f"当前环境状态：\n{env_state}"
+            )
+        else:
+            events_text = "\n".join(
+                f"- [R{e.get('round','?')}] {e.get('content','')[:100]}"
+                for e in my_events[-8:]
+            )
         prompt = (
             f"你是 {agent.name} 的潜意识。回顾你近期的行动经历，"
             f"判断你的性格是否需要微调。\n\n"
@@ -1802,15 +1813,19 @@ class SimulationEngine:
             last_r = self._last_reflection_round_n.get(eid, 0)
             reason = None
 
-            # 条件1：环境累积剧变（任一维度自上次反思后累计变化 >8）
+            # 条件1：环境累积剧变（任一维度漂移>5 或 累计漂移>12）
+            total_drift = 0.0
             for k in self._narrative_env:
                 delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
-                if abs(delta) > 8:
+                total_drift += abs(delta)
+                if abs(delta) > 5:
                     reason = f"环境剧变({k}{delta:+.0f})"
                     break
+            if reason is None and total_drift > 12:
+                reason = f"环境累计漂移({total_drift:.0f})"
 
-            # 条件2：该 Agent 的关系网络发生变化（最小间隔 3 轮，避免每轮触发）
-            if reason is None and (round_number - last_r) >= 3:
+            # 条件2：该 Agent 的关系网络发生变化
+            if reason is None:
                 prev_rels = getattr(self, "_prev_rel_map", {})
                 curr_rels = self._rel_context.get(eid, {})
                 prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
@@ -1825,7 +1840,8 @@ class SimulationEngine:
                 reason = "长期无反思保护"
 
             if reason is not None:
-                await self._reflect_narrative(agent, round_number, _rc)
+                # 量化模式使用指标驱动反思（比叙事模式的事件驱动更适合数值推演）
+                await self._reflect_and_adapt(agent, round_number, _rc)
                 self._reflection_baselines[eid] = dict(self._narrative_env)
                 self._last_reflection_round_n[eid] = round_number
                 self._log("simulation",
