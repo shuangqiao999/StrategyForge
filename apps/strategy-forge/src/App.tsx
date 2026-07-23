@@ -12,8 +12,8 @@ function isTauri(): boolean {
 }
 
 const lbl: React.CSSProperties = { fontSize: 13, color: "#cbd5e1", marginBottom: 4, display: "block" };
-const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%" };
-const btn: React.CSSProperties = { height: 28, fontSize: 13, borderRadius: 6, border: "1px solid #334155", cursor: "pointer", padding: "0 12px" };
+const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: "0 8px", fontSize: 13 };
+const btn: React.CSSProperties = { height: 28, fontSize: 13, borderRadius: 6, border: "1px solid #334155", cursor: "pointer", padding: "0 12px", background: "#1e293b", color: "#cbd5e1" };
 
 // ── Types ──
 
