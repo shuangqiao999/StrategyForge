@@ -719,32 +719,32 @@ export default function App() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100%", overflow: "hidden" }}>
       {/* ── Left Panel: Sessions ── */}
-      <div style={{ borderRight: "1px solid #374151", overflow: "auto", padding: 12 }}>
-        <h3 style={{ margin: "0 0 8px", fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>StrategyForge 战略推演</span>
+      <div style={{ borderRight: "2px solid #475569", overflow: "auto", padding: 24 }}>
+        <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: "#f1f5f9" }}>StrategyForge 战略推演</span>
           <button onClick={() => { fetchConfig(); setShowSettings(true); }} style={{ background: "#334155", border: "1px solid #475569", color: "#e2e8f0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12 }}>⚙ 配置</button>
         </h3>
 
-        <div className="card" style={{ marginBottom: 10 }}>
+        <div className="card" style={{ marginBottom: 16, background: "#0f172a", border: "1px solid #334155", borderRadius: 10, padding: 16 }}>
           <input
-            style={{ height: 32, marginBottom: 6, width: "100%" }}
+            style={{ height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13, padding: "0 10px" }}
             placeholder="会话标题"
             value={title}
             onChange={e => setTitle(e.target.value)}
           />
           <textarea
-            style={{ height: 100, fontSize: 13, marginBottom: 6, width: "100%" }}
+            style={{ height: 100, fontSize: 13, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: 8, resize: "vertical" }}
             placeholder="粘贴种子材料（或点击上传文档）"
             value={sourceMaterial}
             onChange={e => setSourceMaterial(e.target.value)}
           />
           <textarea
-            style={{ height: 48, fontSize: 13, marginBottom: 6, width: "100%" }}
+            style={{ height: 48, fontSize: 13, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: 8, resize: "vertical" }}
             placeholder="推演前愿景/目标（可选）"
             value={preGoal}
             onChange={e => setPreGoal(e.target.value)}
           />
-          <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center" }}>
             <select
               value={roundMode === "preset" ? String(rounds) : "custom"}
               onChange={e => {
@@ -780,7 +780,7 @@ export default function App() {
             value={domain}
             onChange={e => setDomain(e.target.value)}
             title="推演领域：选具体领域或自动识别进入量化推演；纯叙事保持 1.0 行为"
-            style={{ height: 32, marginBottom: 6, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13 }}
+            style={{ height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, fontSize: 13 }}
           >
             <option value="auto">🤖 自动识别领域（量化）</option>
             {domains.length === 0
@@ -813,7 +813,7 @@ export default function App() {
             style={{ display: "none" }}
           />
           <button
-            style={{ width: "100%", height: 28, fontSize: 13, marginBottom: 6, background: "#1e293b", border: "1px solid #374151", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8" }}
+            style={{ width: "100%", height: 28, fontSize: 13, marginBottom: 8, background: "#1e293b", border: "1px solid #374151", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#94a3b8", transition: "background 0.2s" }}
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
           >
@@ -822,7 +822,7 @@ export default function App() {
           </button>
           <button
             className="btnPrimary"
-            style={{ width: "100%", height: 32, fontSize: 13 }}
+            style={{ width: "100%", height: 34, fontSize: 14, borderRadius: 8, transition: "background 0.2s, opacity 0.2s" }}
             onClick={handleCreate}
             disabled={creating}
           >
@@ -831,7 +831,7 @@ export default function App() {
         </div>
 
         {/* ── 策略优化器面板（高级，默认关闭） ── */}
-        <div style={{ marginBottom: 10, background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: 10 }}>
+        <div style={{ marginBottom: 16, background: "#0f172a", border: "1px solid #334155", borderRadius: 10, padding: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#e2e8f0" }}>
             <Toggle checked={optEnabled} onChange={setOptEnabled} />
             策略优化器
@@ -881,9 +881,9 @@ export default function App() {
           )}
         </div>
 
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>会话列表（历史推演记录）</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#94a3b8", marginBottom: 10, paddingTop: 4, borderTop: "1px solid #334155" }}>会话列表（历史推演记录）</div>
         {sessions.length === 0 && (
-          <div style={{ color: "#94a3b8", fontSize: 13, textAlign: "center", padding: 20 }}>
+          <div style={{ color: "#64748b", fontSize: 14, textAlign: "center", padding: 32 }}>
             暂无推演会话，请创建新会话开始
           </div>
         )}
@@ -894,13 +894,14 @@ export default function App() {
               key={s.id}
               onClick={() => selectSession(s.id)}
               style={{
-                padding: "8px 10px", marginBottom: 6, borderRadius: 8, cursor: "pointer",
+                padding: "10px 12px", marginBottom: 8, borderRadius: 10, cursor: "pointer",
                 background: selectedId === s.id ? "#1e3a8a" : "#1e293b",
-                border: "1px solid " + (selectedId === s.id ? "#3b82f6" : "#334155"),
+                border: "2px solid " + (selectedId === s.id ? "#3b82f6" : "#334155"),
+                transition: "background 0.15s, border-color 0.15s",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {s.title || s.id.slice(0, 8)}
                 </span>
                 <button
@@ -910,13 +911,13 @@ export default function App() {
                   style={{ flexShrink: 0, background: "transparent", border: "none", color: running ? "#475569" : "#f87171", cursor: running ? "not-allowed" : "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px" }}
                 >🗑</button>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#cbd5e1", background: "#0f172a", borderRadius: 4, padding: "1px 6px" }}>{PHASE_LABELS[s.status] || s.status}</span>
-                {s.entity_count > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.entity_count} 实体</span>}
-                {s.agent_count > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.agent_count} 智能体</span>}
-                {s.current_round > 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>{s.current_round}/{s.total_rounds} 轮</span>}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#cbd5e1", background: "#0f172a", borderRadius: 4, padding: "2px 8px" }}>{PHASE_LABELS[s.status] || s.status}</span>
+                {s.entity_count > 0 && <span style={{ fontSize: 12, color: "#64748b" }}>{s.entity_count} 实体</span>}
+                {s.agent_count > 0 && <span style={{ fontSize: 12, color: "#64748b" }}>{s.agent_count} 智能体</span>}
+                {s.current_round > 0 && <span style={{ fontSize: 12, color: "#64748b" }}>{s.current_round}/{s.total_rounds} 轮</span>}
               </div>
-              <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{(s.created_at || "").slice(0, 19).replace("T", " ")}</div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>{(s.created_at || "").slice(0, 19).replace("T", " ")}</div>
             </div>
           );
         })}
@@ -1006,10 +1007,11 @@ export default function App() {
                   key={k}
                   onClick={() => setMainTab(k)}
                   style={{
-                    padding: "4px 16px", borderRadius: 6, fontSize: 13, cursor: "pointer",
+                    padding: "4px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer",
                     border: "1px solid #334155",
                     background: mainTab === k ? "#3b82f6" : "#0f172a",
                     color: mainTab === k ? "#fff" : "#94a3b8",
+                    transition: "background 0.15s, color 0.15s",
                   }}
                 >{k === "graph" ? "图谱" : k === "report" ? "报告" : k === "logs" ? "日志" : k === "dashboard" ? "态势" : k === "timeline" ? "时间线" : k === "token" ? "Token" : "优化"}</button>
               ))}
