@@ -265,6 +265,10 @@ async def create_agents_from_graph(
         if etype in _COMPANY_TYPES:
             return "科技企业或行业参与者"
         domain_role = get_domain_prompt(domain, "agent_domain_role")
+        if domain_role:
+            if domain not in getattr(_entity_role, "_logged", set()):
+                logger.info("[AgentFactory] 领域 %s 角色指南已注入 persona prompt", domain)
+                _entity_role._logged = getattr(_entity_role, "_logged", set()) | {domain}
         return domain_role or "独立博弈者"
 
     def _fallback(nm: str) -> dict:

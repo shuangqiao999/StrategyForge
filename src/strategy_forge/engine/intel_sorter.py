@@ -181,6 +181,9 @@ async def sort_entities(
                     domain_examples = formatted
         except (_json.JSONDecodeError, ValueError):
             pass
+    if extra_rules or domain_examples:
+        logger.info("[IntelSorter] 领域 %s 自定义提示已启用（规则=%d chars, 示例=%d chars）",
+                     domain, len(extra_rules or ""), len(domain_examples or ""))
     prompt = _INTEL_PROMPT.format(
         entity_names=", ".join(entity_names),
         source=source[:max_source_chars],

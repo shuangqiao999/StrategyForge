@@ -238,6 +238,7 @@ class DeductionOrchestrator:
                     source_material=self.session.source_material,
                     log_fn=self._log,
                     preprocessor=self._preprocessor,
+                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
                 )
                 self._agents = agents
                 self.session.agent_count = len(agents)
@@ -382,9 +383,14 @@ class DeductionOrchestrator:
                 from strategy_forge.engine.intel_sorter import sort_entities
                 from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
+                domain = self._rule_engine.domain
+                from strategy_forge.core.rule_templates import get_domain_prompt
+                dr = get_domain_prompt(domain, "intel_extra_rules")
+                if dr:
+                    self._log("graph", f"领域 {domain} 自定义筛选规则已启用（{len(dr)} chars）")
                 self._intel_list = await sort_entities(
                     self.session.source_material, entity_names, LLMClient(),
-                    domain=self._rule_engine.domain)
+                    domain=domain)
                 if self._intel_list:
                     active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
                     passive = len(self._intel_list) - active
@@ -482,6 +488,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             pre_interventions=pre_goals if pre_goals else None,
             intel_list=getattr(self, "_intel_list", None) or None,
+            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
         )
         self.session.agent_count = len(agents)
         self._agents = agents
