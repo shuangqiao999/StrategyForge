@@ -54,6 +54,7 @@ class DeductionOrchestrator:
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
+        self._engine: Any = None  # SimulationEngine 引用，供暂停时导出暂态
         self._enable_narrate: bool = True
         self._enable_multi_action: bool = False
         self._max_actions: int = 3
@@ -117,7 +118,7 @@ class DeductionOrchestrator:
             raise _PhaseCancelledError()
 
     def _save_pause_snapshot(self, session_id: str) -> None:
-        """Serialize in-memory state (EntityState metrics/history/delays) into config_json."""
+        """Serialize in-memory state (EntityState metrics/history/delays + engine transient state)."""
         snapshot: dict[str, Any] = {}
         states = getattr(self, "_states", None)
         if states:
@@ -132,6 +133,10 @@ class DeductionOrchestrator:
                 }
                 for eid, st in states.items()
             }
+        # 保存引擎暂态（事件历史、情报队列、人格日志、环境状态等）
+        engine = getattr(self, "_engine", None)
+        if engine is not None:
+            snapshot["engine"] = engine.get_state()
         data = self.store.get(session_id)
         cfg = (data or {}).get("config_json", {}) or {}
         if isinstance(cfg, str):
@@ -603,6 +608,18 @@ class DeductionOrchestrator:
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
         )
+        self._engine = engine
+
+        # 恢复暂停前的引擎暂态（如果有）
+        data = self.store.get(self.session.id)
+        if data:
+            cfg = (data or {}).get("config_json", {}) or {}
+            if isinstance(cfg, str):
+                cfg = _json.loads(cfg)
+            snapshot = self._load_state_snapshot(cfg)
+            if snapshot and snapshot.get("engine"):
+                engine.restore_state(snapshot["engine"])
+                self._log("orchestrator", "从快照恢复引擎暂态（事件历史/情报队列/人格日志/环境状态等）")
 
         rounds: list[SimulationRound] = []
         start_rnd = self._resume_start_round + 1

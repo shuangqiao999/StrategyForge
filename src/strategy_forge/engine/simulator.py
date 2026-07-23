@@ -444,7 +444,42 @@ class SimulationEngine:
                 break
         return (base + " " + " ".join(names)).strip() if names else base
 
-    # ── 用户强制 override（按体强制动作，跳过 FSM/LLM）──
+    def get_state(self) -> dict[str, Any]:
+        """导出暂态快照供暂停时持久化。"""
+        return {
+            "_event_history": list(self._event_history[-100:]),
+            "_narrative_env": dict(getattr(self, "_narrative_env", {})),
+            "_agent_knowledge": {k: [dict(e) for e in v[-200:]]
+                                 for k, v in getattr(self, "_agent_knowledge", {}).items()},
+            "_intel_bonuses": {k: dict(v) for k, v in
+                               getattr(self, "_intel_bonuses", {}).items()},
+            "_personality_log": list(getattr(self, "_personality_log", [])),
+            "_character_journal": {k: list(v) for k, v in
+                                  getattr(self, "_character_journal", {}).items()},
+            "_reflection_baselines": {k: dict(v) for k, v in
+                                      getattr(self, "_reflection_baselines", {}).items()},
+            "_last_reflection_round_n": dict(getattr(self, "_last_reflection_round_n", {})),
+            "_last_round_outcomes": dict(getattr(self, "_last_round_outcomes", {})),
+            "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
+                                  "opponents": list(v.get("opponents", []))}
+                              for k, v in getattr(self, "_prev_rel_map", {}).items()},
+        }
+
+    def restore_state(self, saved: dict[str, Any]) -> None:
+        """从暂停快照恢复暂态。"""
+        self._event_history = saved.get("_event_history", [])
+        self._narrative_env = saved.get("_narrative_env",
+                                         getattr(self, "_narrative_env", {}))
+        self._agent_knowledge = saved.get("_agent_knowledge", {})
+        self._intel_bonuses = saved.get("_intel_bonuses", {})
+        self._personality_log = saved.get("_personality_log", [])
+        self._character_journal = saved.get("_character_journal", {})
+        self._reflection_baselines = saved.get("_reflection_baselines", {})
+        self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
+        self._last_round_outcomes = saved.get("_last_round_outcomes", {})
+        self._prev_rel_map = saved.get("_prev_rel_map", {})
+
+    # ── 用户强制 override ──
     def _pop_override(self, agent: Any) -> dict | None:
         """取出并消费该 agent 的强制动作（按名称或 entity_id 匹配）。remaining 归零即删除。"""
         store = self._fsm_override_store
