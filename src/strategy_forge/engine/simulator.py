@@ -571,7 +571,9 @@ class SimulationEngine:
 
     def _append_event(self, event: dict) -> None:
         """共享事件历史追加 + 截断。"""
-        self._append_event(event)
+        self._event_history.append(event)
+        if len(self._event_history) > 200:
+            self._event_history = self._event_history[-200:]
 
     async def run_round(self, round_number: int) -> SimulationRound:
         if self._quantified:
