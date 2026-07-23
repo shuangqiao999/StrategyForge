@@ -11,7 +11,7 @@ function isTauri(): boolean {
   return !!(window as any).__TAURI_INTERNALS__;
 }
 
-const lbl: React.CSSProperties = { fontSize: 13, color: "#94a3b8", marginBottom: 4, display: "block" };
+const lbl: React.CSSProperties = { fontSize: 13, color: "#cbd5e1", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%" };
 const btn: React.CSSProperties = { height: 28, fontSize: 13, borderRadius: 6, border: "1px solid #334155", cursor: "pointer", padding: "0 12px" };
 
@@ -1853,7 +1853,7 @@ export default function App() {
       {/* ── Settings Overlay ── */}
       {showSettings && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowSettings(false)}>
-          <div style={{ background: "#1e293b", borderRadius: 12, padding: 24, width: 520, maxHeight: "80vh", overflow: "auto", border: "1px solid #334155" }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: "#0f172a", borderRadius: 12, padding: 24, width: 520, maxHeight: "80vh", overflow: "auto", border: "1px solid #334155" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <h2 style={{ margin: 0, fontSize: 18 }}>LLM / 嵌入模型配置</h2>
               <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 20 }}>✕</button>
