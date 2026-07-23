@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btnSmall {
+    @apply h-[26px] text-xs rounded-md border border-border cursor-pointer px-2.5 bg-bg-card text-text transition-colors;
+  }
+  .btnSmall:hover { @apply bg-[#263346]; }
+  .btnSmallPrimary { @apply bg-accent text-white border-accent; }
+  .btnSmallPrimary:hover { @apply bg-accent-hover; }
+  .pill {
+    @apply inline-block text-[11px] text-text bg-bg-card rounded-[10px] px-2 py-0.5;
+  }
+  .topbarStatusRow { @apply flex flex-wrap gap-1.5 mb-1 items-center; }
+  .topbarWs { @apply text-sm font-semibold text-text; }
+  .spinIcon { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+}
