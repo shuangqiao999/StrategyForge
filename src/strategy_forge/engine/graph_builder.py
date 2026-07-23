@@ -181,14 +181,14 @@ async def build_graph(
 
             async def _extract_call(prompt: str) -> str | None:
                 try:
-                        resp = await client.chat(
-                            [Message(role="user", content=prompt)], system=system, temperature=0)
-                        return _extract_text(resp)
-                    except LLMConnectionError:
-                        raise
-                    except Exception as e:
-                        logger.warning("[Graph] Entity-driven extract failed: %s", e)
-                        return None
+                    resp = await client.chat(
+                        [Message(role="user", content=prompt)], system=system, temperature=0)
+                    return _extract_text(resp)
+                except LLMConnectionError:
+                    raise
+                except Exception as e:
+                    logger.warning("[Graph] Entity-driven extract failed: %s", e)
+                    return None
 
             idxs = [k for k, p in enumerate(prompts) if p is not None]
             # 用 as_completed 替代 gather——每完成一个 LLM 调用立即 parse 并输出进度，
@@ -314,15 +314,15 @@ async def _extract_from_chunks(
 
     async def _chunk_call(text: str) -> str | None:
         try:
-                resp = await client.chat(
-                    [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
-                    system=system, temperature=0)
-                return _extract_text(resp)
-            except LLMConnectionError:
-                raise
-            except Exception as e:
-                logger.warning("[Graph] Chunk extract failed: %s", e)
-                return None
+            resp = await client.chat(
+                [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
+                system=system, temperature=0)
+            return _extract_text(resp)
+        except LLMConnectionError:
+            raise
+        except Exception as e:
+            logger.warning("[Graph] Chunk extract failed: %s", e)
+            return None
 
     texts = [(c if isinstance(c, str) else c.content) for c in chunks]
     contents = await asyncio.gather(*(_chunk_call(t) for t in texts))
