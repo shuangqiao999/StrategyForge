@@ -540,7 +540,8 @@ class SimulationEngine:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
         return static_text or "无特定背景", dynamic_text or "无近期模拟事件"
 
-    def _should_reflect(self, agent_id: str, round_number: int) -> str | None:
+    def _should_reflect(self, agent_id: str, round_number: int,
+                         state: Any = None, rule_engine: Any = None) -> str | None:
         """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
         叙事和量化模式统一调用，返回触发原因或 None。
         """
@@ -567,6 +568,13 @@ class SimulationEngine:
         # 条件3：长期无反思保护（超过 6 轮）
         if (round_number - last_r) > 6:
             return "长期无反思保护"
+        # 量化模式补充：指标告急触发反思
+        if state is not None and rule_engine is not None:
+            thr_map = getattr(rule_engine, "thresholds", lambda: {})()
+            for m, v in getattr(state, "metrics", {}).items():
+                thr = thr_map.get(m, 0)
+                if thr > 0 and v <= thr * 1.3:
+                    return f"指标告急({m}={v:.0f},阈={thr:.0f})"
         return None
 
     def _append_event(self, event: dict) -> None:
@@ -997,9 +1005,6 @@ class SimulationEngine:
         )
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
-
-    REFLECT_INTERVAL = 5      # 每5轮触发一次人格反思
-    REFLECT_DELTA_THRESHOLD = 25.0  # 单指标累计变化超过此阈值也触发
 
     # ── 前瞻规划：Rollout 反应规则 ──
     _REACTION_RULES: list[tuple[str, str, str]] = [
@@ -1776,7 +1781,7 @@ class SimulationEngine:
         _rc = LLMClient()
         for agent in self.agents:
             eid = agent.entity_id
-            reason = self._should_reflect(eid, round_number)
+            reason = self._should_reflect(eid, round_number, states.get(eid), re_engine)
             if reason is not None:
                 # 量化模式使用指标驱动反思（比叙事模式的事件驱动更适合数值推演）
                 await self._reflect_and_adapt(agent, round_number, _rc)

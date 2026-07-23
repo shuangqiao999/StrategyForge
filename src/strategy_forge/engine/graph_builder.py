@@ -151,7 +151,7 @@ async def build_graph(
             prompts: list[str | None] = []
             for std_name, aliases in hf_items:
                 fragments = preprocessor.retrieve_for_entity(
-                    std_name, _reg.retrieve_top_k * 2, must_contain=aliases)
+                    std_name, max(_reg.retrieve_top_k, 3) * 2, must_contain=aliases)
                 if not fragments:
                     prompts.append(None)
                     continue
@@ -276,7 +276,6 @@ async def build_graph(
             await _extract_from_chunks(
                 client=client, chunks=result.chunks, graph=graph, log_fn=log_fn,
                 entity_types=entity_type_names, relation_types=relation_type_names,
-                total_entities=total_entities, total_relations=total_relations,
             )
     else:
         # ── 回退模式: 全量语义分块 (无预处理器时) ──
@@ -287,23 +286,29 @@ async def build_graph(
         await _extract_from_chunks(
             client=client, chunks=chunks, graph=graph, log_fn=log_fn,
             entity_types=entity_type_names, relation_types=relation_type_names,
-            total_entities=total_entities, total_relations=total_relations,
         )
 
 
 async def _extract_from_chunks(
     client, chunks, graph, log_fn,
     entity_types, relation_types,
-    total_entities: int = 0, total_relations: int = 0,
 ) -> None:
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
     from strategy_forge.core.llm_client import Message
     system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
 
+    total_entities = 0
+    total_relations = 0
+    # 构建全文概览：从 chunks 多处采样
+    texts = [(c if isinstance(c, str) else c.content) for c in chunks]
+    _n = len(texts)
+    _raw = "\n\n---\n\n".join(texts[i][:600] for i in [0, _n//4, _n//2, 3*_n//4, _n-1] if 0 <= i < _n)
+    _overview = _raw[:1500] if _raw.strip() else "(无概览)"
+
     _chunk_base = Template(_EXTRACT_PROMPT).substitute(
         text="__TEXT__",
-        text_overview="(无概览)",
+        text_overview=_overview,
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
         candidate_entities="(无限制)",

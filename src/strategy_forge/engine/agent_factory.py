@@ -164,9 +164,13 @@ async def create_agents_from_graph(
                         merged[short] = long
                         break
             if merged:
-                persons = [name_to_person[merged.get(n, n)] for n in names
-                           if n not in merged or merged[n] not in merged]
-                persons = list({p.get("name", ""): p for p in persons}.values())
+                def _resolve(n: str) -> str:
+                    while n in merged and merged[n] != n:
+                        n = merged[n]
+                    return n
+                persons = [name_to_person.get(_resolve(n)) or name_to_person.get(n)
+                           for n in names if _resolve(n) not in {_resolve(m) for m in merged}]
+                persons = list({p.get("name", ""): p for p in persons if p is not None}.values())
                 log_fn("agents", f"子串去重: {len(merged)} 对合并 → {len(persons)} 个智能体")
 
     # freq_map 初始化前置：_build_prompt 在两种分支都需要
@@ -226,7 +230,6 @@ async def create_agents_from_graph(
 
             filtered.append(p)
 
-        persons = filtered
         persons = filtered
         if fallback_count:
             log_fn("agents", f"频率兜底: {fallback_count} 个高频实体（sorter 遗漏）已恢复为智能体，阈值≥{freq_threshold}")
@@ -364,6 +367,10 @@ async def create_agents_from_graph(
         )
 
         log_fn("agents", f"  [{i+1}/{max_agents}] {person_name}: {agent_profile.persona}")
+
+    if not agents and results:
+        raise RuntimeError(
+            f"全部 {len(results)} 个智能体 persona 生成失败，请检查 LLM 连接或模型配置")
 
     return agents
 
