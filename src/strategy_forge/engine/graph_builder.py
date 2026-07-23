@@ -182,7 +182,8 @@ async def build_graph(
             async def _extract_call(prompt: str) -> str | None:
                 try:
                     resp = await client.chat(
-                        [Message(role="user", content=prompt)], system=system, temperature=0)
+                        [Message(role="user", content=prompt)], system=system, temperature=0,
+                        max_tokens=8000)
                     return _extract_text(resp)
                 except LLMConnectionError:
                     raise
@@ -201,7 +202,10 @@ async def build_graph(
             async def _extract_with_idx(idx: int, prompt: str) -> tuple[int, str | None]:
                 # 在 prompt 末尾追加已发现实体列表——无需重复输出实体条目，
                 # 但涉及这些实体的新关系仍可提取
-                _max_exclude = min(200, len(_seen_names))
+                _max_exclude = 200
+                if len(_ent_pool) > 500:
+                    _max_exclude = 50  # 池过大时精简提示，防 prompt 膨胀
+                _max_exclude = min(_max_exclude, len(_seen_names))
                 if _max_exclude > 0:
                     prompt = f"{prompt}\n\n## 已在之前提取中发现的实体（无需输出条目，但涉及它们的新关系仍可提取）\n{', '.join(_seen_names[:_max_exclude])}"
                 return (idx, await _extract_call(prompt))
