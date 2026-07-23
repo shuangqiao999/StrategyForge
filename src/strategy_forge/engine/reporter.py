@@ -195,6 +195,25 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
         if e not in seen:
             seen.add(e)
             out.append(e)
+
+    # 语义去重：相邻事件内容相似度 >0.6 → 只保留第一条（消除"同一agent多轮重复同一动作"的流水账）
+    if len(out) > 1:
+        def _trigrams(s: str) -> set[str]:
+            return {s[i:i+3] for i in range(len(s)-2)}
+        deduped: list[str] = [out[0]]
+        for i in range(1, len(out)):
+            prev = deduped[-1]
+            curr = out[i]
+            p_set = _trigrams(prev)
+            c_set = _trigrams(curr)
+            union = len(p_set | c_set)
+            if union > 0:
+                jaccard = len(p_set & c_set) / union
+                if jaccard > 0.6:
+                    continue
+            deduped.append(curr)
+        out = deduped
+
     return out
 
 
