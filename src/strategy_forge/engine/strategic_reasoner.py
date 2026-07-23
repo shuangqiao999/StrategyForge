@@ -468,10 +468,6 @@ class StrategicReasoner:
             sc = get_domain_prompt(domain, "strategic_context")
             if sc:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
-                if not getattr(_inject_strategic_context, "_logged", set()).get(domain):
-                    logger.info("[StrategicReasoner] 领域 %s 行动指引已注入决策 prompt", domain)
-                    _inject_strategic_context._logged = getattr(_inject_strategic_context, "_logged", {})
-                    _inject_strategic_context._logged[domain] = True
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"

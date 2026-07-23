@@ -259,7 +259,6 @@ async def create_agents_from_graph(
 
     expected_keys = {"persona", "background", "goals"}
 
-    _DOMAIN_ROLES: dict[str, str] = {}
     _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
                       "公司", "企业", "组织", "机构"}
     def _entity_role(person: dict) -> str:

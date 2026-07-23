@@ -201,6 +201,3 @@ class EntityState:
     def to_prompt_context(self) -> str:
         return f"{self.name}({self.domain}): " + ", ".join(
             f"{k}={v:.1f}" for k, v in self.metrics.items())
-
-    def snapshot(self) -> dict[str, float]:
-        return dict(self.metrics)

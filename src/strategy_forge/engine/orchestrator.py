@@ -99,6 +99,7 @@ class DeductionOrchestrator:
             self.store.update(session_id, status=SessionStatus.COMPLETE.value,
                               phase=DeductionPhase.COMPLETE.value)
             self._clear_state_snapshot(session_id)
+            self.store.prune_logs(session_id)
             if getattr(self, "_preprocessor", None) is not None:
                 self._preprocessor.close()
         except _PhaseCancelledError:
@@ -769,11 +770,3 @@ class DeductionOrchestrator:
         self.store.update(self.session.id,
                           report_json=_json.dumps(report_payload, ensure_ascii=False))
         self._log("report", f"报告生成完成: {report.summary}")
-
-    def get_realtime_round(self) -> SimulationRound | None:
-        rounds = getattr(self, "_simulation_rounds", None)
-        if rounds and self.session.current_round > 0:
-            idx = self.session.current_round - 1
-            if idx < len(rounds):
-                return rounds[idx]
-        return None
