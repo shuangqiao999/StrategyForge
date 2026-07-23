@@ -213,6 +213,7 @@ class DeductionOrchestrator:
                     f"MATCH (e:{self.graph.NODE_TABLE}) RETURN e.id, e.type")
                 type_map = {r[0]: r[1] for r in erows if r[0] and r[1]}
             except Exception:
+                logger.warning("[Orchestrator] 恢复智能体时实体类型查询失败")
                 pass
             for a in stored_agents:
                 try:
@@ -371,6 +372,8 @@ class DeductionOrchestrator:
         self.session.relation_count = r_count
 
         self._log("graph", f"图谱构建完成: {e_count} 实体, {r_count} 关系")
+        if e_count == 0:
+            self._log("graph", "⚠️ 图谱未提取到任何实体——种子材料可能过短或格式无法解析")
         self.store.update(self.session.id, entity_count=e_count, relation_count=r_count,
                           status=SessionStatus.AGENTS_RUNNING.value,
                           phase=DeductionPhase.AGENTS.value)
@@ -417,6 +420,7 @@ class DeductionOrchestrator:
                         if r[0] and r[1]:
                             entity_types[str(r[0])] = str(r[1])
                 except Exception:
+                    logger.warning("[Orchestrator] 叙事模式实体类型查询失败")
                     pass
                 # 传递预处理器的实体统计和分块数据，供超长文本构建全局视图
                 pp = getattr(self, "_preprocessor", None)
@@ -506,6 +510,7 @@ class DeductionOrchestrator:
                         priority=0.9,
                     )
                 except Exception:
+                    logger.warning("[Orchestrator] 不可变目标注入 LanceDB 失败")
                     pass
             self._log("agents", f"已注入 {len(pre_goals)} 个不可变目标到 LanceDB")
 

@@ -598,28 +598,25 @@ class SimulationEngine:
         if self._cancel is not None and self._cancel.is_set():
             raise _PhaseCancelledError()
 
-        sem = asyncio.Semaphore(self._max_concurrent)
-
         async def process_agent(agent: DeductionAgentProfile) -> SimulationAction | None:
-            async with sem:
-                # 取信号量后再查一次取消，便于并发批内尽早短路
-                if self._cancel is not None and self._cancel.is_set():
-                    return None
-                from strategy_forge.core.config import config
-                from strategy_forge.core.providers import registry as _reg
-                from strategy_forge.core.llm_client import LLMConnectionError
-                fails = 0
-                max_passes = max(0, _reg.retry_passes)
-                while True:
-                    try:
-                        return await self._agent_decide(client, agent, round_number)
-                    except LLMConnectionError as e:
-                        fails += 1
-                        if fails > max_passes:
-                            raise
-                        delay = min(60.0, 5.0 * (2 ** (fails - 1)))
-                        self._log("simulation", f"{agent.name} LLM 连接失败({fails}/{max_passes+1})，{delay:.0f}s 后重试… | {e.endpoint}: {e.cause}")
-                        await asyncio.sleep(delay)
+            # 取信号量后再查一次取消，便于并发批内尽早短路
+            if self._cancel is not None and self._cancel.is_set():
+                return None
+            from strategy_forge.core.config import config
+            from strategy_forge.core.providers import registry as _reg
+            from strategy_forge.core.llm_client import LLMConnectionError
+            fails = 0
+            max_passes = max(0, _reg.retry_passes)
+            while True:
+                try:
+                    return await self._agent_decide(client, agent, round_number)
+                except LLMConnectionError as e:
+                    fails += 1
+                    if fails > max_passes:
+                        raise
+                    delay = min(60.0, 5.0 * (2 ** (fails - 1)))
+                    self._log("simulation", f"{agent.name} LLM 连接失败({fails}/{max_passes+1})，{delay:.0f}s 后重试… | {e.endpoint}: {e.cause}")
+                    await asyncio.sleep(delay)
 
         # 并发决策（上限 = FORGE_MAX_CONCURRENT），随后按 ordered 原序回填以保持确定性
         results = await asyncio.gather(
@@ -919,7 +916,9 @@ class SimulationEngine:
         stage_text = ""
         if not self._quantified and self.total_rounds > 0:
             progress = round_number / max(1, self.total_rounds)
-            if progress <= 0.3:
+            if self.total_rounds == 1:
+                stage_hint = ("唯一轮次：请做出关键决策以推动局势发展")
+            elif progress <= 0.3:
                 stage_hint = ("当前为铺垫幕：自由布局，建立关系、收集信息、埋设伏笔均可，"
                               "但每轮行动都应产生新信息或新关系，不要空转。")
             elif progress <= 0.8:
@@ -1225,6 +1224,10 @@ class SimulationEngine:
                     "importance": 0.5,
                     "_base_distortion": distortion,  # for information decay
                 })
+                # 队列上限保护
+                queue = self._agent_knowledge[a_id]
+                if len(queue) > 500:
+                    self._agent_knowledge[a_id] = queue[-500:]
 
     def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
         """交付该 agent 的已熟事件（deliver_round <= 当前轮），从队列中移除。"""
@@ -1412,8 +1415,6 @@ class SimulationEngine:
                 lines.append("接触/碰撞中: " + "、".join(in_contact))
             return "\n".join(lines)
 
-        sem = asyncio.Semaphore(self._max_concurrent)
-
         # Clear round-level caches at start of round
         if self._preprocessor is not None and hasattr(self._preprocessor, "clear_round_cache"):
             self._preprocessor.clear_round_cache()
@@ -1455,44 +1456,43 @@ class SimulationEngine:
             last_err = None
             while True:
                 try:
-                    async with sem:
-                        if self._cancel is not None and self._cancel.is_set():
-                            return None
-                        static_text, dynamic_text = await _recall(agent)
-                        rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
-                        causal = _causal_ctxs.get(agent.entity_id, "")
-                        agent_recent = _recent_ctxs.get(agent.entity_id, "（无近期事件）")
-                        d = await self.reasoner.reason_quantified(
-                            agent, states[agent.entity_id], re_engine,
-                            recent_events=agent_recent, other_context=_other_ctxs.get(agent.entity_id, ""),
-                            round_number=round_number, client=client,
-                            static_knowledge=static_text, dynamic_memory=dynamic_text,
-                            relationship_context=rel_ctx, causal_feedback=causal,
-                            spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
-                            env_context=_env_ctx,
-                            multi_candidate=getattr(self, "_enable_rollout", False),
-                        )
-                        d["actor_id"] = agent.entity_id
+                    if self._cancel is not None and self._cancel.is_set():
+                        return None
+                    static_text, dynamic_text = await _recall(agent)
+                    rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
+                    causal = _causal_ctxs.get(agent.entity_id, "")
+                    agent_recent = _recent_ctxs.get(agent.entity_id, "（无近期事件）")
+                    d = await self.reasoner.reason_quantified(
+                        agent, states[agent.entity_id], re_engine,
+                        recent_events=agent_recent, other_context=_other_ctxs.get(agent.entity_id, ""),
+                        round_number=round_number, client=client,
+                        static_knowledge=static_text, dynamic_memory=dynamic_text,
+                        relationship_context=rel_ctx, causal_feedback=causal,
+                        spatial_context=_spatial_ctxs.get(agent.entity_id, ""),
+                        env_context=_env_ctx,
+                        multi_candidate=getattr(self, "_enable_rollout", False),
+                    )
+                    d["actor_id"] = agent.entity_id
 
-                        # ── 前瞻规划：如果设定了 enable_rollout，做多候选评分 ──
-                        if getattr(self, "_enable_rollout", False):
-                            try:
-                                candidates_raw = d.get("_candidates", [])
-                                if candidates_raw and len(candidates_raw) > 1:
-                                    scored = await self._rollout_candidates(
-                                        agent, candidates_raw, re_engine,
-                                        states, round_number, lookahead=3)
-                                    if scored:
-                                        best = max(scored, key=lambda c: c.get("_future_score", 0))
-                                        best["actor_id"] = agent.entity_id
-                                        best["_original"] = d
-                                        best["_rollout_score"] = best.get("_future_score", 0)
-                                        best["driver"] = "llm_rollout"
-                                        return best
-                            except Exception:
-                                pass  # rollout 失败 → 安全回退到 LLM 直接决策
+                    # ── 前瞻规划：如果设定了 enable_rollout，做多候选评分 ──
+                    if getattr(self, "_enable_rollout", False):
+                        try:
+                            candidates_raw = d.get("_candidates", [])
+                            if candidates_raw and len(candidates_raw) > 1:
+                                scored = await self._rollout_candidates(
+                                    agent, candidates_raw, re_engine,
+                                    states, round_number, lookahead=3)
+                                if scored:
+                                    best = max(scored, key=lambda c: c.get("_future_score", 0))
+                                    best["actor_id"] = agent.entity_id
+                                    best["_original"] = d
+                                    best["_rollout_score"] = best.get("_future_score", 0)
+                                    best["driver"] = "llm_rollout"
+                                    return best
+                        except Exception:
+                            pass  # rollout 失败 → 安全回退到 LLM 直接决策
 
-                        return d
+                    return d
                 except LLMConnectionError as e:
                     fails += 1
                     if fails > max_passes:

@@ -179,6 +179,8 @@ class EntityState:
         self.history.append({"round": round_number, "metric": name,
                              "old": round(old, 2), "delta": round(delta, 2),
                              "new": round(new, 2)})
+        if len(self.history) > 500:
+            self.history = self.history[-500:]
         return new
 
     def apply_deltas(self, deltas: dict[str, float], round_number: int = 0,
