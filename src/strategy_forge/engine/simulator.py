@@ -496,6 +496,84 @@ class SimulationEngine:
                 return f"{action_type}（{worst_metric}={worst_val:.0f}{tag}，阈值{worst_thr:.0f}｜{state}）"
         return f"{action_type}（{state}）"
 
+    async def _shared_dual_recall(
+        self, agent: DeductionAgentProfile,
+        recall_top_k: int | None = None,
+        recall_chars: int | None = None,
+    ) -> tuple[str, str]:
+        """共享双路 LanceDB 召回：Path A 静态原著 + Path B 动态事件。
+        叙事和量化模式统一调用本方法，消除 ~40 行重复代码。
+        """
+        from strategy_forge.core.providers import registry as _reg
+        from strategy_forge.core.config import config as _cfg
+        rk = recall_top_k or _reg.retrieve_top_k
+        rc = recall_chars or 300
+        pp = self._preprocessor
+        static_text, dynamic_text = "", ""
+        if pp is not None and getattr(pp, "result", None):
+            try:
+                frags = await asyncio.to_thread(
+                    pp.retrieve_for_entity, agent.name, rk,
+                    {agent.name} if agent.name else None)
+                if frags:
+                    static_text = "\n---\n".join(f[:300] for f in frags[:rk])[:rc]
+            except Exception as e:
+                logger.warning("[Simulator] 静态召回失败 %s: %s", agent.name, e)
+        if self._persist_events and pp is not None:
+            try:
+                aliases: set[str] = set()
+                if getattr(pp, "result", None):
+                    aliases = set(pp.result.high_freq_entities.get(agent.name, set()))
+                    aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
+                query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
+                query = self._augment_recall_query(query, agent.entity_id)
+                frags = await asyncio.to_thread(
+                    pp.retrieve_dynamic_events, query, rk,
+                    _cfg.deduction_similarity_threshold, agent.name)
+                if frags:
+                    dynamic_text = "\n---\n".join(frags[:rk])[:rc]
+            except Exception as e:
+                logger.warning("[Simulator] 动态召回失败 %s: %s", agent.name, e)
+        elif not self._persist_events:
+            mem = [e for e in self._event_history[-20:]
+                   if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
+            if mem:
+                dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
+        return static_text or "无特定背景", dynamic_text or "无近期模拟事件"
+
+    def _should_reflect(self, agent_id: str, round_number: int) -> str | None:
+        """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
+        叙事和量化模式统一调用，返回触发原因或 None。
+        """
+        baseline = self._reflection_baselines.get(agent_id, dict(self._narrative_env))
+        last_r = self._last_reflection_round_n.get(agent_id, 0)
+        # 条件1：环境累积剧变
+        total_drift = 0.0
+        for k in self._narrative_env:
+            delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
+            total_drift += abs(delta)
+            if abs(delta) > 5:
+                return f"环境剧变({k}{delta:+.0f})"
+        if total_drift > 12:
+            return f"环境累计漂移({total_drift:.0f})"
+        # 条件2：关系网络变化
+        prev_rels = getattr(self, "_prev_rel_map", {})
+        curr_rels = self._rel_context.get(agent_id, {})
+        prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
+        curr_allies = set(curr_rels.get("allies", []))
+        prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
+        curr_opps = set(curr_rels.get("opponents", []))
+        if prev_allies != curr_allies or prev_opps != curr_opps:
+            return "关系网络变化"
+        # 条件3：长期无反思保护（超过 6 轮）
+        if (round_number - last_r) > 6:
+            return "长期无反思保护"
+        return None
+
+    def _append_event(self, event: dict) -> None:
+        """共享事件历史追加 + 截断。"""
+        self._append_event(event)
+
     async def run_round(self, round_number: int) -> SimulationRound:
         if self._quantified:
             return await self._run_round_quantified(round_number)
@@ -558,7 +636,7 @@ class SimulationEngine:
                 _secret = is_secret_action(action.action_type, action.content)
                 _participants = "|".join(filter(None, [
                     _actor_name, action.agent_id, str(action.target_id or "")]))
-                self._event_history.append({
+                self._append_event({
                     "agent": action.agent_id,
                     "agent_name": _actor_name,
                     "action": action.action_type,
@@ -568,9 +646,6 @@ class SimulationEngine:
                     "visibility": "private" if _secret else "public",
                     "participants": _participants,
                 })
-
-        if len(self._event_history) > 200:
-            self._event_history = self._event_history[-200:]
 
         # Write round events to Kuzu graph + LanceDB dynamic event table
         # 蒙特卡洛隔离模式 (persist_events=False): 不落盘、不写向量库，仅保留内存事件历史，
@@ -613,12 +688,10 @@ class SimulationEngine:
             self._narrative_env[key] = max(0.0, min(100.0,
                 round(self._narrative_env[key] * 0.95, 1)))
 
-            # ── 叙事模式人格动态化（纯事件驱动）──
-        # 每个 Agent 维护独立的上次反思环境基线 + 轮次记录
+        # ── 共享反思闸门（叙事模式调用 _reflect_narrative）──
         if not hasattr(self, "_reflection_baselines"):
             self._reflection_baselines: dict[str, dict[str, float]] = {}
             self._last_reflection_round_n: dict[str, int] = {}
-            # 随机初始偏移 0~2 轮，避免全部 Agent 锁步同时触发空闲保护
             import random as _random
             for agent in self.agents:
                 self._last_reflection_round_n[agent.entity_id] = _random.randint(0, 2)
@@ -627,36 +700,7 @@ class SimulationEngine:
         _rc = LLMClient()
         for agent in self.agents:
             eid = agent.entity_id
-            baseline = self._reflection_baselines.get(eid, dict(self._narrative_env))
-            last_r = self._last_reflection_round_n.get(eid, 0)
-            reason = None
-
-            # 条件1：环境累积剧变（任一维度漂移>5 或 累计漂移>12）
-            total_drift = 0.0
-            for k in self._narrative_env:
-                delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
-                total_drift += abs(delta)
-                if abs(delta) > 5:
-                    reason = f"环境剧变({k}{delta:+.0f})"
-                    break
-            if reason is None and total_drift > 12:
-                reason = f"环境累计漂移({total_drift:.0f})"
-
-            # 条件2：该 Agent 的关系网络发生变化
-            if reason is None:
-                prev_rels = getattr(self, "_prev_rel_map", {})
-                curr_rels = self._rel_context.get(eid, {})
-                prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
-                curr_allies = set(curr_rels.get("allies", []))
-                prev_opps = set(prev_rels.get(eid, {}).get("opponents", []))
-                curr_opps = set(curr_rels.get("opponents", []))
-                if prev_allies != curr_allies or prev_opps != curr_opps:
-                    reason = "关系网络变化"
-
-            # 条件3：长时间无反思保护（超过 6 轮）
-            if reason is None and (round_number - last_r) > 6:
-                reason = "长期无反思保护"
-
+            reason = self._should_reflect(eid, round_number)
             if reason:
                 await self._reflect_narrative(agent, round_number, _rc)
                 self._reflection_baselines[eid] = dict(self._narrative_env)
@@ -889,49 +933,8 @@ class SimulationEngine:
         action_catalog_text = ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
                                if action_list and not self._quantified else "")
 
-        # ── Path A: 静态原著背景检索 ──
-        static_text = "无特定背景"
-        if self._preprocessor and self._preprocessor.result:
-            try:
-                from strategy_forge.core.providers import registry as _reg
-                static_frags = await asyncio.to_thread(
-                    self._preprocessor.retrieve_for_entity,
-                    agent.name, _reg.retrieve_top_k,
-                    must_contain={agent.name} if agent.name else None,
-                )
-                if static_frags:
-                    static_text = "\n---\n".join(f[:300] for f in static_frags)
-            except Exception as e:
-                logger.warning("[Simulator] Static recall failed for %s: %s", agent.name, e)
-
-        # ── Path B: 动态模拟事件检索 ──
-        dynamic_text = "无近期模拟事件"
-        if self._persist_events and self._preprocessor is not None:
-            try:
-                from strategy_forge.core.config import config
-                from strategy_forge.core.providers import registry as _reg
-                aliases: set[str] = set()
-                if self._preprocessor.result:
-                    aliases = self._preprocessor.result.high_freq_entities.get(agent.name, set())
-                    aliases.update(
-                        self._preprocessor.result.low_freq_entities.get(agent.name, set()))
-                query = agent.name + " " + " ".join(aliases - {agent.name})
-                query = self._augment_recall_query(query, agent.entity_id)
-                dynamic_frags = await asyncio.to_thread(
-                    self._preprocessor.retrieve_dynamic_events,
-                    query, _reg.retrieve_top_k, _reg.similarity_threshold,
-                    agent.name,
-                )
-                if dynamic_frags:
-                    dynamic_text = "\n---\n".join(dynamic_frags)
-            except Exception as e:
-                logger.warning("[Simulator] Dynamic recall failed for %s: %s", agent.name, e)
-        elif not self._persist_events:
-            # 隔离模式(蒙特卡洛): 仅用内存事件历史, 不触碰 LanceDB
-            mem = [e for e in visible_history[-20:]
-                   if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
-            if mem:
-                dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
+        # ── 共享双路 LanceDB 召回 ──
+        static_text, dynamic_text = await self._shared_dual_recall(agent)
 
         # ── Strategic Reasoning (primary path) ──
         context_text = recent_text
@@ -1410,43 +1413,9 @@ class SimulationEngine:
             self._preprocessor.clear_round_cache()
 
         async def _recall(agent: DeductionAgentProfile) -> tuple[str, str]:
-            """量化轮的 LanceDB 语义召回：Path A 原著静态(只读，优化器也启用) + Path B 动态事件。"""
-            static_text, dynamic_text = "", ""
-            # B2: 模拟召回片段数与字符预算独立于 graph/agents 的检索深度
             _rk = max(1, _cfg.deduction_sim_recall_topk)
             _rc = max(200, _cfg.deduction_sim_recall_chars)
-            pp = self._preprocessor
-            if pp is not None and getattr(pp, "result", None):
-                try:
-                    frags = await asyncio.to_thread(
-                        pp.retrieve_for_entity, agent.name, _rk,
-                        {agent.name} if agent.name else None)
-                    if frags:
-                        static_text = "\n---\n".join(f[:300] for f in frags[:_rk])[:_rc]
-                except Exception as e:
-                    logger.debug("[Simulator] 量化静态召回失败 %s: %s", agent.name, e)
-            if self._persist_events and pp is not None:
-                try:
-                    aliases: set[str] = set()
-                    if pp.result:
-                        aliases = set(pp.result.high_freq_entities.get(agent.name, set()))
-                        aliases.update(pp.result.low_freq_entities.get(agent.name, set()))
-                    query = (agent.name + " " + " ".join(aliases - {agent.name})).strip()
-                    query = self._augment_recall_query(query, agent.entity_id)
-                    frags = await asyncio.to_thread(
-                        pp.retrieve_dynamic_events, query, _rk,
-                        _cfg.deduction_similarity_threshold, agent.name)
-                    if frags:
-                        dynamic_text = "\n---\n".join(frags[:_rk])[:_rc]
-                except Exception as e:
-                    logger.debug("[Simulator] 量化动态召回失败 %s: %s", agent.name, e)
-            elif not self._persist_events:
-                # 隔离模式(蒙特卡洛)：仅用内存事件历史，不触碰 LanceDB 动态表
-                mem = [e for e in self._event_history[-20:]
-                       if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
-                if mem:
-                    dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
-            return static_text, dynamic_text
+            return await self._shared_dual_recall(agent, _rk, _rc)
 
         # Pre-compute per-agent contexts once before concurrent execution
         _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
@@ -1785,19 +1754,16 @@ class SimulationEngine:
                 except Exception as e:
                     logger.debug("[Simulator] 量化因果写入 Kuzu 失败: %s", e)
             evt_suffix = (f"［{alloc_txt}］" if alloc_txt else "") + (f"（{delta_txt}）" if delta_txt else "")
-            self._event_history.append({
+            self._append_event({
                 "agent": actor, "agent_name": nm, "action": dec["action_type"],
                 "content": content + evt_suffix,
                 "round": round_number,
             })
-        if len(self._event_history) > 200:
-            self._event_history = self._event_history[-200:]
 
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
 
-        # ── 人格动态化：量化/叙事统一使用叙事模式反射逻辑 ──
-        # 条件1：环境累积剧变 / 条件2：关系网络变化 / 条件3：超过6轮无反思
+        # ── 共享反思闸门（量化模式调用 _reflect_and_adapt）──
         if not hasattr(self, "_reflection_baselines"):
             self._reflection_baselines: dict[str, dict[str, float]] = {}
             self._last_reflection_round_n: dict[str, int] = {}
@@ -1809,36 +1775,7 @@ class SimulationEngine:
         _rc = LLMClient()
         for agent in self.agents:
             eid = agent.entity_id
-            baseline = self._reflection_baselines.get(eid, dict(self._narrative_env))
-            last_r = self._last_reflection_round_n.get(eid, 0)
-            reason = None
-
-            # 条件1：环境累积剧变（任一维度漂移>5 或 累计漂移>12）
-            total_drift = 0.0
-            for k in self._narrative_env:
-                delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
-                total_drift += abs(delta)
-                if abs(delta) > 5:
-                    reason = f"环境剧变({k}{delta:+.0f})"
-                    break
-            if reason is None and total_drift > 12:
-                reason = f"环境累计漂移({total_drift:.0f})"
-
-            # 条件2：该 Agent 的关系网络发生变化
-            if reason is None:
-                prev_rels = getattr(self, "_prev_rel_map", {})
-                curr_rels = self._rel_context.get(eid, {})
-                prev_allies = set(prev_rels.get(eid, {}).get("allies", []))
-                curr_allies = set(curr_rels.get("allies", []))
-                prev_opps = set(prev_rels.get(eid, {}).get("opponents", []))
-                curr_opps = set(curr_rels.get("opponents", []))
-                if prev_allies != curr_allies or prev_opps != curr_opps:
-                    reason = "关系网络变化"
-
-            # 条件3：长时间无反思保护（超过 6 轮）
-            if reason is None and (round_number - last_r) > 6:
-                reason = "长期无反思保护"
-
+            reason = self._should_reflect(eid, round_number)
             if reason is not None:
                 # 量化模式使用指标驱动反思（比叙事模式的事件驱动更适合数值推演）
                 await self._reflect_and_adapt(agent, round_number, _rc)
