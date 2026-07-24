@@ -174,7 +174,7 @@ async def sort_narrative_entities(
                 result.append({
                     "name": name,
                     "aliases": aliases,
-                    "include_in_simulation": bool(e.get("include", True)),
+                    "include_in_simulation": True,  # 由 EntityRegistry 决定
                     "role": str(e.get("reason", ""))[:80],
                     "parent": e.get("parent"),
                     "sub_entities": e.get("sub_entities", []),
@@ -194,44 +194,7 @@ async def sort_narrative_entities(
         if r:
             all_results.extend(r)
 
-    # ── 安全网：规则层兜底分类 ──
-    _NON_AGENT_TYPES = {"地理区域", "地理位置", "地点", "天气", "气象",
-                        "文档", "协议", "合同", "批文", "文件",
-                        "概念", "现象", "事件", "日期", "时间",
-                        "设施", "基础设施", "建筑",
-                        "自然景观", "自然现象", "环境要素",
-                        "Location", "Document", "Concept", "Event",
-                        "Date", "Time", "Facility", "NaturalFeature"}
-    try:
-        for e in all_results:
-            if not isinstance(e, dict):
-                continue
-            ename = e.get("name", "")
-            if not ename:
-                continue
-            etype = etypes.get(ename, "")
-            if etype in _NON_AGENT_TYPES and e.get("include_in_simulation") and not e.get("_safety_override"):
-                e["include_in_simulation"] = False
-                e["role"] = (e.get("role", "") or "") + "｜安全网：非决策者类型"
-
-        # 频率兜底：若 LLM 静默失败（全部为 false 或空），强制保底高覆盖实体
-        active = sum(1 for e in all_results if isinstance(e, dict) and e.get("include_in_simulation"))
-        if active == 0 and entity_names and freq:
-            ranked = sorted(entity_names, key=lambda n: (freq.get(n, 0), cov.get(n, 0)), reverse=True)
-            top_n = min(max(3, len(ranked) // 3), 12)
-            for name in ranked[:top_n]:
-                for e in all_results:
-                    if not isinstance(e, dict):
-                        continue
-                    if e.get("name") == name:
-                        e["include_in_simulation"] = True
-                        e["_safety_override"] = True
-                        if not e.get("role"):
-                            e["role"] = f"安全网保底：高频实体(频次={freq.get(name,'?')})"
-                        break
-            logger.warning("[NarrativeSorter] LLM 返回 0 个角色，安全网保底 %d 个高频实体", top_n)
-    except Exception as se:
-        logger.warning("[NarrativeSorter] 安全网执行失败: %s", se)
+    # ── 已废弃：分类判定由 EntityRegistry 接管，保留兼容入口 ──
 
     if len(batches) > 1:
         logger.info("[NarrativeSorter] %d batches → %d entities classified",

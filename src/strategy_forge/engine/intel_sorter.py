@@ -13,7 +13,7 @@ from ._utils import extract_text as _extract_text, parse_json as _parse_json
 
 logger = logging.getLogger(__name__)
 
-_INTEL_PROMPT = """你是情报分析师。请根据以下种子材料，整理实体关系清单。
+_INTEL_PROMPT = """你是情报分析师。请根据以下种子材料，整理实体别名与层级关系。
 
 ## 所有已提取的实体名称
 {entity_names}
@@ -21,94 +21,30 @@ _INTEL_PROMPT = """你是情报分析师。请根据以下种子材料，整理�
 ## 种子材料（完整上下文）
 {source}
 
-## 任务
+## 任务（简化版——EntityRegistry 接管分类判定）
 
-1. 判断每个实体是独立的战略决策者，还是某个实体的子部分/下属
-2. 判断生命周期 —— 如果被收购，在推演时间窗口内是否仍独立存在
-3. 过滤非战略实体 —— 监管机构、评级机构、指数机构、纯媒体平台 — 不参与推演
-4. 建立层级关系 —— 工厂属于企业、部门属于组织
-5. 别名合并 —— 识别同一实体的不同名称（中英文名、简称、全称），合并为一条
-6. 集合概念过滤 —— 泛指的群体/行业/阵营不是单一决策者
+1. 别名合并 —— 识别同一实体的不同名称（中英文名、简称、全称），合并为一条，选最完整的中文全称作为 name
+2. 建立层级关系 —— 判断哪些实体是其他实体的子部分/下属，填写 parent 字段
 
 ## 输出 JSON（仅 JSON，无 markdown）
 {{"entities": [
-  {{"name": "实体A", "type": "企业/国家/组织等", "aliases": ["别名1", "别名2"], "parent": null,
-    "sub_entities": ["下属单元1"], "include_in_simulation": true, "role": "核心博弈者"}},
-  {{"name": "实体B", "type": "组织类型", "aliases": [], "parent": null, "sub_entities": [],
-    "include_in_simulation": false, "role": "协调机构，非独立决策者"}},
-  {{"name": "某行业群体", "type": "集合概念", "aliases": [], "parent": null, "sub_entities": [],
-    "include_in_simulation": false, "role": "泛指集合，具体成员已单列，不作为单一博弈实体"}},
-  {{"name": "A与B", "type": "关系/对抗", "aliases": [], "parent": null, "sub_entities": ["A", "B"],
-    "include_in_simulation": false, "role": "二元对抗关系词，非单一决策者，成员各自为主体"}},
-  {{"name": "某下属编制", "type": "组织编制/部门", "aliases": [], "parent": "上级组织", "sub_entities": [],
-    "include_in_simulation": false, "role": "下属编制，归入上级"}},
-  {{"name": "某职务头衔", "type": "职务", "aliases": [], "parent": "所属组织", "sub_entities": [],
-    "include_in_simulation": false, "role": "职务头衔，对应人物/组织已单列"}},
-  {{"name": "某监管机构", "type": "监管机构", "aliases": [], "parent": null, "sub_entities": [],
-    "include_in_simulation": false, "role": "监管者，非博弈者"}}
+  {{"name": "规范全称", "type": "企业/国家/组织等", "aliases": ["简称", "英文名"], "parent": null}},
+  {{"name": "某部门", "type": "组织编制", "aliases": [], "parent": "上级组织名"}}
 ]}}
 
-- include_in_simulation: true = 独立决策者，需要生成智能体
-- include_in_simulation: false = 子实体/监管/指数/集合概念/职务/关系词/下属部门 —— 不生成智能体
-- parent: null = 独立实体; 填写父实体名 = 从属关系
-- 重要：如果某人是某组织的领导人/代表人物（如CEO→公司、总统→国家），在商业/军事/城市领域将其 include_in_simulation 设为 false，parent 设为该组织——组织本身作为决策者。但在政治/地缘战略领域，若该人物具有独立决策权和公开影响力，保留 include_in_simulation=true，同时仍将 parent 设为所属组织以标明关系。
-- sub_entities: 该实体包含的子部分（工厂、部门、领导人等）
-- 重要：论坛/协调机构（多边峰会、区域合作组织、国际论坛等）和行政下属机构不是独立战略决策者 —— 它们不独立制定核心决策。将其设为 false，或将其设为对应国家/上级组织的一部分。
-- 别名合并（重要）：同一实体的多个名称（中英文名如"经合组织/OECD"、简称如"乌军/乌克兰军队"、全称与缩写）只输出一条，选最规范/最完整的名称作为 name，其余全部放入 aliases 数组；不要把同一实体的别名作为独立条目重复输出。规范名称优先选择中文全称（如"美国国防部"而非"DoD"），英文缩写/简称放入 aliases。
-- 集合概念过滤（重要）：泛指的群体/行业/阵营/民间/概念集合（如"中国科技企业群体"、"科技行业"、"西方民间"）不是单一战略决策者。若其具体成员（如华为、中芯国际、DeepSeek）已出现在实体列表中，则把该集合设为 include_in_simulation=false，并在 role 说明"泛指集合，成员已单列"；若集合是唯一表述（无具体成员出现），则保留为决策者但在 role 标注"集合概念"。
-- 职务/头衔过滤（重要）：纯职务/头衔词（总统、总理、部长、秘书长、司令、主席、领导人等，如"北约秘书长""美国总统"）不是独立实体。将其 include_in_simulation=false，parent 设为对应组织，并把对应的具体人物（如吕特、特朗普）单列为该组织的领导人（按上面的领袖规则处理）。
-- 二元关系/对抗词过滤（重要）：由两个及以上主体拼接而成、表示关系或冲突的词（如"俄乌""美伊""中美""巴以""印巴""俄乌冲突"）不是单一决策者。将其 include_in_simulation=false，把各成员（俄罗斯、乌克兰…）放入 sub_entities，成员各自作为独立主体单列。
-- 国家内部部门/军队编制过滤（重要）：一国政府的职能部门（国防部、财政部、外交部、商务部、央行、最高法院等）与军队编制（第X舰队、战区、司令部、集团军等）不是独立战略决策者。将其 parent 设为所属国家或军队、include_in_simulation=false；由国家/军队本身作为决策者。
-- 不要遗漏任何已提取的实体名（作为别名合并进某条的除外）
+## 规则
+1. 别名合并：同一实体的多个名称只输出一条，选最规范/最完整的名称作为 name，其余全部放入 aliases
+2. 层级关系：部门→上级组织，编制→上级军队，子公司→母公司，人物→所属政党/组织
+3. 不要遗漏任何已提取的实体名（作为别名合并进某条的除外）
 
-## 当前领域补充示例（帮助识别本领域特有的非决策实体）
-以下示例适用于当前领域的过滤需求：
-{domain_examples}
-
-## 本领域判定规则（覆盖通用规则）
+## 领域背景
 {domain_extra_rules}"""
 
 
-# ── 领域特定示例：帮助 LLM 理解不同领域的过滤模式 ──
-_INTEL_DOMAIN_EXAMPLES: dict[str, str] = {
-    "business": (
-        '  {{"name": "郑州", "type": "地理位置", "include_in_simulation": false, "role": "城市/工厂驻地，非独立决策者"}},\n'
-        '  {{"name": "换电", "type": "技术概念", "include_in_simulation": false, "role": "技术方案，非实体决策者"}},\n'
-        '  {{"name": "上路", "type": "抽象动词/状态", "include_in_simulation": false, "role": "概念描述，非实体"}}'
-    ),
-    "politics": (
-        '  {"name": "参议院", "type": "立法机构", "include_in_simulation": false, "parent": "所属国家", "role": "立法部门，归上级国家"},\n'
-        '  {"name": "民意调查", "type": "统计工具", "include_in_simulation": false, "role": "数据工具，非决策者"},\n'
-        '  {"name": "某政党领袖", "type": "Person", "include_in_simulation": true, "parent": "所属政党", "role": "核心决策者，具有独立政治影响力"},\n'
-        '  {"name": "财政部", "type": "政府部门", "include_in_simulation": false, "parent": "所属国家", "role": "政府职能部门，非独立决策者"},\n'
-        '  {"name": "某政党", "type": "Party", "include_in_simulation": true, "sub_entities": ["领袖姓名"], "role": "执政党/反对党，独立战略博弈者"},\n'
-        '  {"name": "宪法法院", "type": "司法机构", "include_in_simulation": false, "parent": "所属国家", "role": "司法部门，非独立决策者"},\n'
-        '  {"name": "国际货币基金组织", "type": "Organization", "include_in_simulation": true, "role": "国际金融机构，具有独立政策影响力"}\n'
-        '  // 政治领域准则：政党领袖、国际组织代表等人物保留为独立决策者'
-    ),
-    "ecology": (
-        '  {{"name": "亚马逊雨林", "type": "地理区域", "include_in_simulation": false, "role": "地理区域，非独立决策者"}},\n'
-        '  {{"name": "碳排放", "type": "环境指标", "include_in_simulation": false, "role": "测量指标，非实体"}}'
-    ),
-    "urban": (
-        '  {{"name": "地铁3号线", "type": "基础设施", "include_in_simulation": false, "role": "基建项目，非独立决策者"}},\n'
-        '  {{"name": "学区房", "type": "房产概念", "include_in_simulation": false, "role": "市场概念，非实体决策者"}}'
-    ),
-    "tech": (
-        '  {{"name": "5G标准", "type": "技术标准", "include_in_simulation": false, "role": "技术标准规范，非独立决策者"}},\n'
-        '  {{"name": "开源社区", "type": "社区集合", "include_in_simulation": false, "role": "社区集合，具体成员已单列"}}'
-    ),
-    "info_war": (
-        '  {{"name": "微博热搜", "type": "媒体平台/工具", "include_in_simulation": false, "role": "信息传播渠道，非独立决策者"}},\n'
-        '  {{"name": "假新闻", "type": "信息产物", "include_in_simulation": false, "role": "信息产物，非实体决策者"}}'
-    ),
-    "geo_strategy": (
-        '  {{"name": "联合国", "type": "国际组织", "include_in_simulation": false, "role": "多边协调平台，非独立战略决策者"}},\n'
-        '  {{"name": "世界经济论坛", "type": "论坛", "include_in_simulation": false, "role": "讨论平台，非决策实体"}}'
-    ),
-}
+# ── 领域示例：帮助 LLM 理解各领域的层级关系 ──
 
 
+# ── 已废弃——EntityRegistry 接管分类判定，保留为兼容旧引用 ──
 def _as_name(x: Any) -> str:
     """将实体名元素统一转为干净字符串。
 
@@ -164,31 +100,12 @@ async def sort_entities(
     if not source or not entity_names:
         return []
 
-    domain_examples = _INTEL_DOMAIN_EXAMPLES.get(domain, "")
     from strategy_forge.core.rule_templates import get_domain_prompt
     extra_rules = get_domain_prompt(domain, "intel_extra_rules")
-    # 从 domain_prompts.json 读取领域格式化示例
-    import json as _json
-    raw_examples = get_domain_prompt(domain, "intel_examples")
-    if isinstance(raw_examples, str) and raw_examples.strip():
-        try:
-            parsed = _json.loads(raw_examples)
-            if isinstance(parsed, list):
-                formatted = ",\n".join(_json.dumps(e, ensure_ascii=False) for e in parsed[:6])
-                if domain_examples:
-                    domain_examples += "\n" + formatted
-                else:
-                    domain_examples = formatted
-        except (_json.JSONDecodeError, ValueError):
-            pass
-    if extra_rules or domain_examples:
-        logger.info("[IntelSorter] 领域 %s 自定义提示已启用（规则=%d chars, 示例=%d chars）",
-                     domain, len(extra_rules or ""), len(domain_examples or ""))
     prompt = _INTEL_PROMPT.format(
         entity_names=", ".join(entity_names),
         source=source[:max_source_chars],
-        domain_examples=domain_examples,
-        domain_extra_rules=extra_rules or "（无额外领域规则）",
+        domain_extra_rules=extra_rules or "（无）",
     )
 
     from strategy_forge.core.config import config

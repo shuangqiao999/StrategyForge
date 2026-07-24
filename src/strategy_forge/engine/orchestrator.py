@@ -401,18 +401,7 @@ class DeductionOrchestrator:
                     self.session.source_material, entity_names, LLMClient(),
                     domain=domain)
                 if self._intel_list:
-                    active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
-                    passive = len(self._intel_list) - active
-                    self._log("graph", f"情报整理: {len(self._intel_list)} 实体 → {active} 核心博弈者 + {passive} 非战略实体")
-                    # 详细分类统计
-                    types: dict[str, int] = {}
-                    for e in self._intel_list:
-                        role = e.get("role", "") or "无角色标注"
-                        key = f"保持" if e.get("include_in_simulation") else f"过滤({role[:20]})"
-                        types[key] = types.get(key, 0) + 1
-                    if types:
-                        detail = " | ".join(f"{k}:{v}" for k, v in sorted(types.items()))
-                        self._log("graph", f"  过滤明细: {detail}")
+                    self._log("graph", f"情报整理: {len(self._intel_list)} 实体的别名和层级关系已提取")
                     self._merge_sorter_aliases()
             except Exception as e:
                 logger.warning("[Orchestrator] 情报整理失败，使用全部实体: %s", e)
@@ -451,9 +440,7 @@ class DeductionOrchestrator:
                     entity_types=entity_types,
                 )
                 if self._intel_list:
-                    active = sum(1 for e in self._intel_list if e.get("include_in_simulation"))
-                    passive = len(self._intel_list) - active
-                    self._log("graph", f"故事编辑: {len(self._intel_list)} 实体 → {active} 角色 + {passive} 背景")
+                    self._log("graph", f"故事编辑: {len(self._intel_list)} 实体的别名和层级关系已提取")
                     self._merge_sorter_aliases()
             except Exception as e:
                 logger.warning("[Orchestrator] 叙事模式分类失败: %s", e)
