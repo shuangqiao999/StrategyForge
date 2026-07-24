@@ -86,9 +86,10 @@ async def test_full_pipeline(rounds=3):
     tmp = os.path.join(os.environ["TEMP"], f"forge_arch_{sid}")
     os.makedirs(tmp, exist_ok=True)
 
-    print("\n" + "=" * 60)
+    print()
+    print("=" * 60)
     print(f"  全流程测试: 大国博弈 ({rounds} 轮)")
-    print(f"  Model: {registry.llm_model}")
+    print(f"  Model: {_reg.llm_model}")
     print(f"  Session: {sid}")
     print("=" * 60)
 
@@ -227,9 +228,14 @@ async def test_determinism():
 
     # Compare
     if agents_list[0] == agents_list[1]:
-        print(f"\n  OK 完全一致：两次运行 {len(agents_list[0])} 个 agent 名单相同")
-        shutil.rmtree(tmp, ignore_errors=True)
-        return True
+        if len(agents_list[0]) > 0:
+            print(f"\n  OK 完全一致：两次运行 {len(agents_list[0])} 个 agent 名单相同")
+            shutil.rmtree(tmp, ignore_errors=True)
+            return True
+        else:
+            print(f"\n  WARN 两次均为 0 agents（推演未生成实体，LM Studio 可能未连接）")
+            shutil.rmtree(tmp, ignore_errors=True)
+            return False
     else:
         only_first = set(agents_list[0]) - set(agents_list[1])
         only_second = set(agents_list[1]) - set(agents_list[0])
