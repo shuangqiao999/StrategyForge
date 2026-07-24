@@ -5,7 +5,6 @@ import asyncio
 import json
 import logging
 import re
-import statistics
 import uuid
 from collections.abc import Callable
 from string import Template
@@ -178,78 +177,89 @@ async def create_agents_from_graph(
     if preprocessor and preprocessor.result:
         freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
 
-    # Intelligence sorting: filter non-strategic entities
+    # ── 确定性代码规则过滤：替代 sorter 的 include_in_simulation 终审权 ──
+    # sorter 的 intel_list 仍用于别名合并 + persona prompt 的 parent/role 信息，
+    # 但实体是否成为博弈者由以下纯 Python 规则决定。
+
+    # 类型级排除
+    _DISCARD_TYPES = {
+        "地理区域", "地理位置", "地点", "天气", "气象",
+        "文档", "协议", "合同", "批文", "文件",
+        "概念", "现象", "事件", "日期", "时间",
+        "设施", "基础设施", "建筑",
+        "自然景观", "自然现象", "环境要素",
+        "Location", "Document", "Concept", "Event",
+        "Date", "Time", "Facility", "NaturalFeature",
+    }
+    # 模式排除——二元关系词检测
+    def _is_dyad(name: str) -> bool:
+        for sep in ("与", "和", "及", "对", "vs", "vs.", "/", "-", "—"):
+            parts = name.split(sep)
+            if len(parts) == 2 and all(len(p.strip()) >= 1 for p in parts):
+                return True
+        return False
+    _COLLECTIVE_SUFFIX = ("阵营", "群体", "板块", "民间", "大众", "行业", "同盟")
+    _TITLE_SUFFIX = ("总统", "总理", "司令", "部长", "秘书长", "主席", "书记", "市长",
+                      "省长", "院长", "局长", "指挥官", "委员长", "主任", "将军", "上将",
+                      "特使", "代表", "发言人", "CEO", "董事长", "行长", "署长")
+    _MILITARY_SUFFIX = ("舰队", "战区", "司令部", "集团军", "师团", "旅", "团", "营", "连",
+                         "导弹旅", "驱逐舰", "航空母舰", "航母")
+    _DEPT_WORDS = ("国防部", "财政部", "外交部", "商务部", "内政部", "央行",
+                   "最高法院", "最高检", "议会", "参议院", "众议院", "国务院", "中央军委",
+                   "国会", "法院", "检察院", "监察院", "行政院")
+
+    before = len(persons)
+    kept: list[dict] = []
+    discard_log: dict[str, int] = {}
+    for p in persons:
+        ptype = p.get("type", "") or ""
+        pname = p.get("name", "") or ""
+        fm = freq_map.get(pname, 0)
+
+        if ptype in _DISCARD_TYPES:
+            discard_log["类型排除"] = discard_log.get("类型排除", 0) + 1
+            continue
+        if _is_dyad(pname):
+            discard_log["二元关系词"] = discard_log.get("二元关系词", 0) + 1
+            continue
+        if any(pname.endswith(s) for s in _COLLECTIVE_SUFFIX):
+            discard_log["集合概念"] = discard_log.get("集合概念", 0) + 1
+            continue
+        if any(pname.endswith(s) for s in _TITLE_SUFFIX):
+            discard_log["职务头衔"] = discard_log.get("职务头衔", 0) + 1
+            continue
+        if any(pname.endswith(s) for s in _MILITARY_SUFFIX):
+            discard_log["军队编制"] = discard_log.get("军队编制", 0) + 1
+            continue
+        if any(w in pname for w in _DEPT_WORDS):
+            discard_log["政府部门"] = discard_log.get("政府部门", 0) + 1
+            continue
+
+        # 保留规则
+        if ptype in ("Person", "人物") and fm >= 2:
+            kept.append(p)
+        elif ptype in ("Organization", "Party", "Company", "Country",
+                        "组织", "政党", "企业", "国家", "国际组织") and fm >= 5:
+            kept.append(p)
+        elif fm >= 10:  # 极高频实体不管类型直接保留
+            kept.append(p)
+        else:
+            discard_log["低频/无类型"] = discard_log.get("低频/无类型", 0) + 1
+
+    persons = kept
+    discard_detail = " | ".join(f"{k}:{v}" for k, v in sorted(discard_log.items()))
+    log_fn("agents", f"代码规则过滤: {before} → {len(persons)} 个智能体（排除: {discard_detail})")
+
+    # 构建 persona 用的 intel_map（sorter 的 parent/role 信息，不影响是否保留）
+    intel_map = {}
     if intel_list:
         intel_map = {e["name"]: e for e in intel_list if e.get("name")}
-        # Build reverse alias mapping from IntelSorter for cross-name matching
-        _intel_reverse: dict[str, str] = {}
+        # 补充反向别名映射
         for e in intel_list:
-            canon = e.get("name", "")
-            if not canon:
-                continue
-            _intel_reverse[canon] = canon
             for a in e.get("aliases", []):
-                _intel_reverse[str(a).strip()] = canon
-        active_names = {e["name"] for e in intel_list if e.get("include_in_simulation")}
-        before = len(persons)
-        # Filter: cross-match graph entity names against IntelSorter canonical names via aliases
-        filtered: list[dict] = []
-
-        # ── 频率兜底：sorter 遗漏的高频实体仍应纳入智能体 ──
-        # 超长文本（长篇小说等）的 sorter 可能因 token 限制漏掉核心角色；
-        # 以预处理器统计的全文频次作为兜底阈值，频次够高则不被 sorter 遗漏所杀。
-        # 动态阈值：以 intel_list 中已标记为 include=true 的实体的频次中位数作为参照
-        included_freqs = [
-            freq_map.get(e["name"], 0) for e in intel_list if e.get("include_in_simulation")
-        ]
-        freq_threshold = int(statistics.median(included_freqs) // 3) if included_freqs else 5
-        freq_threshold = max(3, freq_threshold)  # 至少出现 3 次才兜底
-        fallback_count = 0
-
-        for p in persons:
-            pname = p.get("name", "")
-            # Resolve to canonical name via reverse alias map
-            canon = _intel_reverse.get(pname, pname)
-            # (entities NOT in intel_map are excluded by default — IntelSorter must have seen them)
-            intel_entry = intel_map.get(canon) or intel_map.get(pname)
-            if intel_entry is None:
-                # 频率兜底：sorter 未输出的实体，若全文频次足够高则仍纳入
-                f = freq_map.get(canon, freq_map.get(pname, 0))
-                if f >= freq_threshold:
-                    intel_entry = {
-                        "name": canon, "aliases": [],
-                        "include_in_simulation": True,
-                        "role": f"高频角色(频次={f})",
-                    }
-                    intel_map[canon] = intel_entry
-                    fallback_count += 1
-                else:
-                    continue
-            if not intel_entry.get("include_in_simulation", False):
-                continue  # IntelSorter显式标记为非战略 → 排除
-
-            filtered.append(p)
-
-        persons = filtered
-        if fallback_count:
-            log_fn("agents", f"频率兜底: {fallback_count} 个高频实体（sorter 遗漏）已恢复为智能体，阈值≥{freq_threshold}")
-        if len(persons) < before:
-            log_fn("agents", f"情报过滤: {before} → {len(persons)} 个智能体（排除非战略实体）")
-    else:
-        intel_map = {}
-        # 叙事模式：基于实体类型的基础过滤，排除非决策者类型
-        _NON_AGENT_TYPES = {"地理区域", "地理位置", "地点", "天气", "气象",
-                            "文档", "协议", "合同", "批文", "文件",
-                            "概念", "现象", "事件", "日期", "时间",
-                            "设施", "基础设施", "建筑",
-                            "自然景观", "自然现象", "环境要素"}
-        before = len(persons)
-        persons = [
-            p for p in persons
-            if p.get("type", "") not in _NON_AGENT_TYPES
-        ]
-        if len(persons) < before:
-            log_fn("agents", f"叙事模式类型过滤: {before} → {len(persons)} 个智能体（排除非决策者类型）")
+                a = str(a).strip()
+                if a and a not in intel_map:
+                    intel_map[a] = e
 
     max_agents = min(len(persons), _reg.max_agents)
     log_fn("agents", f"从 {len(persons)} 个实体中生成最多 {max_agents} 个智能体")
