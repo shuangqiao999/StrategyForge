@@ -490,11 +490,12 @@ class DeductionOrchestrator:
             pre_goals = cfg.get("pre_goals", [])
 
         # 构建实体注册中心（唯一权威数据源）
-        entity_registry = build_registry(
+        entity_registry = await build_registry(
             graph=self.graph,
             preprocessor=getattr(self, "_preprocessor", None),
             intel_list=getattr(self, "_intel_list", None) or None,
             ontology=getattr(self.session, "ontology", None),
+            source_material=self.session.source_material,
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
         self._log("agents", f"  排除明细: {' | '.join(f'{k}:{v}' for k,v in sorted(entity_registry.discard_reasons.items()))}")

@@ -91,6 +91,8 @@ class DeductionConfig:
         # 默认开（A/B 实测关系相关召回 +160%、0 回退）；FORGE_RECALL_REL_BOOST=0 可回退。
         self.deduction_recall_rel_boost = os.getenv("FORGE_RECALL_REL_BOOST", "1") == "1"
         self.deduction_recall_rel_max = int(os.getenv("FORGE_RECALL_REL_MAX", "4"))
+        # LLM 审核开关：代码规则定基线后，LLM 审核边缘实体（默认启用）
+        self.deduction_llm_review = os.getenv("FORGE_LLM_REVIEW", "1") == "1"
 
     def __getattr__(self, name: str):
         raise AttributeError(

@@ -177,11 +177,12 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
 
 # ── 构造函数 ──
 
-def build_registry(
+async def build_registry(
     graph: Any,
     preprocessor: Any = None,
     intel_list: list[dict] | None = None,
     ontology: Any = None,
+    source_material: str = "",
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
 
@@ -331,7 +332,123 @@ def build_registry(
             registry.discarded += 1
             registry.discard_reasons[reason] = registry.discard_reasons.get(reason, 0) + 1
 
+    # 5. LLM 审核：代码规则定基线后，LLM 审核边缘实体
+    from strategy_forge.core.config import config as _cfg
+    if _cfg.deduction_llm_review and source_material:
+        await _llm_review_borderline(registry, deduped, source_material, freq_map, cov_map)
+
     return registry
+
+
+async def _llm_review_borderline(
+    registry: EntityRegistry,
+    deduped: list[dict],
+    source: str,
+    freq_map: dict[str, int],
+    cov_map: dict[str, int],
+) -> None:
+    """LLM 审核边缘实体：代码规则定基线后，LLM 只看结构化错误。
+
+    审核对象：
+    - KEEP 实体中 freq=1 的（可能是噪音）
+    - DISCARD 实体中 Person/freq≥1 的（可能是核心人物）
+    - KEEP 实体中疑似军队编制/二元词/职务的（代码规则可能漏判）
+
+    LLM 只做结构化纠正（这是军队编制吗？这是职务头衔吗？），不做模糊博弈分类。
+    """
+    borderline = []
+    for p in deduped:
+        pname = p.get("name", "")
+        e = registry.entities.get(pname)
+        if e is None:
+            continue
+        fm = freq_map.get(pname, 0)
+        ptype = p.get("type", "") or ""
+        # 边缘 KEEP：低频且存在误判风险
+        if e.decision == "KEEP" and (fm <= 2 or
+                any(pname.endswith(s) for s in ("军", "舰队", "司令部",
+                                                  "总统", "总理"))
+                or _is_dyad(pname)):
+            borderline.append(e)
+        # 边缘 DISCARD：人物类型且有一定频次
+        elif e.decision == "DISCARD" and fm >= 1 and (
+                ptype in ("Person", "人物") or any(kw in ptype for kw in ("Person", "人物", "Actor"))):
+            borderline.append(e)
+
+    if not borderline:
+        return
+    # 去重、最多送 20 个实体给 LLM 审核
+    seen = set()
+    review = []
+    for b in borderline[:20]:
+        if b.name in seen:
+            continue
+        seen.add(b.name)
+        review.append(b)
+
+    if not review:
+        return
+
+    prompt_parts = ["你是实体分类审核员。检查以下实体是否被代码规则误分类。"]
+    prompt_parts.append("## 种子材料（文本采样）")
+    prompt_parts.append(source[:2000])
+    prompt_parts.append("\n## 待审核实体（请逐条判断是否需要改写决策）")
+    for i, e in enumerate(review, 1):
+        prompt_parts.append(
+            f"{i}. {e.name}  type={e.type}  freq={e.freq}  "
+            f"当前判定={e.decision} 理由={e.reason}")
+    prompt_parts.append("""
+## 审核规则
+1. 军队编制/番号（含X军、X舰队、X战区、X集团军、X导弹旅）→ 应排除
+2. 职务头衔（含总统、总理、主席、部长、司令、秘书长）→ 应排除  
+3. 二元关系/对抗词（含A与B、A和B、A/B、俄乌、中美、印巴等）→ 应排除
+4. 核心人物（国家级领导人、组织领导人、关键角色，频次≥2且有独立描述）→ 应保留
+5. 其余维持原判
+
+## 输出 JSON
+{"overrides": [{"name": "实体名", "decision": "KEEP|DISCARD", "reason": "≤20字理由"}]}
+如果全部维持原判，输出 {"overrides": []}
+
+只输出 JSON。""")
+    prompt = "\n".join(prompt_parts)
+
+    from strategy_forge.core.llm_client import DeductionLLMClient, Message
+    import json as _json
+    try:
+        client = DeductionLLMClient()
+        resp = await client.chat(
+            [Message(role="user", content=prompt)],
+            system="你是实体分类审核员，只输出 JSON。",
+            temperature=0,
+            max_tokens=500,
+        )
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        if isinstance(content, list):
+            content = "".join(b.text for b in content if hasattr(b, "text"))
+        data = _json.loads(str(content).strip())
+        if isinstance(data, dict) and "overrides" in data:
+            for ov in data["overrides"]:
+                name = ov.get("name", "").strip()
+                reason = ov.get("reason", "")[:80]
+                new_decision = ov.get("decision", "").strip().upper()
+                if not name or new_decision not in ("KEEP", "DISCARD"):
+                    continue
+                e = registry.find(name)
+                if e is None:
+                    continue
+                old = e.decision
+                if old != new_decision:
+                    e.decision = new_decision
+                    e.reason = f"LLM审核({reason})"
+                    if old == "KEEP":
+                        registry.kept -= 1
+                        registry.discarded += 1
+                        registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
+                    else:
+                        registry.kept += 1
+                        registry.discarded -= 1
+    except Exception as e:
+        logger.warning("[EntityRegistry] LLM 审核失败，维持代码规则判定: %s", e)
 
 
 # ── 调试入口 ──
