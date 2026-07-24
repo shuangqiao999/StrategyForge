@@ -48,7 +48,7 @@ _MILITARY_SUFFIX = (
 _DEPT_WORDS = (
     "国防部", "财政部", "外交部", "商务部", "内政部", "央行",
     "最高法院", "最高检", "议会", "参议院", "众议院", "国务院", "中央军委",
-    "国会", "法院", "检察院", "监察院", "行政院",
+    "国会", "法院", "检察院", "监察院", "行政院", "白宫", "五角大楼",
 )
 _COLLECTIVE_SUFFIX = ("阵营", "群体", "板块", "民间", "大众", "行业", "同盟", "联盟国")
 
@@ -121,9 +121,21 @@ class EntityRegistry:
 # ── 分类逻辑（纯代码，零 LLM）──
 
 def _is_dyad(name: str) -> bool:
-    for sep in ("与", "和", "及", "对", "vs", "vs.", "/", "-", "—"):
+    # 分隔符拆分："A与B" "A和B" "A-B" 等
+    for sep in ("与", "和", "及", "对", "vs", "vs.", "/", "-", "—", "关系", "冲突", "战争",
+                  "会谈", "谈判", "对抗", "争端"):
         parts = name.split(sep)
-        if len(parts) == 2 and all(len(p.strip()) >= 1 for p in parts):
+        non_empty = [p for p in parts if p.strip()]
+        if len(parts) >= 2 and len(non_empty) >= 2:
+            return True
+        # 后缀型：像 "中美关系" "俄乌冲突" 等
+        if len(non_empty) >= 1 and name.endswith(sep) and len(name) - len(sep) >= 2:
+            return True
+    # 紧凑二元词：两个国名/地区名并置（"俄乌" "中美" "印巴" "日菲" "朝美"）
+    _DYAD_PREFIXES = ("俄", "美", "中", "乌", "印", "巴", "日", "菲", "朝", "韩",
+                       "以", "越", "缅", "泰", "俄中", "美中", "美俄")
+    for prefix in _DYAD_PREFIXES:
+        if name != prefix and name.startswith(prefix) and len(name) <= len(prefix) + 2:
             return True
     return False
 
