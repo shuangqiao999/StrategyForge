@@ -281,6 +281,15 @@ _DYAD_WORDS_EN = frozenset({
 
 _ALL_DYAD = _DYAD_WORDS | _DYAD_WORDS_EN
 
+# ── 二元关系词模式检测：匹配 "A与B" "A和B" "A-B" "A/B" 等对抗/关系组合 ──
+def _is_dyad_pattern(name: str) -> bool:
+    imports = ("与", "和", "及", "对", "vs", "vs.", "/", "-")
+    for sep in imports:
+        parts = name.split(sep)
+        if len(parts) == 2 and all(len(p.strip()) >= 1 for p in parts):
+            return True
+    return False
+
 # ── 军队名称精确匹配降级（不含后缀的独立军队名）──
 _MILITARY_NAMES = frozenset({
     "乌军", "俄军", "美军", "伊朗伊斯兰革命卫队", "以色列国防军",
@@ -334,7 +343,7 @@ def _apply_safety_net(result: list[dict[str, Any]]) -> int:
     for e in result:
         if not e.get("name"):
             continue
-        if _any_name_matches(e, _ALL_DYAD, mode="exact"):
+        if _any_name_matches(e, _ALL_DYAD, mode="exact") or _is_dyad_pattern(e.get("name", "")):
             demoted += _demote(e, "二元关系词")
         elif _any_name_matches(e, _UNIT_SUFFIX, mode="suffix") or _any_name_matches(e, _UNIT_SUFFIX_EN, mode="suffix"):
             demoted += _demote(e, "军队编制归上级")

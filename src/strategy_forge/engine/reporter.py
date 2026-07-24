@@ -157,6 +157,13 @@ _CONFLICT_KW = (
     "情报交易", "联盟", "联合", "翻盘", "夺权", "继承权", "遗嘱",
 )
 
+_TREND_KW = (
+    "迭代", "升级", "研发", "投入", "布局", "合作", "调整", "优化",
+    "推动", "推进", "建设", "构建", "建立", "启动", "部署", "发布",
+    "投资", "融资", "扩产", "招聘", "培训", "签约", "交付", "上线",
+    "谈判", "协商", "提议", "建议", "申请", "批准", "授权", "签署",
+)
+
 
 def _sample_arc_events(events: list[str], head_n: int = 5,
                        conflict_n: int = 15, tail_n: int = 15) -> list[str]:
@@ -183,6 +190,17 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     scored.sort(key=lambda x: (-x[0], x[1]))
     picked = sorted(scored[:conflict_n], key=lambda x: x[1])
     conflict = [e for _, _, e in picked]
+    # 平缓事件采样通道：商业/科技推演缺少冲突关键词 → 补趋势型事件
+    trend_scored: list[tuple[int, int, str]] = []
+    for idx, e in enumerate(middle):
+        hits = sum(1 for kw in _TREND_KW if kw in e)
+        if hits > 0:
+            trend_scored.append((hits, idx, e))
+    trend_scored.sort(key=lambda x: (-x[0], x[1]))
+    trend_picked = sorted(trend_scored[:max(3, conflict_n // 3)], key=lambda x: x[1])
+    for _, idx, e in trend_picked:
+        if e not in conflict:
+            conflict.append(e)
     # 量化模式（diplomatic_engagement/tech_investment 等）不含冲突关键词，
     # 冲突采样可能落空——兜底用均匀采样补齐到 conflict_n 条
     if len(conflict) < conflict_n and middle:
@@ -468,8 +486,13 @@ async def generate_report(
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
 
-    # ── 统一弧线采样（head + conflict + tail），量化/叙事双模式共用 ──
+    # ── 统一弧线采样（head + conflict + tail + trend），量化/叙事双模式共用 ──
     arc_events = _sample_arc_events(key_events)
+    if len(arc_events) < 5 and len(key_events) >= 5:
+        # 采样不足5条时从原文均匀补齐，保证报告有最低锚点数
+        step = max(1, len(key_events) // 5)
+        fallback = [key_events[i] for i in range(0, len(key_events), step)][:5]
+        arc_events = list(dict.fromkeys(arc_events + fallback))
     is_narrative = states is None or len(states) == 0
     if is_narrative:
         # 叙事模式：故事化报告，temperature 更高鼓励创造性
