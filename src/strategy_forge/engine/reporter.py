@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable
 from string import Template
@@ -219,17 +220,18 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
         def _trigrams(s: str) -> set[str]:
             return {s[i:i+3] for i in range(len(s)-2)}
         deduped: list[str] = [out[0]]
+        prev_set = _trigrams(out[0])
         for i in range(1, len(out)):
             prev = deduped[-1]
             curr = out[i]
-            p_set = _trigrams(prev)
             c_set = _trigrams(curr)
-            union = len(p_set | c_set)
+            union = len(prev_set | c_set)
             if union > 0:
-                jaccard = len(p_set & c_set) / union
+                jaccard = len(prev_set & c_set) / union
                 if jaccard > 0.6:
                     continue
             deduped.append(curr)
+            prev_set = c_set
         out = deduped
 
     return out
@@ -559,7 +561,7 @@ async def generate_report(
     # ── 中文感知 Token 估算 + 上下文窗口安全上限 ──
     _cn = len(re.findall(r"[\u4e00-\u9fff]", prompt_str))
     _input_est = _cn + max(1, (len(prompt_str) - _cn) // 3)
-    _ctx_limit = 262144  # 主流模型上下文窗口上限，400超限时由重试自动修正
+    _ctx_limit = int(os.getenv("FORGE_CTX_LIMIT", "262144"))
     _safe_max = max(2000, _ctx_limit - _input_est - 200)
     report_max_tokens = min(config.deduction_report_max_tokens, _safe_max)
     log_fn("report", f"Token估算: input≈{_input_est} max_tokens={report_max_tokens}")
