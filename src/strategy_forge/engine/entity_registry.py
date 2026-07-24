@@ -139,8 +139,14 @@ def _is_dyad(name: str) -> bool:
     return False
 
 
-def _classify_one(name: str, etype: str, freq: int, total: int) -> tuple[bool, str]:
+def _classify_one(name: str, etype: str, freq: int, total: int,
+                  person_types: frozenset | None = None,
+                  org_types: frozenset | None = None) -> tuple[bool, str]:
     """确定性实体分类：返回 (include_in_simulation, reason)。"""
+    if person_types is None:
+        person_types = _PERSON_TYPES
+    if org_types is None:
+        org_types = _ORG_TYPES
     # 1. 排除规则（按优先级）
     if etype in _DISCARD_TYPES:
         return False, "类型排除"
@@ -159,10 +165,10 @@ def _classify_one(name: str, etype: str, freq: int, total: int) -> tuple[bool, s
     threshold = max(1, total // 50)
 
     # 3. 保留规则
-    if etype in _PERSON_TYPES and freq >= threshold:
-        return True, f"角色(人物+freq≥{threshold})"
-    if etype in _ORG_TYPES and freq >= threshold * 2:
-        return True, f"组织(freq≥{threshold*2})"
+    if etype in person_types and freq >= threshold:
+        return True, f"角色-{etype}(freq≥{threshold})"
+    if etype in org_types and freq >= threshold * 2:
+        return True, f"组织-{etype}(freq≥{threshold*2})"
     if freq >= threshold * 5:
         return True, f"兜底(极高频≥{threshold*5})"
 
@@ -175,6 +181,7 @@ def build_registry(
     graph: Any,
     preprocessor: Any = None,
     intel_list: list[dict] | None = None,
+    ontology: Any = None,
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
 
@@ -182,10 +189,35 @@ def build_registry(
         graph: DeductionGraphStore 实例。
         preprocessor: DeductionPreprocessor 实例（提供频次和去重信息）。
         intel_list: sorter 输出（仅用于补充 parent/aliases，不参与决策）。
-
-    Returns:
-        EntityRegistry 实例。
+        ontology: Ontology 实例（用于动态推断实体类型的博弈属性，
+                  当 LLM 生成新类型名如"国家/政治实体"时无需手动注册）。
     """
+    # ── 动态类型推断：从 ontology 中自动识别"人物类"和"组织类"实体类型 ──
+    dynamic_person: set[str] = set(_PERSON_TYPES)
+    dynamic_org: set[str] = set(_ORG_TYPES)
+    if ontology is not None:
+        for et in getattr(ontology, "entities", []) or []:
+            tn = (getattr(et, "name", "") or "").strip()
+            if not tn or tn in dynamic_person or tn in dynamic_org:
+                continue
+            # 关键词推断："人物/人/角色/Person/Actor"→person
+            if any(kw in tn for kw in ("人物", "人", "角色", "Person", "Actor",
+                                         "Player", "Individual")):
+                dynamic_person.add(tn)
+            # 关键词推断："国家/组织/企业/政党/公司/机构/Country/Org/Party/Company"
+            elif any(kw in tn for kw in ("国家", "组织", "企业", "政党", "公司",
+                                           "机构", "集团", "Country", "Org",
+                                           "Party", "Company", "Union")):
+                dynamic_org.add(tn)
+            elif any(kw in tn for kw in ("Location", "Document", "Event", "Concept",
+                                           "Date", "Time", "Facility")):
+                pass  # 不加入任何博弈类型
+            else:
+                # 未知类型：如果 entity 中该类型实体的平均频次较高 → 视为 org
+                dynamic_org.add(tn)
+    person_types = frozenset(dynamic_person)
+    org_types = frozenset(dynamic_org)
+
     # 1. 从 Kuzu 读取所有实体
     result = graph._conn.execute(
         f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
@@ -277,7 +309,8 @@ def build_registry(
         fm = freq_map.get(pname, 0)
         cv = cov_map.get(pname, 0)
 
-        keep, reason = _classify_one(pname, ptype, fm, registry.total)
+        keep, reason = _classify_one(pname, ptype, fm, registry.total,
+                                        person_types, org_types)
 
         intel = intel_map.get(pname, {})
         entity = RegisteredEntity(

@@ -494,6 +494,7 @@ class DeductionOrchestrator:
             graph=self.graph,
             preprocessor=getattr(self, "_preprocessor", None),
             intel_list=getattr(self, "_intel_list", None) or None,
+            ontology=getattr(self.session, "ontology", None),
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
         self._log("agents", f"  排除明细: {' | '.join(f'{k}:{v}' for k,v in sorted(entity_registry.discard_reasons.items()))}")
