@@ -89,7 +89,7 @@ async def test_full_pipeline(rounds=3):
     print()
     print("=" * 60)
     print(f"  全流程测试: 大国博弈 ({rounds} 轮)")
-    print(f"  Model: {_reg.llm_model}")
+    print(f"  Model: {registry.llm_model}")
     print(f"  Session: {sid}")
     print("=" * 60)
 
@@ -175,10 +175,10 @@ async def test_full_pipeline(rounds=3):
 
     # ── 注册中心详情 ──
     if e_count > 0:
-        registry = build_registry(graph)
-        kept = registry.get_kept()
-        print(f"\n  EntityRegistry: {registry.kept}/{registry.total} KEEP")
-        print(f"  DISCARD reasons: {', '.join(f'{k}:{v}' for k,v in sorted(registry.discard_reasons.items()))}")
+        ent_registry = build_registry(graph)
+        kept = ent_registry.get_kept()
+        print(f"\n  EntityRegistry: {ent_registry.kept}/{ent_registry.total} KEEP")
+        print(f"  DISCARD reasons: {', '.join(f'{k}:{v}' for k,v in sorted(ent_registry.discard_reasons.items()))}")
         if kept:
             print(f"  Top agents: {', '.join(e.name for e in kept[:10])}")
 
@@ -218,8 +218,8 @@ async def test_determinism():
         except Exception:
             pass
 
-        registry = build_registry(graph)
-        agents = sorted(e.name for e in registry.get_kept())
+        ent_registry = build_registry(graph)
+        agents = sorted(e.name for e in ent_registry.get_kept())
         agents_list.append(agents)
         print(f"  运行{i+1}: {len(agents)} agents → {', '.join(agents[:8])}{'...' if len(agents) > 8 else ''}")
 
