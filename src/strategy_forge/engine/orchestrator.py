@@ -493,6 +493,7 @@ class DeductionOrchestrator:
         self._log("agents", "阶段3: 智能体工厂开始")
 
         from .agent_factory import create_agents_from_graph
+        from .entity_registry import build_registry
         cfg_data = self.store.get(self.session.id)
         pre_goals: list[str] = []
         if cfg_data:
@@ -500,6 +501,16 @@ class DeductionOrchestrator:
             if isinstance(cfg, str):
                 cfg = _json.loads(cfg)
             pre_goals = cfg.get("pre_goals", [])
+
+        # 构建实体注册中心（唯一权威数据源）
+        entity_registry = build_registry(
+            graph=self.graph,
+            preprocessor=getattr(self, "_preprocessor", None),
+            intel_list=getattr(self, "_intel_list", None) or None,
+        )
+        self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
+        self._log("agents", f"  排除明细: {' | '.join(f'{k}:{v}' for k,v in sorted(entity_registry.discard_reasons.items()))}")
+
         agents = await create_agents_from_graph(
             graph=self.graph,
             source_material=self.session.source_material,
@@ -508,6 +519,7 @@ class DeductionOrchestrator:
             pre_interventions=pre_goals if pre_goals else None,
             intel_list=getattr(self, "_intel_list", None) or None,
             domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+            entity_registry=entity_registry,
         )
         self.session.agent_count = len(agents)
         self._agents = agents

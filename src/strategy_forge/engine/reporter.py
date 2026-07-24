@@ -345,6 +345,7 @@ async def generate_report(
     thresholds: dict[str, float] | None = None,
     goal_resolution: str = "",
     personality_log: list[dict[str, Any]] | None = None,
+    entity_registry: Any = None,
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
@@ -466,6 +467,13 @@ async def generate_report(
         except (StopIteration, AttributeError):
             pass
     agent_overview = "（无智能体数据）"
+    # 注册中心优先：用实体注册表做概览统计
+    if entity_registry is not None:
+        kept = entity_registry.get_kept()
+        agent_overview = "\n".join(
+            f"- {e.name} [{e.type}, freq={e.freq}] → {e.reason}"
+            for e in kept[:30])
+        log_fn("report", f"注册中心 {entity_registry.kept}/{entity_registry.total} 实体注入报告概览")
     if graph is not None:
         try:
             agents = graph.query(
