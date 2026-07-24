@@ -131,12 +131,11 @@ def _is_dyad(name: str) -> bool:
         # 后缀型：像 "中美关系" "俄乌冲突" 等
         if len(non_empty) >= 1 and name.endswith(sep) and len(name) - len(sep) >= 2:
             return True
-    # 紧凑二元词：两个国名/地区名并置（"俄乌" "中美" "印巴" "日菲" "朝美"）
-    _DYAD_PREFIXES = ("俄", "美", "中", "乌", "印", "巴", "日", "菲", "朝", "韩",
-                       "以", "越", "缅", "泰", "俄中", "美中", "美俄")
-    for prefix in _DYAD_PREFIXES:
-        if name != prefix and name.startswith(prefix) and len(name) <= len(prefix) + 2:
-            return True
+    # 紧凑二元词：两个国名/地区名并置（"俄乌" "中美" "印巴"），不误杀单国名
+    _KNOWN_DYADS = frozenset({"俄乌", "美伊", "中美", "美中", "巴以", "以巴",
+                               "印巴", "美俄", "俄美", "朝美", "美朝", "日菲"})
+    if name in _KNOWN_DYADS:
+        return True
     return False
 
 

@@ -49,7 +49,7 @@ def test_classification_logic():
         ("白宫", "政府部门", 20, 100, False),      # 政府部门排除
         ("财政部", "Organization", 15, 100, False), # 政府部门排除
         ("北约", "Organization", 8, 100, True),     # freq >= 4
-        ("联合国", "Organization", 5, 100, False),  # freq=5 < 4? No, 5 >= 4 → True. Wait, 100/50=2, threshold*2=4
+        ("联合国", "Organization", 5, 100, True),  # freq=5 < 4? No, 5 >= 4 → True. Wait, 100/50=2, threshold*2=4
         ("中美关系", "Other", 20, 100, False),      # 二元关系词
         ("西方阵营", "Other", 10, 100, False),      # 集合概念
         ("太平洋舰队", "军队编制", 8, 100, False),  # 军队编制
