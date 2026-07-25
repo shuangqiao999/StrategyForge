@@ -1,83 +1,43 @@
 {
-  "_comment": "StrategyForge 领域专用提示词配置。含 sorter规则、EntityRegistry规则、agent角色指南、决策上下文。",
+  "_comment": "StrategyForge 领域专用提示词。EntityRegistry 已将分类权移交 LLM，registry_tweak 字段已废弃。",
   "politics": {
     "intel_extra_rules": "在政治领域，政党领袖、民选官员、反对党代表人物均为独立战略决策者。政府职能部门、立法司法机构为下属机构。",
     "agent_domain_role": "政治实体或政策制定者。关注选举周期、民意支持率、联盟构建、议会博弈、国际舆论。",
-    "strategic_context": "作为政治博弈者，你的决策影响政党地位、公众信任和权力平衡。",
-    "registry_tweak": {
-      "threshold_factor": 30,
-      "extra_keep_words": ["政党", "议会", "参议院", "众议院", "国会", "选举委员会"],
-      "extra_discard_words": ["选区", "投票站", "民意调查"]
-    }
+    "strategic_context": "作为政治博弈者，你的决策影响政党地位、公众信任和权力平衡。"
   },
   "business": {
     "intel_extra_rules": "在商业领域，母公司/集团本身为决策者。子公司/部门/产品线为下属。CEO/创始人归入公司。",
     "agent_domain_role": "企业或行业参与者。关注市场份额、供应链安全、技术创新、融资能力、监管合规。",
-    "strategic_context": "作为商业决策者，你的行动影响股价、市场地位和行业格局。",
-    "registry_tweak": {
-      "threshold_factor": 40,
-      "extra_keep_words": ["集团", "控股", "资本"],
-      "extra_discard_words": ["产品线", "门店", "客服中心"]
-    }
+    "strategic_context": "作为商业决策者，你的行动影响股价、市场地位和行业格局。"
   },
   "military": {
     "intel_extra_rules": "在军事领域，国家/军队整体为决策者。下属编制归入上级。军事领导人如具有独立指挥权则保留。",
     "agent_domain_role": "军事力量或国防决策实体。关注战力对比、后勤保障、地形优势、士气、国际军事联盟。",
-    "strategic_context": "作为军事决策者，你的每项行动消耗资源并改变力量对比。",
-    "registry_tweak": {
-      "threshold_factor": 25,
-      "extra_keep_words": ["军", "部队", "特种", "核威慑", "导弹"],
-      "extra_discard_words": ["阵地", "前线", "防线", "哨所"]
-    }
+    "strategic_context": "作为军事决策者，你的每项行动消耗资源并改变力量对比。"
   },
   "ecology": {
     "intel_extra_rules": "在生态领域，环保组织、政府环保部门为主要决策者。地理区域为背景。环境指标为非实体。",
     "agent_domain_role": "生态主体或环境利益方。关注碳排放配额、政策法规、公众环保意识、可再生能源技术。",
-    "strategic_context": "作为生态利益方，你的目标是在经济发展与环境保护之间寻找平衡。",
-    "registry_tweak": {
-      "threshold_factor": 60,
-      "extra_keep_words": ["环保", "生态", "绿色", "可持续"],
-      "extra_discard_words": ["物种", "保护区", "监测站"]
-    }
+    "strategic_context": "作为生态利益方，你的目标是在经济发展与环境保护之间寻找平衡。"
   },
   "urban": {
     "intel_extra_rules": "在城市管理领域，市政府/城市规划部门为决策者。基础设施项目、交通线路为下属。",
     "agent_domain_role": "城市管理机构或市政实体。关注土地规划、交通设施、住房供给、公共财政、市民满意度。",
-    "strategic_context": "作为城市规划者，你的决策影响数百万居民的生活质量。",
-    "registry_tweak": {
-      "threshold_factor": 40,
-      "extra_keep_words": ["市", "管委会", "城建", "交通局"],
-      "extra_discard_words": ["公交线路", "地铁站", "停车场"]
-    }
+    "strategic_context": "作为城市规划者，你的决策影响数百万居民的生活质量。"
   },
   "tech": {
     "intel_extra_rules": "在科技领域，科技企业、研究机构为决策者。技术标准、开源社区为非决策实体。",
     "agent_domain_role": "科技企业或研究机构。关注技术路线选择、人才储备、专利布局、开源生态、合规风险。",
-    "strategic_context": "作为科技决策者，你的行动塑造技术发展方向和产业格局。",
-    "registry_tweak": {
-      "threshold_factor": 35,
-      "extra_keep_words": ["实验室", "研究院", "芯片", "AI", "算法", "平台"],
-      "extra_discard_words": ["SDK", "API", "插件", "模块"]
-    }
+    "strategic_context": "作为科技决策者，你的行动塑造技术发展方向和产业格局。"
   },
   "info_war": {
     "intel_extra_rules": "在信息战领域，媒体机构、政府宣传部门为主要决策者。社交平台、信息传播渠道为工具。",
     "agent_domain_role": "信息舆论参与方。关注舆论风向、媒体信任度、信息传播速度、受众情绪。",
-    "strategic_context": "作为信息战参与者，你的核心资源是公众注意力和信任。",
-    "registry_tweak": {
-      "threshold_factor": 35,
-      "extra_keep_words": ["媒体", "新闻", "舆论", "传播", "平台"],
-      "extra_discard_words": ["热搜", "话题", "跟帖", "水军"]
-    }
+    "strategic_context": "作为信息战参与者，你的核心资源是公众注意力和信任。"
   },
   "geo_strategy": {
     "intel_extra_rules": "在地缘战略领域，主权国家、国际组织为主要决策者。多边论坛、区域合作机制为协调平台。",
     "agent_domain_role": "地缘战略决策主体。关注权力平衡、联盟关系、贸易路线、军事存在、能源安全。",
-    "strategic_context": "作为地缘战略决策者，你的行动改变国际权力格局。",
-    "registry_tweak": {
-      "threshold_factor": 30,
-      "extra_keep_words": ["联盟", "共同体", "理事会", "峰会"],
-      "extra_discard_words": ["公报", "联合声明", "白皮书"]
-    }
+    "strategic_context": "作为地缘战略决策者，你的行动改变国际权力格局。"
   }
 }
