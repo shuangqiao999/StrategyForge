@@ -375,19 +375,20 @@ def _fallback_classify(
     pending: list[RegisteredEntity],
     log_fn: Any = None,
 ) -> None:
-    """LLM 不可用时的简单兜底规则。"""
+    """LLM 不可用时的简单兜底规则。阈值随实体总数自适应。"""
+    t = max(1, registry.total // 50)
     for e in pending:
-        if e.type in ("Person", "人物") and e.freq >= 2:
+        if e.type in ("Person", "人物") and e.freq >= t:
             e.decision = "KEEP"
-            e.reason = "兜底(人物≥2)"
+            e.reason = f"兜底(人物≥{t})"
             registry.kept += 1
         elif e.type in ("Country", "国家", "国际组织") and e.freq >= 1:
             e.decision = "KEEP"
             e.reason = "兜底(国家≥1)"
             registry.kept += 1
-        elif e.freq >= 5:
+        elif e.freq >= t * 3:
             e.decision = "KEEP"
-            e.reason = "兜底(高频≥5)"
+            e.reason = f"兜底(高频≥{t*3})"
             registry.kept += 1
         else:
             e.decision = "DISCARD"
