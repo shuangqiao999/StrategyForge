@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -27,6 +28,15 @@ from .models import EntityState
 logger = logging.getLogger(__name__)
 
 _CONDITION_RE = re.compile(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*')
+
+
+def _normalize_action(a: Any) -> str:
+    """将 action 统一为字符串：dict→取 name 字段，str→原样返回。"""
+    if isinstance(a, str):
+        return a
+    if isinstance(a, dict):
+        return str(a.get("name", "") or a.get("description", "") or json.dumps(a, ensure_ascii=False))
+    return str(a)
 
 
 class RuleEngine:
@@ -96,7 +106,7 @@ class RuleEngine:
         return dict(self.pack.get("metric_ranges", {}))
 
     def actions(self) -> list[str]:
-        return list(self.pack["actions"])
+        return [_normalize_action(a) for a in self.pack["actions"]]
 
     def action_catalog(self) -> str:
         """供决策 prompt 使用的可选动作说明。"""
@@ -106,6 +116,7 @@ class RuleEngine:
         }
         lines = []
         for a in self.pack["actions"]:
+            a = _normalize_action(a)
             eff = self.pack["self_effects"].get(a, {})
             desc = ", ".join(f"{k}{v:+.0f}" for k, v in eff.items()) or "无直接消耗"
             line = f"- {a}（自身效应: {desc}）"
