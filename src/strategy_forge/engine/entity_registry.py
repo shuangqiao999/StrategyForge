@@ -428,11 +428,12 @@ async def _llm_review_borderline(
                 or any(pname.endswith(s) for s in ("军", "舰队", "司令部", "总统", "总理"))
                 or _is_dyad(pname)):
             borderline.append(e)
-        # 边缘 DISCARD：人物类型或名字像人名，有一定频次
+        # 边缘 DISCARD：人物类型、名字像人名、或非类型排除的未知类型实体（freq≥2）
         elif e.decision == "DISCARD" and fm >= 1 and (
                 ptype in ("Person", "人物")
                 or any(kw in ptype for kw in ("Person", "人物", "Actor"))
-                or _looks_like_person(pname)):
+                or _looks_like_person(pname)
+                or (ptype not in _DISCARD_TYPES and fm >= 2 and not _is_dyad(pname))):
             borderline.append(e)
 
     if not borderline:
@@ -467,7 +468,8 @@ async def _llm_review_borderline(
 2. 职务头衔（含"总统""总理""主席""部长""司令"等）→ 改为 DISCARD
 3. 二元关系/对抗词（如俄乌、中美、印巴、"A与B"等）→ 改为 DISCARD
 4. 中文人名（2-4字，不含国/党/盟/院/部/局等组织词）且频次≥2且在源文本中有独立行动的 → 改为 KEEP
-5. 其余维持原判
+5. 被代码规则因"低频/无类型"排除但实际是重要博弈方（如"吕特"type=元首，"吕特"是北约秘书长）→ 改为 KEEP
+6. 其余维持原判
 
 ## 输出 JSON
 {"overrides": [{"name": "实体名", "decision": "KEEP|DISCARD", "reason": "≤20字理由"}]}
