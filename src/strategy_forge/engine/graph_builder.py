@@ -55,14 +55,19 @@ $alias_map
 2. 若发现别名，映射为标准名后再写入
 3. 每个三元组需要 evidence（原文证据）
 4. 仅提取本文本片段中实际出现的实体和关系——不要输出白名单中在本文本内未出现的实体名
+5. 如果以上实体类型无一匹配该实体的本质特征，type 字段请填 "_UNKNOWN"（不要强行选一个不匹配的类型）
 
 ## 正确示例
 文本片段："美国商务部将DeepSeek等多家中国科技企业列入实体清单"
 → [{"entity": "美国", "type": "国家", "description": "实施制裁的主权国家"}, {"source": "美国", "target": "DeepSeek", "relation": "制裁", "evidence": "将...列入实体清单"}]
 
+文本片段："撒哈拉以南非洲的基础设施严重依赖中国投资"
+→ [{"entity": "撒哈拉以南非洲", "type": "_UNKNOWN", "description": "跨国家地理区域，无匹配类型"}]
+  ← 若类型列表中没有"地理区域"，使用 _UNKNOWN 而非强行归类为"国家"
+
 ## 错误示例（禁止）
 文本片段："全球经济增长率从3.4%下降至2.8%"
-→ [{"entity": "全球经济增长率", "type": "经济指标", "description": "..."}]  ← 经济指标非实体
+→ [{"entity": "全球经济增长率", "type": "国家", "description": "..."}]  ← 经济指标不应强行归类为国家
 
 【重要】只返回纯JSON数组。不要```json代码块。不要任何解释文字。
 
@@ -87,6 +92,9 @@ async def build_graph(
     entity_type_names = [e.name for e in ontology.entities] if ontology else [
         "Person", "Organization", "Event", "Concept", "Location"
     ]
+    # 确保 _UNKNOWN 在所有类型列表中（graph_builder prompt 中的安全阀）
+    if "_UNKNOWN" not in entity_type_names and len(entity_type_names) < 10:
+        entity_type_names.append("_UNKNOWN")
     relation_type_names = [r.name for r in ontology.relations] if ontology else [
         "works_for", "involved_in", "located_in", "opposes", "supports"
     ]

@@ -50,13 +50,17 @@ _GEO_REGIONS = frozenset({
     "非洲", "亚洲", "欧洲", "美洲", "北美洲", "南美洲",
     "大洋洲", "拉丁美洲", "中东", "东南亚", "南亚", "东亚",
     "中亚", "西亚", "东欧", "西欧", "北欧", "南欧", "中欧",
+    "北非", "西非", "东非", "中非", "南部非洲",
     "撒哈拉以南非洲", "印太地区", "亚太地区",
+    "巴尔干", "高加索", "加勒比", "中美洲",
 })
 
 _ORG_MEMBERS: dict[str, frozenset[str]] = {
     "欧盟": frozenset({"法国", "德国", "意大利", "荷兰", "比利时", "西班牙"}),
     "北约": frozenset({"美国", "英国", "法国", "德国", "意大利", "加拿大"}),
     "G7":   frozenset({"美国", "日本", "德国", "英国", "法国", "意大利", "加拿大"}),
+    "东盟": frozenset({"印度尼西亚", "马来西亚", "菲律宾", "新加坡", "泰国", "越南"}),
+    "金砖": frozenset({"中国", "俄罗斯", "印度", "巴西", "南非"}),
 }
 
 _PERSON_COUNTRY: dict[str, str] = {
@@ -299,82 +303,8 @@ async def build_registry(
     return registry
 
 
-async def _llm_classify(
-    registry: EntityRegistry,
-    pending: list[RegisteredEntity],
-    source: str,
-    domain: str,
-    log_fn: Any = None,
-    preprocessor: Any = None,
-) -> None:
-    """LLM 单次调用：对所有非硬排除实体做 KEEP/DISCARD 分类。
-
-    当 preprocessor 可用时，为每个实体检索 LanceDB 中的关联语义块作为证据上下文，
-    替代固定窗口 source[:5000] 的随机截断。"""
-    import time as _time
-
-    # ── 为每个实体检索关联证据 ──
-    entity_evidence: dict[str, list[str]] = {}
-    seen_prefixes: set[str] = set()
-    if preprocessor is not None:
-        t0 = _time.time()
-        for e in pending:
-            ename = str(e.name or "").strip()
-            if not ename or len(ename) < 2:
-                continue
-            try:
-                must = {ename} if len(ename) >= 2 else None
-                chunks = await asyncio.to_thread(
-                    preprocessor.retrieve_for_entity, ename, top_k=3,
-                    must_contain=must,
-                )
-                if chunks:
-                    deduped: list[str] = []
-                    for c in chunks:
-                        c = str(c).strip()
-                        if not c:
-                            continue
-                        prefix = c[:80]
-                        if prefix in seen_prefixes:
-                            continue
-                        seen_prefixes.add(prefix)
-                        deduped.append(c)
-                        if len(deduped) >= 2:
-                            break
-                    if deduped:
-                        entity_evidence[ename] = deduped
-            except Exception:
-                pass
-        if log_fn and entity_evidence:
-            dt = _time.time() - t0
-            log_fn("agents", f"实体证据检索: {len(entity_evidence)}/{len(pending)} 实体有匹配段落 ({dt:.1f}s)")
-
-    prompt_parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
-    # 注入领域特定规则
-    if domain:
-        from strategy_forge.core.rule_templates import get_domain_prompt
-        dr = get_domain_prompt(domain, "intel_extra_rules")
-        if dr:
-            prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
-    if entity_evidence:
-        prompt_parts.append("\n## 待分类实体与关联证据")
-        prompt_parts.append("每个实体下方附有其在种子材料中最相关的段落，请据此判断「残留行动」（检验三）。频次仅供参考——1 次关键行动 > 10 次背景提及。")
-        prompt_parts.append("")
-        for i, e in enumerate(pending, 1):
-            p = f" (上级: {e.parent})" if e.parent else ""
-            prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
-            evidence = entity_evidence.get(e.name, [])
-            for j, chunk in enumerate(evidence[:2], 1):
-                c = chunk[:280] + ("..." if len(chunk) > 280 else "")
-                prompt_parts.append(f"     | 证据{j}: {c}")
-    else:
-        prompt_parts.append("## 种子材料采样")
-        prompt_parts.append(source[:5000])
-        prompt_parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
-        for i, e in enumerate(pending, 1):
-            p = f" (上级: {e.parent})" if e.parent else ""
-            prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
-    prompt_parts.append("""
+# ── LLM 分类提示词（共享方法论，所有批次复用）──
+_METHODOLOGY_PROMPT = """
 ## 分类方法论：三步检验法（按序应用）
 对每个待分类实体，依次用以下三步检验。任何一步失败则 DISCARD，三步全通过则 KEEP。
 
@@ -443,25 +373,144 @@ async def _llm_classify(
 ## 输出格式
 严格输出 JSON，reasons 为 ≤20 字简述：
 {"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "简述原因"}}
-未出现在 keep 或 discard 中的实体默认视为 discard。只输出 JSON。""")
+未出现在 keep 或 discard 中的实体默认视为 discard。只输出 JSON。"""
 
-    prompt = "\n".join(prompt_parts)
+
+async def _llm_classify(
+    registry: EntityRegistry,
+    pending: list[RegisteredEntity],
+    source: str,
+    domain: str,
+    log_fn: Any = None,
+    preprocessor: Any = None,
+) -> None:
+    """LLM 分批并行分类：将实体分组（每批≤15 个），各组独立调用 LLM 并并行执行。
+
+    当 preprocessor 可用时，为每个实体检索 LanceDB 中的关联语义块作为证据上下文，
+    替代固定窗口 source[:5000] 的随机截断。"""
+    import time as _time
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     import json as _json
     import re as _re
-    try:
-        client = DeductionLLMClient()
-        resp = await client.chat(
-            [Message(role="user", content=prompt)],
-            system="你是实体分类员，只输出 JSON。",
-            temperature=0,
-            max_tokens=max(500, min(5000, 100 + len(pending) * 40)),
-        )
-        content = resp.content if hasattr(resp, "content") else str(resp)
-        if isinstance(content, list):
-            content = "".join(b.text for b in content if hasattr(b, "text"))
-        raw = str(content).strip()
-        # 多策略 JSON 解析（兼容 qwen3.5-9b 的各种输出格式）
+
+    # ── 为每个实体检索关联证据（共享，不重复检索）──
+    entity_evidence: dict[str, list[str]] = {}
+    seen_prefixes: set[str] = set()
+    if preprocessor is not None:
+        t0 = _time.time()
+        for e in pending:
+            ename = str(e.name or "").strip()
+            if not ename or len(ename) < 2:
+                continue
+            try:
+                must_set = {ename}
+                for alias in (getattr(e, "aliases", None) or []):
+                    a = str(alias).strip()
+                    if a and len(a) >= 2:
+                        must_set.add(a)
+                must = must_set if ename and len(ename) >= 2 else None
+                chunks = await asyncio.to_thread(
+                    preprocessor.retrieve_for_entity, ename, top_k=3,
+                    must_contain=must,
+                )
+                if chunks:
+                    deduped: list[str] = []
+                    for c in chunks:
+                        c = str(c).strip()
+                        if not c:
+                            continue
+                        prefix = c[:80]
+                        if prefix in seen_prefixes:
+                            continue
+                        seen_prefixes.add(prefix)
+                        deduped.append(c)
+                        if len(deduped) >= 2:
+                            break
+                    if deduped:
+                        entity_evidence[ename] = deduped
+            except Exception:
+                pass
+        if log_fn and entity_evidence:
+            dt = _time.time() - t0
+            log_fn("agents", f"实体证据检索: {len(entity_evidence)}/{len(pending)} 实体有匹配段落 ({dt:.1f}s)")
+
+    # ── 构建领域摘要（各组共享）──
+    domain_preamble: list[str] = []
+    if domain:
+        from strategy_forge.core.rule_templates import get_domain_prompt
+        dr = get_domain_prompt(domain, "intel_extra_rules")
+        if dr:
+            domain_preamble.append(f"## 当前领域：{domain}\n{dr}")
+
+    # ── 分批（优先类型分组，每批≤15）──
+    type_priority = {"国家": 0, "Country": 0, "国际组织": 1, "人物": 2, "Person": 2}
+    sorted_pending = sorted(
+        pending, key=lambda e: (type_priority.get(e.type, 9), -e.freq))
+    batch_size = max(8, min(15, 100 // max(1, len(pending) // 3)))
+    batches = [sorted_pending[i:i + batch_size] for i in range(0, len(sorted_pending), batch_size)]
+
+    if log_fn:
+        log_fn("agents", f"LLM 分批分类: {len(pending)} 实体 → {len(batches)} 批 (每批≤{batch_size})")
+
+    # ── 并行处理各批次（Semaphore 控制并发 LLM 调用数）──
+    from strategy_forge.core.providers import registry as _prov_reg
+    sem = asyncio.Semaphore(max(1, _prov_reg.max_concurrent))
+
+    async def _process_batch(batch_entities: list[RegisteredEntity], batch_idx: int) -> None:
+        parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
+        parts.extend(domain_preamble)
+        if entity_evidence:
+            parts.append("\n## 待分类实体与关联证据")
+            parts.append("每个实体下方附有其在种子材料中最相关的段落，请据此判断「残留行动」（检验三）。频次仅供参考——1 次关键行动 > 10 次背景提及。\n")
+            for i, e in enumerate(batch_entities, 1):
+                p = f" (上级: {e.parent})" if e.parent else ""
+                parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
+                evidence = entity_evidence.get(e.name, [])
+                for j, chunk in enumerate(evidence[:2], 1):
+                    c = chunk[:280] + ("..." if len(chunk) > 280 else "")
+                    parts.append(f"     | 证据{j}: {c}")
+        else:
+            parts.append("## 种子材料采样")
+            parts.append(source[:5000])
+            parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
+            for i, e in enumerate(batch_entities, 1):
+                p = f" (上级: {e.parent})" if e.parent else ""
+                parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
+        parts.append(_METHODOLOGY_PROMPT)
+        prompt = "\n".join(parts)
+
+        _MAX_RETRIES = 1
+        raw = ""
+        for _attempt in range(_MAX_RETRIES + 1):
+            try:
+                client = DeductionLLMClient()
+                async with sem:
+                    resp = await client.chat(
+                        [Message(role="user", content=prompt)],
+                        system="你是实体分类员，只输出 JSON。",
+                        temperature=0,
+                        max_tokens=max(400, min(3000, 80 + len(batch_entities) * 40)),
+                    )
+                content = resp.content if hasattr(resp, "content") else str(resp)
+                if isinstance(content, list):
+                    content = "".join(b.text for b in content if hasattr(b, "text"))
+                raw = str(content).strip()
+                break
+            except Exception as e:
+                if _attempt < _MAX_RETRIES:
+                    logger.warning("[EntityRegistry] 批次 %d 第%d次尝试失败: %s，重试中...",
+                                   batch_idx, _attempt + 1, e)
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning("[EntityRegistry] 批次 %d 全部尝试失败: %s", batch_idx, e)
+                    for e in batch_entities:
+                        e.decision = "DISCARD"
+                        e.reason = f"LLM(批次{batch_idx}调用失败)"
+                        registry.discarded += 1
+                        registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
+                    return
+
+        # 多策略 JSON 解析
         data = None
         strategies = [
             ("direct", lambda s: _json.loads(s)),
@@ -481,11 +530,17 @@ async def _llm_classify(
             except Exception:
                 continue
         if not isinstance(data, dict):
-            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}):\n{raw}")
+            logger.warning("[EntityRegistry] 批次 %d JSON 解析失败，整批排除", batch_idx)
+            for e in batch_entities:
+                e.decision = "DISCARD"
+                e.reason = f"LLM(批次{batch_idx}解析失败)"
+                registry.discarded += 1
+                registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
+            return
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
-        for e in pending:
+        for e in batch_entities:
             if e.name in keep_set:
                 e.decision = "KEEP"
                 r = str(reasons.get(e.name, "LLM判定"))[:40]
@@ -498,14 +553,26 @@ async def _llm_classify(
                 registry.discarded += 1
                 registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
 
-        logger.info("[EntityRegistry] LLM 分类: %d KEEP / %d DISCARD", registry.kept, registry.discarded)
+    tasks = [_process_batch(b, idx + 1) for idx, b in enumerate(batches)]
+    try:
+        await asyncio.gather(*tasks)
+    except Exception as ge:
+        logger.warning("[EntityRegistry] 分批分类全局异常 (%s): %s", type(ge).__name__, str(ge))
         if log_fn:
-            log_fn("agents", f"LLM 全量分类: {registry.kept} 保留 / {registry.discarded} 排除")
-    except Exception as e:
-        logger.warning("[EntityRegistry] LLM 分类失败 (%s): %s", type(e).__name__, str(e))
+            log_fn("agents", f"分批分类全局异常({type(ge).__name__})，回退规则兜底")
+
+    # 全局兜底：仍有 PENDING 实体未分类 → fallback
+    still_pending = [e for e in sorted_pending if e.decision == "PENDING"]
+    if still_pending:
+        logger.warning("[EntityRegistry] %d 实体仍为 PENDING，回退规则兜底", len(still_pending))
         if log_fn:
-            log_fn("agents", f"LLM 分类失败({type(e).__name__})，回退规则兜底")
-        _fallback_classify(registry, pending, log_fn)
+            log_fn("agents", f"分批未覆盖 {len(still_pending)} 个实体，回退规则兜底")
+        _fallback_classify(registry, still_pending, log_fn)
+
+    logger.info("[EntityRegistry] 分批分类完成: %d 批, %d KEEP / %d DISCARD",
+                len(batches), registry.kept, registry.discarded)
+    if log_fn:
+        log_fn("agents", f"分批分类完成 ({len(batches)} 批): {registry.kept} 保留 / {registry.discarded} 排除")
 
 
 def _fallback_classify(

@@ -14,6 +14,16 @@ logger = logging.getLogger(__name__)
 
 _ontology_cache: dict[str, Ontology] = {}
 
+# 强制注入的拒收类型——无论 LLM 是否生成，下游 graph_builder 都需要这些类型
+# 来正确分类"非决策实体"（否则 LLM 会把"非洲"归入"国家"）
+_MANDATORY_DISCARD_TYPES = [
+    EntityTypeDef("地理区域", "大洲、地区、海域、地形等地理概念，非决策主体"),
+    EntityTypeDef("经济指标", "GDP、通胀率、贸易额、汇率等统计数据，非决策主体"),
+    EntityTypeDef("军事装备", "武器系统、军舰、战机、导弹等，非决策主体"),
+    EntityTypeDef("战略资源", "石油、稀土、粮食、矿产等战略物资，非决策主体"),
+    EntityTypeDef("基础设施", "港口、管道、铁路、光缆等设施，非决策主体"),
+]
+
 _PROMPT = """你是一个知识本体专家。请分析以下文本，定义其中涉及的实体类型和关系类型。
 
 ## 输出 JSON 格式
@@ -70,6 +80,9 @@ async def generate_ontology(text: str) -> Ontology:
         logger.warning("[Deduction] Ontology LLM failed, using defaults: %s", e)
         result = _default_ontology()
 
+    # 合并强制拒收类型（确保 graph_builder 有正确类型桶）
+    _inject_mandatory_types(result)
+
     _ontology_cache[text_hash] = result
     return result
 
@@ -96,6 +109,16 @@ def _parse_ontology(raw: str) -> Ontology:
     return Ontology(entities=entities, relations=relations) if entities else _default_ontology()
 
 
+def _inject_mandatory_types(ontology: Ontology) -> None:
+    """向 ontology 注入拒收类型（若尚未包含），确保 graph_builder 有正确类型桶。"""
+    existing = {e.name for e in ontology.entities}
+    for mt in _MANDATORY_DISCARD_TYPES:
+        if mt.name not in existing and len(ontology.entities) < 10:
+            ontology.entities.append(mt)
+            existing.add(mt.name)
+            logger.info("[Ontology] 注入强制类型: %s", mt.name)
+
+
 def _default_ontology() -> Ontology:
     return Ontology(
         entities=[
@@ -104,6 +127,11 @@ def _default_ontology() -> Ontology:
             EntityTypeDef("Event", "事件", ["date", "location"]),
             EntityTypeDef("Concept", "抽象概念/主题", []),
             EntityTypeDef("Location", "地点", []),
+            EntityTypeDef("地理区域", "大洲、地区、海域等地理概念", []),
+            EntityTypeDef("经济指标", "GDP、通胀率、贸易额等统计数据", []),
+            EntityTypeDef("军事装备", "武器系统、军舰、战机等", []),
+            EntityTypeDef("战略资源", "石油、稀土、粮食等战略物资", []),
+            EntityTypeDef("基础设施", "港口、管道、铁路等设施", []),
         ],
         relations=[
             RelationTypeDef("works_for", "任职于", "Person", "Organization"),

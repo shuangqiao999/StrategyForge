@@ -25,6 +25,77 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# 实体质量预检：已知的拒收类型（参考 ontology 强制注入类型 + entity_registry 硬规则）
+_PRECheck_DISCARD_TYPES = frozenset({
+    "地理区域", "经济指标", "军事装备", "战略资源", "基础设施",
+    "Location", "地理区域(非决策主体)",
+})
+# 预检排除关键词：实体名称包含这些词时，静默跳过不告警
+_PRECheck_SKIP_KW = frozenset({
+    "军", "舰队", "战区", "导弹", "航母", "驱逐舰",  # 军事编制
+    "部", "委", "局", "白宫", "五角大楼", "央行",     # 政府部门
+    "公约", "协定", "协议", "条令",                     # 文档/协议
+})
+
+
+def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
+    """实体质量预检：对高频实体检查类型合理性 + 行动证据覆盖率。
+
+    在 Phase 2 图谱构建完成后、Phase 2.5 情报整理前调用。
+    仅输出日志，不修改数据。
+    """
+    try:
+        result = graph._conn.execute(
+            f"MATCH (e:{graph.NODE_TABLE}) RETURN e.name, e.type, e.description"
+        )
+    except Exception as e:
+        logger.warning("[Precheck] 图谱查询失败: %s", e)
+        return
+
+    entities: list[dict] = []
+    while result.has_next():
+        r = result.get_next()
+        entities.append({"name": r[0], "type": r[1], "desc": r[2] or ""})
+
+    if not entities:
+        return
+
+    # 获取频次数据
+    freq_map: dict[str, int] = {}
+    if preprocessor and getattr(preprocessor, "result", None):
+        freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
+
+    suspicious: list[str] = []
+    high_freq_no_action: list[str] = []
+
+    for e in entities:
+        name = str(e.get("name", "") or "").strip()
+        etype = str(e.get("type", "") or "").strip()
+        desc = str(e.get("desc", "") or "").strip()
+        freq = freq_map.get(name, 0)
+
+        # 检查1：高频实体类型属于拒收类型
+        if freq >= 3 and etype in _PRECheck_DISCARD_TYPES:
+            if not any(kw in name for kw in _PRECheck_SKIP_KW):
+                suspicious.append(f"{name}(type={etype}, freq={freq})")
+
+        # 检查2：高频实体但描述中无行动动词（描述为空或仅含静态词）
+        if freq >= 5 and etype not in _PRECheck_DISCARD_TYPES:
+            action_kw = ("制裁", "攻击", "签署", "宣布", "部署", "发动",
+                          "制裁", "出口", "进口", "限制", "投资", "谈判")
+            if not desc or not any(kw in desc for kw in action_kw):
+                high_freq_no_action.append(f"{name}(freq={freq})")
+
+    if suspicious:
+        log_fn("graph",
+               f"预检: {len(suspicious)} 个高频实体归类可能不当 → {', '.join(suspicious[:8])}")
+    if high_freq_no_action:
+        log_fn("graph",
+               f"预检: {len(high_freq_no_action)} 个高频实体描述缺少行动证据 → {', '.join(high_freq_no_action[:8])}")
+
+    if not suspicious and not high_freq_no_action:
+        logger.info("[Precheck] 实体质量预检通过 (n=%d)", len(entities))
+
 
 class _PhaseCancelledError(Exception):
     """用户取消推演（非错误，应持久化进度为 paused）。"""
@@ -391,8 +462,11 @@ class DeductionOrchestrator:
         if e_count == 0:
             self._log("graph", "⚠️ 图谱未提取到任何实体——种子材料可能过短或格式无法解析")
         self.store.update(self.session.id, entity_count=e_count, relation_count=r_count,
-                          status=SessionStatus.AGENTS_RUNNING.value,
-                          phase=DeductionPhase.AGENTS.value)
+                           status=SessionStatus.AGENTS_RUNNING.value,
+                           phase=DeductionPhase.AGENTS.value)
+
+        # ── 实体质量预检：高频实体类型合理性 + 行动证据覆盖率 ──
+        _precheck_entity_quality(self.graph, preprocessor, self._log)
 
         # Phase 2.5: Intelligence sorting — classify entities before agent creation
         self._intel_list: list[dict] = []

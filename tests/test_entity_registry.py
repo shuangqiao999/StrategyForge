@@ -160,7 +160,7 @@ async def test_full_pipeline():
     kept_set = set(agent_names)
 
     # 1. LLM 分类是否运行
-    llm_ran = any("LLM 全量分类" in m for _, _, m in log_lines)
+    llm_ran = any("分批分类" in m or "LLM 分类" in m for _, _, m in log_lines)
     fallback_used = any("兜底规则" in m for _, _, m in log_lines)
     ok1 = llm_ran and not fallback_used
     checks.append(("LLM分类", ok1, f"fallback兜底" if fallback_used else ("未运行" if not llm_ran else f"OK({a_count} agents)")))
