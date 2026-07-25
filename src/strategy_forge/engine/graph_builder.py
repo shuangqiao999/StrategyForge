@@ -93,6 +93,7 @@ async def build_graph(
             client=client, chunks=result.chunks, graph=graph, log_fn=log_fn,
             entity_types=entity_type_names, relation_types=relation_type_names,
         )
+    else:
         # ── 回退模式: 全量语义分块 (无预处理器时) ──
         from strategy_forge.core.chunker import TextChunker
         chunker = TextChunker(strategy="paragraph", max_chunk_size=1536)
