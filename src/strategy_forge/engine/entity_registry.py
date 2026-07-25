@@ -292,14 +292,22 @@ async def _llm_classify(
             prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
     prompt_parts.append("## 种子材料采样")
     prompt_parts.append(source[:5000])
-    prompt_parts.append("\n## 待分类实体")
+    prompt_parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
     for i, e in enumerate(pending, 1):
-        p = e.parent or "无"
-        prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}  parent={p}")
+        p = f" (上级: {e.parent})" if e.parent else ""
+        prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
     prompt_parts.append("""
 ## 判定标准
-具有独立战略决策权：能独立做出影响格局的决策（国家、国际组织、大型企业、核心人物、政党等）
-不具有独立战略决策权：地理概念、下属部门、军队编制、职务头衔、泛指集合、二元关系词
+具有独立战略决策权：
+- 在种子材料中作为独立行动者出现（有独立立场、独立行为、影响格局）
+- 包括但不限于：主权国家、国际组织、跨国企业（尤其是受制裁/管制/竞争的科技企业）、
+  核心政治人物、军事联盟、行业联盟、大型集团
+- 频次仅作参考——低频但关键行动（如被制裁、发动攻击、签署协议）的实体应保留
+
+不具有独立战略决策权：
+- 地理概念、纯下属部门、军队编制、职务头衔、泛指集合概念
+- 纯经济指标、纯技术标准、纯贸易机制（如RCEP是框架而非博弈者）
+- 仅在文本中作为背景提及、无独立行为的实体
 
 ## 输出 JSON
 {"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "≤20字理由"}}
