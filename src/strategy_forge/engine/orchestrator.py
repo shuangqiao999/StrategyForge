@@ -240,12 +240,23 @@ class DeductionOrchestrator:
             self._log("orchestrator", "图谱中无已存智能体，重新生成...")
             try:
                 from .agent_factory import create_agents_from_graph
+                from .entity_registry import build_registry
+                entity_registry = await build_registry(
+                    graph=self.graph,
+                    preprocessor=getattr(self, "_preprocessor", None),
+                    intel_list=getattr(self, "_intel_list", None) or None,
+                    ontology=getattr(self.session, "ontology", None),
+                    source_material=self.session.source_material,
+                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+                    log_fn=self._log,
+                )
                 agents = await create_agents_from_graph(
                     graph=self.graph,
                     source_material=self.session.source_material,
                     log_fn=self._log,
                     preprocessor=self._preprocessor,
                     domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+                    entity_registry=entity_registry,
                 )
                 self._agents = agents
                 self.session.agent_count = len(agents)

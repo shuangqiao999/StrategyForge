@@ -154,11 +154,17 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
         extra_keep = frozenset()
     if extra_discard is None:
         extra_discard = frozenset()
-    # 1. 排除规则（按优先级）
+    # 1. 硬排除规则（不可覆盖）
     if etype in _DISCARD_TYPES:
         return False, "类型排除"
     if _is_dyad(name):
         return False, "二元关系词"
+
+    # 2. 领域专属保留词（优先于后续排斥规则，允许领域配置覆盖通用规则）
+    if freq >= 1 and any(kw in name for kw in extra_keep):
+        return True, "领域保留词"
+
+    # 3. 软排除规则（可被 extra_keep 覆盖）
     if any(name.endswith(s) for s in _TITLE_SUFFIX):
         return False, "职务头衔"
     if any(name.endswith(s) for s in _MILITARY_SUFFIX):
@@ -171,14 +177,11 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
     # 领域专属排除词
     if any(kw in name for kw in extra_discard):
         return False, "领域排除"
-    # 领域专属保留词（>0 频次即保留）
-    if freq >= 1 and any(kw in name for kw in extra_keep):
-        return True, "领域保留词"
 
-    # 2. 自适应阈值（领域可配置因子）
+    # 3. 自适应阈值（领域可配置因子）
     threshold = max(1, total // threshold_factor)
 
-    # 3. 保留规则
+    # 4. 保留规则
     if etype in person_types and freq >= threshold:
         return True, f"角色-{etype}(freq≥{threshold})"
     if etype in org_types and freq >= threshold * 2:

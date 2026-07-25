@@ -146,7 +146,6 @@ async def sort_entities(
             "aliases": _as_name_list(e.get("aliases")),
             "parent": e.get("parent") or None,
             "sub_entities": _as_name_list(e.get("sub_entities")),
-            "include_in_simulation": bool(e.get("include_in_simulation", True)),
             "role": str(e.get("role", "")).strip(),
         })
 
