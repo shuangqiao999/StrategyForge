@@ -343,7 +343,7 @@ async def _llm_classify(
             except Exception:
                 continue
         if not isinstance(data, dict):
-            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}): {raw[:2000]}")
+            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}):\n{raw}")
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
