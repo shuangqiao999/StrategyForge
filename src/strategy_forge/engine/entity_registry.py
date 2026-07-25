@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -288,7 +289,7 @@ async def build_registry(
     # 5. LLM 单次全量分类
     from strategy_forge.core.config import config as _cfg
     if _cfg.deduction_llm_review and source_material:
-        await _llm_classify(registry, hard_kept, source_material, domain, log_fn)
+        await _llm_classify(registry, hard_kept, source_material, domain, log_fn, preprocessor)
     else:
         _fallback_classify(registry, hard_kept, log_fn)
 
@@ -304,8 +305,49 @@ async def _llm_classify(
     source: str,
     domain: str,
     log_fn: Any = None,
+    preprocessor: Any = None,
 ) -> None:
-    """LLM 单次调用：对所有非硬排除实体做 KEEP/DISCARD 分类。"""
+    """LLM 单次调用：对所有非硬排除实体做 KEEP/DISCARD 分类。
+
+    当 preprocessor 可用时，为每个实体检索 LanceDB 中的关联语义块作为证据上下文，
+    替代固定窗口 source[:5000] 的随机截断。"""
+    import time as _time
+
+    # ── 为每个实体检索关联证据 ──
+    entity_evidence: dict[str, list[str]] = {}
+    seen_prefixes: set[str] = set()
+    if preprocessor is not None:
+        t0 = _time.time()
+        for e in pending:
+            ename = str(e.name or "").strip()
+            if not ename or len(ename) < 2:
+                continue
+            try:
+                must = {ename} if len(ename) >= 2 else None
+                chunks = await asyncio.to_thread(
+                    preprocessor.retrieve_for_entity, ename, top_k=3,
+                    must_contain=must,
+                )
+                if chunks:
+                    deduped: list[str] = []
+                    for c in chunks:
+                        c = str(c).strip()
+                        if not c:
+                            continue
+                        prefix = c[:80]
+                        if prefix in seen_prefixes:
+                            continue
+                        seen_prefixes.add(prefix)
+                        deduped.append(c)
+                        if len(deduped) >= 2:
+                            break
+                    if deduped:
+                        entity_evidence[ename] = deduped
+            except Exception:
+                pass
+        if log_fn and entity_evidence:
+            dt = _time.time() - t0
+            log_fn("agents", f"实体证据检索: {len(entity_evidence)}/{len(pending)} 实体有匹配段落 ({dt:.1f}s)")
 
     prompt_parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
     # 注入领域特定规则
@@ -314,12 +356,24 @@ async def _llm_classify(
         dr = get_domain_prompt(domain, "intel_extra_rules")
         if dr:
             prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
-    prompt_parts.append("## 种子材料采样")
-    prompt_parts.append(source[:5000])
-    prompt_parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
-    for i, e in enumerate(pending, 1):
-        p = f" (上级: {e.parent})" if e.parent else ""
-        prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
+    if entity_evidence:
+        prompt_parts.append("\n## 待分类实体与关联证据")
+        prompt_parts.append("每个实体下方附有其在种子材料中最相关的段落，请据此判断「残留行动」（检验三）。频次仅供参考——1 次关键行动 > 10 次背景提及。")
+        prompt_parts.append("")
+        for i, e in enumerate(pending, 1):
+            p = f" (上级: {e.parent})" if e.parent else ""
+            prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
+            evidence = entity_evidence.get(e.name, [])
+            for j, chunk in enumerate(evidence[:2], 1):
+                c = chunk[:280] + ("..." if len(chunk) > 280 else "")
+                prompt_parts.append(f"     | 证据{j}: {c}")
+    else:
+        prompt_parts.append("## 种子材料采样")
+        prompt_parts.append(source[:5000])
+        prompt_parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
+        for i, e in enumerate(pending, 1):
+            p = f" (上级: {e.parent})" if e.parent else ""
+            prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
     prompt_parts.append("""
 ## 分类方法论：三步检验法（按序应用）
 对每个待分类实体，依次用以下三步检验。任何一步失败则 DISCARD，三步全通过则 KEEP。

@@ -415,6 +415,13 @@ class DeductionPreprocessor:
             self._recall_cache[cache_key] = list(results)
         return results
 
+    def _hybrid_or_vector_search(self, table, query_vec, query_text, fetch_k):
+        if self._fts_ready and query_text:
+            q = table.search(query_type="hybrid").vector(query_vec).text(query_text)
+        else:
+            q = table.search(query_vec).metric("cosine")
+        return q.limit(fetch_k).to_list()
+
     # ── Main preprocessing pipeline ──
 
     @property
