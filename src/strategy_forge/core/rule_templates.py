@@ -228,6 +228,7 @@ def reload_rules() -> None:
     if loaded:
         _RULE_CACHE = loaded
         _rules_loaded_from_file = True
+        _apply_inheritance()
     else:
         _RULE_CACHE = dict(_FALLBACK_RULES)
         _rules_loaded_from_file = False
@@ -235,6 +236,63 @@ def reload_rules() -> None:
 
 def get_template(domain: str) -> dict[str, Any] | None:
     return _RULE_CACHE.get(domain)
+
+
+def _deep_merge(base: dict, child: dict) -> dict:
+    """深度合并：child 覆盖 base 的同名字段。metrics/actions 做并集去重。"""
+    result = dict(base)
+    for key, val in child.items():
+        if key in ("metrics", "actions") and key in result:
+            # 并集去重：保留 base 中的项，child 中的同名项覆盖
+            base_items = {item if isinstance(item, str) else item.get("name", item): item
+                          for item in result[key]}
+            child_items = {item if isinstance(item, str) else item.get("name", item): item
+                            for item in val}
+            merged = list(base_items.values())
+            for ck, cv in child_items.items():
+                if ck in base_items:
+                    # 覆盖同名项
+                    for i, item in enumerate(merged):
+                        if (isinstance(item, str) and item == ck) or (
+                            isinstance(item, dict) and item.get("name") == ck):
+                            merged[i] = cv
+                            break
+                else:
+                    merged.append(cv)
+            result[key] = merged
+        elif key == "ode_engine" and key in result:
+            result[key]["equations"] = {**result[key].get("equations", {}),
+                                         **val.get("equations", {})}
+            result[key]["params"] = {**result[key].get("params", {}),
+                                      **val.get("params", {})}
+        elif isinstance(val, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
+def _apply_inheritance() -> None:
+    """后处理：对标记了 inherited_from 的域，从祖先域合并规则。"""
+    for domain, tpl in list(_RULE_CACHE.items()):
+        ancestors = tpl.get("inherited_from", [])
+        if not ancestors and tpl.get("extends"):
+            ancestors = [tpl["extends"]]
+        if not ancestors:
+            continue
+        merged = {}
+        for ancestor in ancestors:
+            base = _RULE_CACHE.get(ancestor)
+            if base:
+                merged = _deep_merge(merged, base)
+        if merged:
+            # 子域自身配置最后合并，覆盖祖先
+            _RULE_CACHE[domain] = _deep_merge(merged, tpl)
+            # 清理 inherited_from 标记（不再需要）
+            _RULE_CACHE[domain].pop("inherited_from", None)
+            _RULE_CACHE[domain].pop("extends", None)
+            logger.info("[RuleTemplates] %s 继承了 %d 个祖先域: %s",
+                        domain, len(ancestors), ", ".join(ancestors))
 
 
 def list_domains() -> list[dict[str, str]]:

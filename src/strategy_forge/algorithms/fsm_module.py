@@ -144,7 +144,12 @@ class FiniteStateMachineModule(AlgorithmModule):
         # Strip streak before iterating — it's an int, not a (op, threshold) tuple
         cond_pairs = [(m, op_th) for m, op_th in condition.items() if m != "streak"]
         for metric, (op, threshold) in cond_pairs:
-            val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
+            # opponent.<metric>：读取最强对手的指标值
+            if metric.startswith("opponent."):
+                real_metric = metric[len("opponent."):]
+                val = FiniteStateMachineModule._resolve_opponent_metric(ctx, idx, real_metric)
+            else:
+                val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
             if val is None:
                 return False
             if op == "<" and not (val < float(threshold)):
@@ -192,7 +197,39 @@ class FiniteStateMachineModule(AlgorithmModule):
             ally_ids = ally_ids if ally_ids is not None else []
             targets = enemy_ids if "enemy" in metric else ally_ids
             if not targets:
-                return None
+        return None
+
+    @staticmethod
+    def _resolve_opponent_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
+        """读取最强对手的指标值。从 enemy_ids 中找到距离最近的敌人，读取其 metric。"""
+        sp = ctx.spatial
+        n = len(sp.positions)
+        if idx >= n or metric not in ctx.arrays:
+            return None
+        enemy_ids = ctx.metadata.get("fsm.enemy_ids")
+        if enemy_ids is None:
+            polar = ctx.arrays.get("polarization")
+            if polar is not None and len(polar) == n:
+                own_pol = float(polar[idx])
+                enemy_ids = [j for j in range(n) if j != idx and
+                            (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0)]
+            else:
+                enemy_ids = [j for j in range(n) if j != idx]
+        if not enemy_ids:
+            return None
+        # 找距离最近的对手
+        min_dist = float("inf")
+        nearest = None
+        for tidx in enemy_ids:
+            if not isinstance(tidx, int) or tidx >= n:
+                continue
+            d = float(np.linalg.norm(sp.positions[idx] - sp.positions[tidx]))
+            if d < min_dist:
+                min_dist = d
+                nearest = tidx
+        if nearest is not None and nearest < len(ctx.arrays.get(metric, [])):
+            return float(ctx.arrays[metric][nearest])
+        return None
             min_dist = float("inf")
             for tidx in targets:
                 if not isinstance(tidx, int) or tidx >= n or tidx == idx:
