@@ -33,16 +33,17 @@ _DISCARD_TYPES = frozenset({
 })
 _PERSON_TYPES = frozenset({"Person", "人物"})
 _ORG_TYPES = frozenset({
-    "Organization", "Party", "Company", "Country",
-    "组织", "政党", "企业", "国家", "国际组织",
+    "Organization", "Party", "Company",
+    "组织", "政党", "企业",
 })
+_COUNTRY_TYPES = frozenset({"Country", "国家", "国际组织"})
 _TITLE_SUFFIX = (
     "总统", "总理", "司令", "部长", "秘书长", "主席", "书记", "市长",
     "省长", "院长", "局长", "指挥官", "委员长", "主任", "将军", "上将",
     "特使", "代表", "发言人", "CEO", "董事长", "行长", "署长",
 )
 _MILITARY_SUFFIX = (
-    "舰队", "战区", "司令部", "集团军", "师团", "旅", "营", "连",
+    "舰队", "战区", "司令部", "集团军", "师团", "旅", "营", "连", "军",
     "导弹旅", "驱逐舰", "航空母舰", "航母",
 )
 _DEPT_WORDS = (
@@ -184,6 +185,8 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
     # 4. 保留规则
     if etype in person_types and freq >= threshold:
         return True, f"角色-{etype}(freq≥{threshold})"
+    if etype in _COUNTRY_TYPES and freq >= threshold:
+        return True, f"国家-{etype}(freq≥{threshold})"
     if etype in org_types and freq >= threshold * 2:
         return True, f"组织-{etype}(freq≥{threshold*2})"
     if freq >= threshold * 5:
@@ -379,6 +382,7 @@ async def build_registry(
     from strategy_forge.core.config import config as _cfg
     if _cfg.deduction_llm_review and source_material:
         await _llm_review_borderline(registry, deduped, source_material, freq_map, cov_map, log_fn)
+        await _llm_merge_and_supplement(registry, deduped, source_material, freq_map, log_fn)
 
     return registry
 
@@ -519,6 +523,123 @@ async def _llm_review_borderline(
                     log_fn("agents", f"LLM 审核: {len(overrides)} 条改写 (排除:{kept_to_discard} 恢复:{discard_to_keep})")
     except Exception as e:
         logger.warning("[EntityRegistry] LLM 审核失败，维持代码规则判定: %s", e)
+
+
+async def _llm_merge_and_supplement(
+    registry: EntityRegistry,
+    deduped: list[dict],
+    source: str,
+    freq_map: dict[str, int],
+    log_fn: Any = None,
+) -> None:
+    """LLM 合并审核：父子合并 + 从 DISCARD 中补充遗漏的核心博弈方。
+
+    只看 KEEP 列表，做两件事：
+    1. 父子合并：子实体的 parent 也在 KEEP 中 → 将子合并入父
+    2. 缺漏补充：从 DISCARD 列表中找出被代码规则遗漏的核心博弈方
+    """
+    kept = registry.get_kept()
+    discarded = [e for e in registry.entities.values() if e.decision == "DISCARD"]
+    if len(kept) < 2:
+        return
+
+    prompt_parts = ["你是实体合并审核员。当前有代码规则筛选出的博弈实体列表。"]
+    prompt_parts.append("## 种子材料采样")
+    prompt_parts.append(source[:2500])
+
+    prompt_parts.append("\n## 当前博弈实体 (KEEP)")
+    for e in kept[:20]:
+        p = e.parent or "无"
+        prompt_parts.append(f"  {e.name}  type={e.type}  freq={e.freq}  parent={p}")
+
+    # 找高频 DISCARD 实体（可能是被代码规则误排除的）
+    high_freq_discard = sorted(
+        [e for e in discarded if e.freq >= 2],
+        key=lambda e: -e.freq)[:10]
+    if high_freq_discard:
+        prompt_parts.append("\n## 被排除的高频实体 (DISCARD)")
+        for e in high_freq_discard:
+            prompt_parts.append(f"  {e.name}  type={e.type}  freq={e.freq}  排除理由={e.reason}")
+
+    prompt_parts.append("""
+## 任务
+1. 父子合并：如果实体 parent 是上述某个 KEEP 实体 → 把子实体合并入父实体（如 "特朗普 parent=美国" → 合并，"乌军 parent=乌克兰" → 合并）
+2. 缺漏补充：从 DISCARD 高频列表中，找出被错误排除的核心博弈方（如 "俄罗斯" 全文多次出现但不在 KEEP → 应补充）
+3. 维持代码规则的判定——只做明确的合并和补充，不做模糊判断
+
+## 输出 JSON
+{"merge_into_parent": ["要合并的子实体名", ...],
+ "supplement_from_discard": ["要恢复的实体名", ...],
+ "supplement_reason": {"实体名": "≤20字理由"}}
+
+如果无需合并和补充，输出 {"merge_into_parent": [], "supplement_from_discard": []}
+
+只输出 JSON。""")
+    prompt = "\n".join(prompt_parts)
+
+    from strategy_forge.core.llm_client import DeductionLLMClient, Message
+    import json as _json
+    try:
+        client = DeductionLLMClient()
+        resp = await client.chat(
+            [Message(role="user", content=prompt)],
+            system="你是实体合并审核员，只输出 JSON。",
+            temperature=0,
+            max_tokens=500,
+        )
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        if isinstance(content, list):
+            content = "".join(b.text for b in content if hasattr(b, "text"))
+        data = _json.loads(str(content).strip())
+
+        if not isinstance(data, dict):
+            return
+
+        # 处理父子合并
+        merged = 0
+        for name in data.get("merge_into_parent", []):
+            name = str(name).strip()
+            if not name:
+                continue
+            e = registry.find(name)
+            if e is None or e.decision != "KEEP":
+                continue
+            parent = e.parent
+            if not parent:
+                continue
+            pe = registry.find(parent)
+            if pe is None:
+                continue
+            # 合并：子实体降级为 DISCARD
+            e.decision = "DISCARD"
+            e.reason = f"合并入{parent}(LLM合并审核)"
+            registry.kept -= 1
+            registry.discarded += 1
+            merged += 1
+
+        # 处理缺漏补充
+        supplemented = 0
+        reasons = data.get("supplement_reason", {}) or {}
+        for name in data.get("supplement_from_discard", []):
+            name = str(name).strip()
+            if not name:
+                continue
+            e = registry.find(name)
+            if e is None or e.decision != "DISCARD":
+                continue
+            reason = str(reasons.get(name, "LLM补充"))
+            e.decision = "KEEP"
+            e.reason = f"LLM补充({reason[:30]})"
+            registry.kept += 1
+            registry.discarded -= 1
+            supplemented += 1
+
+        if merged or supplemented:
+            logger.info("[EntityRegistry] LLM 合并审核: 合并%d 补充%d", merged, supplemented)
+            if log_fn:
+                log_fn("agents", f"LLM 合并审核: 合并{merged}个(父子合并) + 补充{supplemented}个(遗漏恢复)")
+    except Exception as e:
+        logger.warning("[EntityRegistry] LLM 合并审核失败: %s", e)
 
 
 # ── 调试入口 ──
