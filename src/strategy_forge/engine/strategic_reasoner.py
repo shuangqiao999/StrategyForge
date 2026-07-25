@@ -404,14 +404,26 @@ class StrategicReasoner:
                 '"rationale": "20-50字理由"}\n'
                 f"- 最多 {self._max_actions} 个动作，可同时分配资源（如同时进攻与防守，或对不同对手施压）\n"
                 "- budget：本轮总投入力度，0.1=保守，0.5=常规，1.0=倾尽全力\n"
-                "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0"
+                "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0\n"
+                '## 正确示例\n'
+                '{"budget": 0.7, "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
+                '{"action_type": "defend", "weight": 0.4, "target": ""}], '
+                '"rationale": "主力进攻，预留防守余力防止被反制"}\n'
+                '## 错误示例\n'
+                '{"budget": 0.8, "actions": [{"action_type": "attack", "weight": 0.5, "target": "敌方A"}], '
+                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短'
             )
         else:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
                 '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
                 '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
-                "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力"
+                "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力\n"
+                '## 正确示例\n'
+                '{"action_type": "attack", "target": "敌方A", "intensity": 0.7, "rationale": "敌方军力削弱过半，抓住战机全力出击以扩大战果"}\n'
+                '## 错误示例\n'
+                '{"action_type": "observe", "target": "", "intensity": 0.3, "rationale": "看看情况"}\n'
+                '← 若核心目标未达成，observe往往不是最优选择；rationale应说明策略依据而非模糊表态'
             )
             if multi_candidate:
                 output_spec += (

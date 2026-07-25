@@ -381,6 +381,11 @@ class RuleEngine:
         _detect_base = (
             "判断以下文本最适合哪个推演领域，并给出 0-1 的置信度。\n\n"
             f"## 可选领域\n{options}\n- narrative: 无明确量化领域 / 纯叙事文学\n\n"
+            "## 示例\n"
+            '文本："A国与B国在边境爆发激烈交火，双方投入大量装甲部队..."\n'
+            '→ {"domain": "military", "confidence": 0.92}\n'
+            '文本："市场竞争激烈，新兴品牌通过价格战和社交媒体营销快速占领市场份额"\n'
+            '→ {"domain": "business", "confidence": 0.85}\n\n'
             "## 文本\n{text}\n\n"
             '## 输出 JSON（仅 JSON）\n{"domain": "领域标识", "confidence": 0.0到1.0}'
         )

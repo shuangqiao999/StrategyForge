@@ -1874,7 +1874,11 @@ class SimulationEngine:
             lines.append(f"{nm} {act_txt}，数值变化: {chg}")
         prompt = (
                     f"将第 {round_number} 轮量化推演结果改写为一段生动简洁的态势叙事（200 字以内）。\n\n"
-            "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n只输出叙事段落，不要解释或列表。"
+            "## 本轮各方行动与数值变化\n" + "\n".join(lines) + "\n\n"
+            "## 示例\n"
+            "输入：A国 发动进攻(强度0.8) 目标:B国，数值变化: A国strength-8,B国supply-15\n"
+            "输出：A国以雷霆之势向B国边境发起猛攻，虽然自身消耗不小，但B国的后勤补给线遭受重创，前线的物资储备已降至警戒水平。\n\n"
+            "只输出叙事段落，不要解释或列表。叙事只能基于上方列出的行动和数值变化，不得添加未发生的情节。"
         )
         resp = await client.chat([Message(role="user", content=prompt)],
                                  system="你是推演解说员，把数值变化翻译成简洁叙事。", temperature=0.5)
