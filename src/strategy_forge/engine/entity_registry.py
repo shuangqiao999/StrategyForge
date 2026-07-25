@@ -317,7 +317,7 @@ async def _llm_classify(
             [Message(role="user", content=prompt)],
             system="你是实体分类员，只输出 JSON。",
             temperature=0,
-            max_tokens=800,
+            max_tokens=5000,
         )
         content = resp.content if hasattr(resp, "content") else str(resp)
         if isinstance(content, list):
@@ -343,7 +343,7 @@ async def _llm_classify(
             except Exception:
                 continue
         if not isinstance(data, dict):
-            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}): {raw[:300]}")
+            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}): {raw[:2000]}")
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
