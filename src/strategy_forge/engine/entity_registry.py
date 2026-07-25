@@ -317,7 +317,7 @@ async def _llm_classify(
             [Message(role="user", content=prompt)],
             system="你是实体分类员，只输出 JSON。",
             temperature=0,
-            max_tokens=5000,
+            max_tokens=max(500, min(5000, 100 + len(pending) * 40)),
         )
         content = resp.content if hasattr(resp, "content") else str(resp)
         if isinstance(content, list):
