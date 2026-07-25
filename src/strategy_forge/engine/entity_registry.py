@@ -357,6 +357,17 @@ async def _llm_review_borderline(
     LLM 只做结构化纠正（这是军队编制吗？这是职务头衔吗？），不做模糊博弈分类。
     """
     borderline = []
+    # 人名特征检测：2-4字中文，不含组织/地点/军队关键词
+    _PERSON_NAME_KW = frozenset({"国", "党", "盟", "院", "部", "局", "军", "队", "省",
+                                   "市", "组", "委", "会", "府", "署", "厅", "司",
+                                   "社", "团", "联", "盟", "网", "报", "台", "站"})
+    def _looks_like_person(name: str) -> bool:
+        if not (2 <= len(name) <= 4):
+            return False
+        if not all('\u4e00' <= ch <= '\u9fff' for ch in name):
+            return False
+        return not any(kw in name for kw in _PERSON_NAME_KW)
+
     for p in deduped:
         pname = p.get("name", "")
         e = registry.entities.get(pname)
@@ -364,15 +375,16 @@ async def _llm_review_borderline(
             continue
         fm = freq_map.get(pname, 0)
         ptype = p.get("type", "") or ""
-        # 边缘 KEEP：低频且存在误判风险
-        if e.decision == "KEEP" and (fm <= 2 or
-                any(pname.endswith(s) for s in ("军", "舰队", "司令部",
-                                                  "总统", "总理"))
+        # 边缘 KEEP：低频、疑似军队/职务/二元词
+        if e.decision == "KEEP" and (fm <= 2
+                or any(pname.endswith(s) for s in ("军", "舰队", "司令部", "总统", "总理"))
                 or _is_dyad(pname)):
             borderline.append(e)
-        # 边缘 DISCARD：人物类型且有一定频次
+        # 边缘 DISCARD：人物类型或名字像人名，有一定频次
         elif e.decision == "DISCARD" and fm >= 1 and (
-                ptype in ("Person", "人物") or any(kw in ptype for kw in ("Person", "人物", "Actor"))):
+                ptype in ("Person", "人物")
+                or any(kw in ptype for kw in ("Person", "人物", "Actor"))
+                or _looks_like_person(pname)):
             borderline.append(e)
 
     if not borderline:
@@ -399,10 +411,10 @@ async def _llm_review_borderline(
             f"当前判定={e.decision} 理由={e.reason}")
     prompt_parts.append("""
 ## 审核规则
-1. 军队编制/番号（含X军、X舰队、X战区、X集团军、X导弹旅）→ 应排除
-2. 职务头衔（含总统、总理、主席、部长、司令、秘书长）→ 应排除  
-3. 二元关系/对抗词（含A与B、A和B、A/B、俄乌、中美、印巴等）→ 应排除
-4. 核心人物（国家级领导人、组织领导人、关键角色，频次≥2且有独立描述）→ 应保留
+1. 军队编制/番号（含"X军"如乌军、俄军、美军、"X舰队"、"X战区"）→ 改为 DISCARD
+2. 职务头衔（含"总统""总理""主席""部长""司令"等）→ 改为 DISCARD
+3. 二元关系/对抗词（如俄乌、中美、印巴、"A与B"等）→ 改为 DISCARD
+4. 中文人名（2-4字，不含国/党/盟/院/部/局等组织词）且频次≥2且在源文本中有独立行动的 → 改为 KEEP
 5. 其余维持原判
 
 ## 输出 JSON
