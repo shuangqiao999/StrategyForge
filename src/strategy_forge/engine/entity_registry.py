@@ -117,7 +117,6 @@ async def build_registry(
     preprocessor: Any = None,
     intel_list: list[dict] | None = None,
     source_material: str = "",
-    domain: str = "",
     log_fn: Any = None,
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
