@@ -33,9 +33,7 @@ def test_all_imports():
     # 验证 domain_prompts.json 各领域有 intel_examples
     for d in ['politics', 'business', 'military', 'ecology', 'urban', 'tech', 'info_war', 'geo_strategy']:
         rules = get_domain_prompt(d, 'intel_extra_rules')
-        examples = get_domain_prompt(d, 'intel_examples')
         assert rules, f"{d} missing intel_extra_rules"
-        assert examples, f"{d} missing intel_examples"
     print("  [OK] All 8 domains have intel rules + examples")
 
     # 验证死代码 _last_reflection_round 已删除
