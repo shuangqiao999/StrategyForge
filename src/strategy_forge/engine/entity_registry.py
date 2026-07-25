@@ -96,7 +96,7 @@ class EntityRegistry:
                                 sorted(self.discard_reasons.items(), key=lambda x: -x[1]))
             lines.append(f"  DISCARD: {detail}")
         lines.append("  KEPT entities:")
-        for e in self.get_kept()[:20]:
+        for e in self.get_kept()[:50]:
             lines.append(f"    {e.name}  {e.type}  freq={e.freq}  → {e.reason}")
         return "\n".join(lines)
 
@@ -291,7 +291,7 @@ async def _llm_classify(
         if dr:
             prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
     prompt_parts.append("## 种子材料采样")
-    prompt_parts.append(source[:3000])
+    prompt_parts.append(source[:5000])
     prompt_parts.append("\n## 待分类实体")
     for i, e in enumerate(pending, 1):
         p = e.parent or "无"

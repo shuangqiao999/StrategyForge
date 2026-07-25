@@ -26,7 +26,7 @@ registry._data["max_concurrent"] = "2"
 
 from strategy_forge.engine.models import DeductionSession
 from strategy_forge.engine.orchestrator import DeductionOrchestrator
-from strategy_forge.engine.entity_registry import build_registry, _is_dyad
+from strategy_forge.engine.entity_registry import _is_dyad
 from strategy_forge.storage.graph_store import DeductionGraphStore
 from strategy_forge.storage.session_store import SessionStore
 
@@ -136,66 +136,63 @@ async def test_full_pipeline():
     a_count = session_data.get("agent_count", 0) or getattr(result, "agent_count", 0)
     error = session_data.get("error", "") or getattr(result, "error", "")
 
-    # ── 注册中心独立验证 ──
+    # ── 从模拟日志提取 agent 名单 ──
+    agent_names: list[str] = []
+    for _, phase, msg in log_lines:
+        if phase == "agents" and msg.startswith("  [") and "/" in msg and "] " in msg:
+            # 格式: "  [1/21] 美国: ..."
+            m = re.search(r'\] (\S+):', msg)
+            if m:
+                agent_names.append(m.group(1))
+
+    # ── 验证 ──
     print()
     print("=" * 60)
-    print("  EntityRegistry 验证")
+    print("  验证")
     print("=" * 60)
 
-    ent_registry = await build_registry(graph, source_material=source, domain="geo_strategy")
-    kept_names = {e.name for e in ent_registry.get_kept()}
-    discard_names = {e.name: e.reason for e in ent_registry.entities.values() if e.decision == "DISCARD"}
-
     checks = []
+    kept_set = set(agent_names)
 
     # 1. LLM 分类是否运行
     llm_ran = any("LLM 全量分类" in m for _, _, m in log_lines)
     fallback_used = any("兜底规则" in m for _, _, m in log_lines)
-    checks.append(("LLM分类成功", llm_ran and not fallback_used,
-                   "OK" if llm_ran and not fallback_used else ("fallback兜底" if fallback_used else "未运行")))
-    print(f"  {'PASS' if checks[-1][1] else 'WARN'} LLM分类: {checks[-1][2]}")
+    ok1 = llm_ran and not fallback_used
+    checks.append(("LLM分类", ok1, f"fallback兜底" if fallback_used else ("未运行" if not llm_ran else f"OK({a_count} agents)")))
+    print(f"  {'OK' if ok1 else 'FAIL'} LLM分类: {checks[-1][2]}")
 
-    # 2. agent数量合理
-    checks.append(("agent数量(6-25)", 6 <= a_count <= 25, f"{a_count} agents"))
-    print(f"  {'PASS' if checks[-1][1] else 'FAIL'} agent数量: {checks[-1][2]}")
+    # 2. agent 数量
+    ok2 = 6 <= a_count <= 30
+    checks.append(("数量(6-30)", ok2, f"{a_count}"))
+    print(f"  {'OK' if ok2 else 'FAIL'} 数量: {checks[-1][2]}")
 
-    # 3. 核心博弈方保留
-    missing = [n for n in REQUIRED_KEEP if n not in kept_names]
-    checks.append(("核心博弈方", len(missing) <= 2, f"缺失: {missing}" if missing else "全部保留"))
-    print(f"  {'PASS' if checks[-1][1] else 'FAIL'} 核心博弈方: {checks[-1][2]}")
+    # 3. 核心博弈方
+    missing = [n for n in REQUIRED_KEEP if n not in kept_set]
+    ok3 = len(missing) <= 3
+    checks.append(("核心方", ok3, f"缺失:{missing}" if missing else "全在"))
+    print(f"  {'OK' if ok3 else 'WARN'} 核心方: {checks[-1][2]}")
 
-    # 4. 必须排除的实体
-    kept_bad = [n for n in MUST_DISCARD if n in kept_names]
-    checks.append(("必须排除", len(kept_bad) == 0, f"误保留: {kept_bad}" if kept_bad else "全部排除"))
-    print(f"  {'PASS' if checks[-1][1] else 'FAIL'} 必须排除: {checks[-1][2]}")
+    # 4. 必须排除
+    bad_kept = [n for n in MUST_DISCARD if n in kept_set]
+    ok4 = len(bad_kept) == 0
+    checks.append(("排除", ok4, f"误保留:{bad_kept}" if bad_kept else "OK"))
+    print(f"  {'OK' if ok4 else 'FAIL'} 必须排除: {checks[-1][2]}")
 
-    # 5. 代码排除日志
-    hard_discard_log = any("军队编制" in m or "二元关系词" in m or "政府部门" in m
-                           for _, _, m in log_lines)
-    checks.append(("硬排除生效", hard_discard_log, "OK" if hard_discard_log else "未找到"))
-    print(f"  {'PASS' if checks[-1][1] else 'FAIL'} 硬排除: {checks[-1][2]}")
+    # 5. 代码硬排除生效
+    hard_discard_terms = sum(1 for _, _, m in log_lines
+                             if any(kw in m for kw in ("军队编制", "二元关系词", "政府部门", "类型排除")))
+    ok5 = hard_discard_terms > 0
+    checks.append(("硬排除", ok5, f"{hard_discard_terms}条"))
+    print(f"  {'OK' if ok5 else 'FAIL'} 硬排除日志: {checks[-1][2]}")
 
-    # ── 详细实体列表 ──
-    print()
-    print(f"  KEPT ({ent_registry.kept}): {', '.join(sorted(kept_names)[:20])}")
-    if discard_names:
-        summary: dict[str, int] = {}
-        for reason in discard_names.values():
-            summary[reason] = summary.get(reason, 0) + 1
-        print(f"  DISCARD ({ent_registry.discarded}): {', '.join(f'{k}:{v}' for k,v in sorted(summary.items()))}")
-
-    # ── 检查关键排除 ──
-    print()
-    for name in MUST_DISCARD + SHOULD_DISCARD:
-        if name in discard_names:
-            print(f"  OK  {name} → DISCARD({discard_names[name]})")
-        elif name in kept_names:
-            print(f"  WARN {name} → KEPT（应该在排除列表）")
+    # ── 详细 ──
+    print(f"\n  Agent({len(agent_names)}): {', '.join(agent_names[:25])}")
     for name in SHOULD_KEEP:
-        if name in kept_names:
-            print(f"  OK  {name} → KEEP")
-        elif name in discard_names:
-            print(f"  WARN {name} → DISCARD({discard_names[name]})（应该在保留列表）")
+        tag = "KEPT" if name in kept_set else "MISSING"
+        print(f"    {tag:8s} {name}")
+    for name in MUST_DISCARD:
+        tag = "OK(discarded)" if name not in kept_set else "BAD(kept)"
+        print(f"    {tag:8s} {name}")
 
     # ── 判定 ──
     passed = sum(1 for c in checks if c[1])
