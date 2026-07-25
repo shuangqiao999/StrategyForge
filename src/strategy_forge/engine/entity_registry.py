@@ -112,6 +112,30 @@ class EntityRegistry:
 
 # ── 构造函数 ──
 
+def _extract_balanced(text: str, opener: str, closer: str) -> str | None:
+    """返回从第一个 opener 起、括号配平的子串。"""
+    start = text.find(opener)
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc: esc = False
+            elif ch == "\\": esc = True
+            elif ch == '"': in_str = False
+            continue
+        if ch == '"': in_str = True
+        elif ch == opener: depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 async def build_registry(
     graph: Any,
     preprocessor: Any = None,
@@ -278,6 +302,7 @@ async def _llm_classify(
     prompt = "\n".join(prompt_parts)
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     import json as _json
+    import re as _re
     try:
         client = DeductionLLMClient()
         resp = await client.chat(
@@ -289,9 +314,28 @@ async def _llm_classify(
         content = resp.content if hasattr(resp, "content") else str(resp)
         if isinstance(content, list):
             content = "".join(b.text for b in content if hasattr(b, "text"))
-        data = _json.loads(str(content).strip())
+        raw = str(content).strip()
+        # 多策略 JSON 解析（兼容 qwen3.5-9b 的各种输出格式）
+        data = None
+        strategies = [
+            ("direct", lambda s: _json.loads(s)),
+            ("no_md",   lambda s: _json.loads(
+                _re.sub(r'```(?:json)?\s*\n?', '', s).replace('```', '').strip())),
+            ("greedy",  lambda s: _json.loads(
+                (_re.search(r'\{[\s\S]*\}', s) or _re.search(r'\[[\s\S]*\]', s)).group(0)
+                if (_re.search(r'\{[\s\S]*\}', s) or _re.search(r'\[[\s\S]*\]', s)) else "")),
+            ("balanced", lambda s: _json.loads(
+                _extract_balanced(s, '{', '}') or s)),
+        ]
+        for name, parser in strategies:
+            try:
+                data = parser(raw)
+                if isinstance(data, dict):
+                    break
+            except Exception:
+                continue
         if not isinstance(data, dict):
-            raise ValueError(f"Expected dict, got {type(data)}")
+            raise ValueError(f"All strategies failed for: {raw[:200]}")
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
