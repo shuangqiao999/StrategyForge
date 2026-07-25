@@ -198,6 +198,7 @@ async def build_registry(
     ontology: Any = None,
     source_material: str = "",
     domain: str = "",
+    log_fn: Any = None,
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
 
@@ -249,8 +250,10 @@ async def build_registry(
                     threshold_factor = int(tweak.get("threshold_factor", 50)) or 50
                     extra_keep = set(tweak.get("extra_keep_words", []))
                     extra_discard = set(tweak.get("extra_discard_words", []))
-                    logger.info("[EntityRegistry] 领域 %s 配置已应用 (threshold=%d, keep=%d, discard=%d)",
+                    logger.info("[EntityRegistry] 领域 %s 配置已加载 (threshold=%d, keep=%d, discard=%d)",
                                 domain, threshold_factor, len(extra_keep), len(extra_discard))
+                    if log_fn:
+                        log_fn("agents", f"领域 {domain} 注册配置已加载 (阈值因子={threshold_factor}, 保留词={len(extra_keep)}, 排除词={len(extra_discard)})")
             except (_json.JSONDecodeError, ValueError, TypeError):
                 pass
 
@@ -372,7 +375,7 @@ async def build_registry(
     # 5. LLM 审核：代码规则定基线后，LLM 审核边缘实体
     from strategy_forge.core.config import config as _cfg
     if _cfg.deduction_llm_review and source_material:
-        await _llm_review_borderline(registry, deduped, source_material, freq_map, cov_map)
+        await _llm_review_borderline(registry, deduped, source_material, freq_map, cov_map, log_fn)
 
     return registry
 
@@ -383,6 +386,7 @@ async def _llm_review_borderline(
     source: str,
     freq_map: dict[str, int],
     cov_map: dict[str, int],
+    log_fn: Any = None,
 ) -> None:
     """LLM 审核边缘实体：代码规则定基线后，LLM 只看结构化错误。
 
@@ -438,6 +442,10 @@ async def _llm_review_borderline(
     if not review:
         return
 
+    logger.info("[EntityRegistry] LLM 审核启动: %d 个边缘实体待审核", len(review))
+    if log_fn:
+        log_fn("agents", f"LLM 审核: {len(review)} 个边缘实体待审核")
+
     prompt_parts = ["你是实体分类审核员。检查以下实体是否被代码规则误分类。"]
     prompt_parts.append("## 种子材料（文本采样）")
     prompt_parts.append(source[:2000])
@@ -476,7 +484,10 @@ async def _llm_review_borderline(
             content = "".join(b.text for b in content if hasattr(b, "text"))
         data = _json.loads(str(content).strip())
         if isinstance(data, dict) and "overrides" in data:
-            for ov in data["overrides"]:
+            overrides = data["overrides"]
+            kept_to_discard = 0
+            discard_to_keep = 0
+            for ov in overrides:
                 name = ov.get("name", "").strip()
                 reason = ov.get("reason", "")[:80]
                 new_decision = ov.get("decision", "").strip().upper()
@@ -492,10 +503,17 @@ async def _llm_review_borderline(
                     if old == "KEEP":
                         registry.kept -= 1
                         registry.discarded += 1
+                        kept_to_discard += 1
                         registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
                     else:
                         registry.kept += 1
                         registry.discarded -= 1
+                        discard_to_keep += 1
+            if overrides:
+                logger.info("[EntityRegistry] LLM 审核完成: %d 条改写 (KEEP→DISCARD:%d, DISCARD→KEEP:%d)",
+                            len(overrides), kept_to_discard, discard_to_keep)
+                if log_fn:
+                    log_fn("agents", f"LLM 审核: {len(overrides)} 条改写 (排除:{kept_to_discard} 恢复:{discard_to_keep})")
     except Exception as e:
         logger.warning("[EntityRegistry] LLM 审核失败，维持代码规则判定: %s", e)
 
