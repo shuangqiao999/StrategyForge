@@ -96,7 +96,9 @@ async def build_graph(
     else:
         # ── 回退模式: 全量语义分块 (无预处理器时) ──
         from strategy_forge.core.chunker import TextChunker
-        chunker = TextChunker(strategy="paragraph", max_chunk_size=1536)
+        from strategy_forge.core.config import config as _cfg
+        _cs = max(256, _cfg.deduction_chunk_size)
+        chunker = TextChunker(strategy="paragraph", max_chunk_size=_cs)
         chunks = [c.content for c in chunker.chunk(source)]
         log_fn("graph", f"回退模式: {len(chunks)} 个语义块")
         await _extract_from_chunks(

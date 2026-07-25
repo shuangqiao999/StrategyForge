@@ -423,10 +423,12 @@ class DeductionPreprocessor:
 
     async def preprocess(self, source: str) -> PreprocessResult:
         from strategy_forge.core.chunker import TextChunker
+        from strategy_forge.core.config import config as _cfg
         from strategy_forge.core.tokenizer import extract_named_entities
 
         # 1. semantic chunking
-        chunker = TextChunker(strategy="paragraph", max_chunk_size=1536)
+        _cs = max(256, _cfg.deduction_chunk_size)
+        chunker = TextChunker(strategy="paragraph", max_chunk_size=_cs)
         chunks = chunker.chunk(source, file_type=".txt")
         chunk_texts = [c.content for c in chunks]
         logger.info("[Preprocessor] Chunked into %d semantic chunks", len(chunks))

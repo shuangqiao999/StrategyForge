@@ -93,6 +93,7 @@ class DeductionConfig:
         self.deduction_recall_rel_max = int(os.getenv("FORGE_RECALL_REL_MAX", "4"))
         # LLM 审核开关：代码规则定基线后，LLM 审核边缘实体（默认启用）
         self.deduction_llm_review = os.getenv("FORGE_LLM_REVIEW", "1") == "1"
+        self.deduction_chunk_size = int(os.getenv("FORGE_CHUNK_SIZE", "1000"))
 
     def __getattr__(self, name: str):
         raise AttributeError(
