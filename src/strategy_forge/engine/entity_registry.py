@@ -45,6 +45,25 @@ _KNOWN_DYADS = frozenset({
     "印巴", "美俄", "俄美", "朝美", "美朝", "日菲",
 })
 
+_GEO_REGIONS = frozenset({
+    "非洲", "亚洲", "欧洲", "美洲", "北美洲", "南美洲",
+    "大洋洲", "拉丁美洲", "中东", "东南亚", "南亚", "东亚",
+    "中亚", "西亚", "东欧", "西欧", "北欧", "南欧", "中欧",
+    "撒哈拉以南非洲", "印太地区", "亚太地区",
+})
+
+_ORG_MEMBERS: dict[str, frozenset[str]] = {
+    "欧盟": frozenset({"法国", "德国", "意大利", "荷兰", "比利时", "西班牙"}),
+    "北约": frozenset({"美国", "英国", "法国", "德国", "意大利", "加拿大"}),
+    "G7":   frozenset({"美国", "日本", "德国", "英国", "法国", "意大利", "加拿大"}),
+}
+
+_PERSON_COUNTRY: dict[str, str] = {
+    "特朗普": "美国", "拜登": "美国", "习近平": "中国",
+    "普京": "俄罗斯", "泽连斯基": "乌克兰", "内塔尼亚胡": "以色列",
+    "马克龙": "法国",
+}
+
 
 def _is_dyad(name: str) -> bool:
     for sep in ("与", "和", "及", "对", "vs", "vs.", "/", "-", "—",
@@ -245,6 +264,8 @@ async def build_registry(
             discard_reason = "军队编制"
         elif any(w in pname for w in _DEPT_WORDS):
             discard_reason = "政府部门"
+        elif pname in _GEO_REGIONS:
+            discard_reason = "地理区域(非决策主体)"
 
         intel = intel_map.get(pname, {})
         entity = RegisteredEntity(
@@ -270,6 +291,9 @@ async def build_registry(
         await _llm_classify(registry, hard_kept, source_material, domain, log_fn)
     else:
         _fallback_classify(registry, hard_kept, log_fn)
+
+    # 6. 实体层次修正（组织-成员国、人物-国家重叠检测）
+    _resolve_entity_hierarchy(registry, log_fn)
 
     return registry
 
@@ -297,30 +321,75 @@ async def _llm_classify(
         p = f" (上级: {e.parent})" if e.parent else ""
         prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
     prompt_parts.append("""
-## 判定标准
-具有独立战略决策权：
-- 在种子材料中作为独立行动者出现（有独立立场、独立行为、影响格局）
-- 包括但不限于：主权国家、国际组织、跨国企业（尤其是受制裁/管制/竞争的科技企业）、
-  核心政治人物、军事联盟、行业联盟、大型集团
-- 频次仅作参考——低频但关键行动（如被制裁、发动攻击、签署协议）的实体应保留
+## 分类方法论：三步检验法（按序应用）
+对每个待分类实体，依次用以下三步检验。任何一步失败则 DISCARD，三步全通过则 KEEP。
 
-不具有独立战略决策权：
-- 地理概念、纯下属部门、军队编制、职务头衔、泛指集合概念
-- 纯经济指标、纯技术标准、纯贸易机制（如RCEP是框架而非博弈者）
-- 仅在文本中作为背景提及、无独立行为的实体
+### 检验一：归属检验 — 该实体的决策权来源于自身，还是另一个实体？
+- 主权国家的决策权来源于自身主权 → 通过。
+- 政治人物的决策权来源于其所代表的国家/政府 → 不通过，应归入该国。
+- 跨国企业 CEO 的决策权来源于企业 → 若企业已保留则 CEO 不通过。
+- 政府部门的决策权来源于国家 → 不通过。
+- 军队编制的行动权来源于国家 → 不通过。
+- 关键判据：如果上级实体消失，该实体是否还能独立做出同样的决策？
 
-## 正确示例（通用——适配所有领域和种子材料）
-  [某企业] freq=2 type=科技企业 → KEEP（被列入实体清单/受制裁，是博弈锚点而非背景板）
-  [某国家] freq=2 type=国家 → KEEP（在全文中是核心冲突方，虽频次低但以其他名称反复出现）
-  [某地点] freq=5 type=地点 → DISCARD（纯地理概念，无独立决策行为）
-  [某指标] freq=4 type=经济指标 → DISCARD（统计数据，非博弈实体）
-  [某论坛] freq=3 type=国际组织 → DISCARD（协调平台，非独立决策者）
+### 检验二：双重代表检验 — 保留该实体是否会造成"同一决策力量被重复计算"？
+- 如果"法国"已保留，再保留"欧盟"等于法国的外交/经济决策权被算两次 → 不通过。
+- 如果"美国"已保留，再保留"北约"等于美国的军事决策权被算两次 → 不通过。
+- 关键判据：该实体做的决策，是否必须通过另一个实体（的投票/军队/资金）才能生效？若是，则决策权实质上属于后者。
+- 例外：如果该组织内的主要成员国大多未被保留，且该组织有独立行动记录 → 可通过。
 
-## 输出 JSON
-{"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "≤20字理由"}}
-如果实体名未出现在 keep 或 discard 中，默认 discard。
+### 检验三：残留行动检验 — 该实体在种子材料中是否做出了具体的、独立的战略行动？
+- "签署协议""发动攻击""实施制裁""被列入管制清单"是战略行动 → 通过。
+- "作为背景被提及""统计数据""地理位置描述"不是战略行动 → 不通过。
+- 大洲、地理区域永远无法"做出行动" → 不通过。
+- 关键判据：能否为这个实体写出一个"X 做了 Y，影响了 Z"的句子？如果不能，它就不是决策者。
+- 注意：频次低但行动关键（如1次被制裁）远强于频次高但无行动（如10次背景提及）。
 
-只输出 JSON。""")
+## 正例（三步全通过，应当 KEEP）
+  例1: [华为] type=科技企业 freq=3
+      → 检验一：企业自主决策 ✓
+      → 检验二：不与任何国家重叠 ✓
+      → 检验三：被列入实体清单/受制裁 ✓
+      → KEEP（独立企业，被制裁锚点）
+
+  例2: [乌克兰] type=国家 freq=5
+      → 检验一：主权国家 ✓
+      → 检验二：不与任何已保留实体重叠 ✓
+      → 检验三：发动攻击/签署协议/接受军援 ✓
+      → KEEP（独立主权决策者）
+
+  例3: [OPEC] type=国际组织 freq=2
+      → 检验一：组织有独立决策机制 ✓
+      → 检验二：核心成员国并未全部单独列出，不形成重复 ✓
+      → 检验三：做出产量决策，直接影响油价 ✓
+      → KEEP（有独立行动权的国际组织）
+
+## 反例（某一步失败，应当 DISCARD）
+  例1: [特朗普] type=人物 freq=6  — 假设"美国"已在待保留列表中
+      → 检验一失败：决策权来源于美国，不是独立主权体
+      → 检验二失败：与美国形成双重代表
+      → DISCARD（政治人物，归入其所属国家）
+
+  例2: [非洲] type=地理区域 freq=4
+      → 检验三失败：不能做决策的地理概念，从未"签署"或"发动"任何行动
+      → DISCARD（地理背景，非决策主体）
+
+  例3: [G7] type=国际组织 freq=3  — 假设"美国""日本""法国"已在待保留列表中
+      → 检验二失败：核心成员国美国/日本/法国均已独立保留，G7 无超出成员国的独立执行能力
+      → 检验三可能失败：G7 的决议需要成员国各自落地执行
+      → DISCARD（协调平台，决策权归于成员国）
+
+## 边界案例（需结合种子材料判断）
+  例4: [马斯克] type=人物 freq=3
+      → 检验一：若他以 SpaceX CEO 身份独立行动，决策权来自企业自身 → 可能通过
+      → 检验二：若 SpaceX 也在列表中 → 不通过；若不在 → 可能通过
+      → 检验三：若他绕过政府管制独立决策 → 通过；若仅为政府顾问 → 不通过
+      → 结论：取决于种子材料中该人物是否展现出超越国家的独立行动。
+
+## 输出格式
+严格输出 JSON，reasons 为 ≤20 字简述：
+{"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "简述原因"}}
+未出现在 keep 或 discard 中的实体默认视为 discard。只输出 JSON。""")
 
     prompt = "\n".join(prompt_parts)
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
@@ -397,7 +466,7 @@ def _fallback_classify(
             e.decision = "KEEP"
             e.reason = f"兜底(人物≥{t})"
             registry.kept += 1
-        elif e.type in ("Country", "国家", "国际组织") and e.freq >= 1:
+        elif e.type in ("Country", "国家") and e.freq >= 1:
             e.decision = "KEEP"
             e.reason = "兜底(国家≥1)"
             registry.kept += 1
@@ -412,6 +481,36 @@ def _fallback_classify(
             registry.discard_reasons["兜底排除"] = registry.discard_reasons.get("兜底排除", 0) + 1
     if log_fn:
         log_fn("agents", f"兜底规则: {registry.kept} 保留")
+
+
+def _resolve_entity_hierarchy(registry: EntityRegistry, log_fn: Any = None) -> None:
+    """LLM 分类后修正：检测组织-成员国 / 人物-国家重叠，降级冗余实体。"""
+    kept_entities = registry.get_kept()
+    kept_names = {e.name for e in kept_entities}
+
+    to_discard: list[RegisteredEntity] = []
+
+    for e in kept_entities:
+        if e.name in _ORG_MEMBERS:
+            core = _ORG_MEMBERS[e.name]
+            overlap = core & kept_names
+            if overlap:
+                to_discard.append((e, f"组织(成员国重叠:{','.join(sorted(overlap)[:3])})"))
+        elif e.name in _PERSON_COUNTRY:
+            country = _PERSON_COUNTRY[e.name]
+            if country in kept_names:
+                to_discard.append((e, f"人物(归入{country})"))
+
+    for e, reason in to_discard:
+        e.decision = "DISCARD"
+        e.reason = reason
+        registry.kept -= 1
+        registry.discarded += 1
+
+    if to_discard and log_fn:
+        log_fn("agents", f"实体层次修正: {len(to_discard)} 个重叠实体降级")
+    if to_discard:
+        logger.info("[EntityRegistry] 层次修正: %d 个重叠实体降级", len(to_discard))
 
 
 # ── 调试入口 ──

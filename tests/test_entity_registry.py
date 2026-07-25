@@ -33,9 +33,10 @@ from strategy_forge.storage.session_store import SessionStore
 SOURCE = r"E:\gongxiang\软件\资本论\大国博弈.txt"
 
 REQUIRED_KEEP = ["中国", "美国", "俄罗斯", "伊朗", "以色列"]
-SHOULD_KEEP = ["日本", "法国", "菲律宾", "乌克兰", "特朗普", "普京", "吕特"]
+SHOULD_KEEP = ["日本", "法国", "菲律宾", "乌克兰", "吕特"]
+EXPECT_DISCARD_BY_OVERLAP = ["特朗普", "普京"]  # 所属国家已在列表中，层次修正后应降级
 MUST_DISCARD = ["中美关系", "俄乌冲突", "俄乌", "乌军", "俄军"]
-SHOULD_DISCARD = ["国防部", "总统", "太平洋舰队", "西方阵营"]
+SHOULD_DISCARD = ["国防部", "总统", "太平洋舰队", "西方阵营", "非洲"]
 
 
 def test_code_rules_offline():
@@ -58,11 +59,14 @@ def test_code_rules_offline():
         ("财政部", "Organization", "政府部门"),
         ("白宫", "Organization", "政府部门"),
         ("西方阵营", "Other", "集合概念"),
+        ("非洲", "地理区域", "地理区域(非决策主体)"),
+        ("中东", "地区", "地理区域(非决策主体)"),
+        ("欧洲", "国家", "地理区域(非决策主体)"),
     ]
 
     from strategy_forge.engine.entity_registry import (
         _DISCARD_TYPES, _TITLE_SUFFIX, _MILITARY_SUFFIX,
-        _DEPT_WORDS, _COLLECTIVE_SUFFIX,
+        _DEPT_WORDS, _COLLECTIVE_SUFFIX, _GEO_REGIONS,
     )
 
     passed = 0
@@ -74,6 +78,7 @@ def test_code_rules_offline():
         elif any(name.endswith(s) for s in _COLLECTIVE_SUFFIX): reason = "集合概念"
         elif any(name.endswith(s) for s in _MILITARY_SUFFIX): reason = "军队编制"
         elif any(w in name for w in _DEPT_WORDS): reason = "政府部门"
+        elif name in _GEO_REGIONS: reason = "地理区域(非决策主体)"
 
         if reason == expected:
             passed += 1
