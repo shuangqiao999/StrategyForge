@@ -141,12 +141,19 @@ def _is_dyad(name: str) -> bool:
 
 def _classify_one(name: str, etype: str, freq: int, total: int,
                   person_types: frozenset | None = None,
-                  org_types: frozenset | None = None) -> tuple[bool, str]:
+                  org_types: frozenset | None = None,
+                  extra_keep: frozenset | None = None,
+                  extra_discard: frozenset | None = None,
+                  threshold_factor: int = 50) -> tuple[bool, str]:
     """确定性实体分类：返回 (include_in_simulation, reason)。"""
     if person_types is None:
         person_types = _PERSON_TYPES
     if org_types is None:
         org_types = _ORG_TYPES
+    if extra_keep is None:
+        extra_keep = frozenset()
+    if extra_discard is None:
+        extra_discard = frozenset()
     # 1. 排除规则（按优先级）
     if etype in _DISCARD_TYPES:
         return False, "类型排除"
@@ -161,8 +168,15 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
     if any(name.endswith(s) for s in _COLLECTIVE_SUFFIX):
         return False, "集合概念"
 
-    # 2. 自适应阈值
-    threshold = max(1, total // 50)
+    # 领域专属排除词
+    if any(kw in name for kw in extra_discard):
+        return False, "领域排除"
+    # 领域专属保留词（>0 频次即保留）
+    if freq >= 1 and any(kw in name for kw in extra_keep):
+        return True, "领域保留词"
+
+    # 2. 自适应阈值（领域可配置因子）
+    threshold = max(1, total // threshold_factor)
 
     # 3. 保留规则
     if etype in person_types and freq >= threshold:
@@ -183,6 +197,7 @@ async def build_registry(
     intel_list: list[dict] | None = None,
     ontology: Any = None,
     source_material: str = "",
+    domain: str = "",
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
 
@@ -218,6 +233,26 @@ async def build_registry(
                 dynamic_org.add(tn)
     person_types = frozenset(dynamic_person)
     org_types = frozenset(dynamic_org)
+
+    # ── 领域配置：读取 domain_prompts.json 的 registry_tweak 字段 ──
+    threshold_factor = 50
+    extra_keep = set()
+    extra_discard = set()
+    if domain:
+        from strategy_forge.core.rule_templates import get_domain_prompt
+        import json as _json
+        raw_tweak = get_domain_prompt(domain, "registry_tweak")
+        if raw_tweak:
+            try:
+                tweak = _json.loads(raw_tweak) if isinstance(raw_tweak, str) else raw_tweak
+                if isinstance(tweak, dict):
+                    threshold_factor = int(tweak.get("threshold_factor", 50)) or 50
+                    extra_keep = set(tweak.get("extra_keep_words", []))
+                    extra_discard = set(tweak.get("extra_discard_words", []))
+                    logger.info("[EntityRegistry] 领域 %s 配置已应用 (threshold=%d, keep=%d, discard=%d)",
+                                domain, threshold_factor, len(extra_keep), len(extra_discard))
+            except (_json.JSONDecodeError, ValueError, TypeError):
+                pass
 
     # 1. 从 Kuzu 读取所有实体
     result = graph._conn.execute(
@@ -311,7 +346,9 @@ async def build_registry(
         cv = cov_map.get(pname, 0)
 
         keep, reason = _classify_one(pname, ptype, fm, registry.total,
-                                        person_types, org_types)
+                                        person_types, org_types,
+                                        frozenset(extra_keep), frozenset(extra_discard),
+                                        threshold_factor)
 
         intel = intel_map.get(pname, {})
         entity = RegisteredEntity(
