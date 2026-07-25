@@ -364,9 +364,9 @@ async def _llm_classify(
         if log_fn:
             log_fn("agents", f"LLM 全量分类: {registry.kept} 保留 / {registry.discarded} 排除")
     except Exception as e:
-        logger.warning("[EntityRegistry] LLM 分类失败 (%s): %s", type(e).__name__, str(e)[:200])
+        logger.warning("[EntityRegistry] LLM 分类失败 (%s): %s", type(e).__name__, str(e))
         if log_fn:
-            log_fn("agents", f"LLM 分类失败({type(e).__name__})，回退规则兜底
+            log_fn("agents", f"LLM 分类失败({type(e).__name__})，回退规则兜底")
         _fallback_classify(registry, pending, log_fn)
 
 
