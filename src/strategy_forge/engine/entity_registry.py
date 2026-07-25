@@ -309,6 +309,13 @@ async def _llm_classify(
 - 纯经济指标、纯技术标准、纯贸易机制（如RCEP是框架而非博弈者）
 - 仅在文本中作为背景提及、无独立行为的实体
 
+## 正确示例
+  DeepSeek freq=2 type=科技企业 → KEEP（被美国列入实体清单，是科技战核心锚点）
+  长鑫存储 freq=2 type=科技企业 → KEEP（被制裁的芯片企业，地缘博弈关键方）
+  俄罗斯 freq=2 type=国家 → KEEP（俄乌冲突核心方，文中以"俄军""普京"等指代）
+  哈尔科夫 freq=3 type=地点 → DISCARD（地理概念，非独立决策者）
+  OECD freq=3 type=国际组织 → DISCARD（经济指标发布者，非地缘博弈方）
+
 ## 输出 JSON
 {"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "≤20字理由"}}
 如果实体名未出现在 keep 或 discard 中，默认 discard。
