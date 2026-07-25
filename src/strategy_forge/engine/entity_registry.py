@@ -343,7 +343,7 @@ async def _llm_classify(
             except Exception:
                 continue
         if not isinstance(data, dict):
-            raise ValueError(f"All strategies failed for: {raw[:200]}")
+            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}): {raw[:300]}")
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
@@ -364,9 +364,9 @@ async def _llm_classify(
         if log_fn:
             log_fn("agents", f"LLM 全量分类: {registry.kept} 保留 / {registry.discarded} 排除")
     except Exception as e:
-        logger.warning("[EntityRegistry] LLM 分类失败，回退 fallback: %s", e)
+        logger.warning("[EntityRegistry] LLM 分类失败 (%s): %s", type(e).__name__, str(e)[:200])
         if log_fn:
-            log_fn("agents", f"LLM 分类失败，回退规则兜底")
+            log_fn("agents", f"LLM 分类失败({type(e).__name__})，回退规则兜底
         _fallback_classify(registry, pending, log_fn)
 
 
