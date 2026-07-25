@@ -143,6 +143,7 @@ def _is_dyad(name: str) -> bool:
 def _classify_one(name: str, etype: str, freq: int, total: int,
                   person_types: frozenset | None = None,
                   org_types: frozenset | None = None,
+                  country_types: frozenset | None = None,
                   extra_keep: frozenset | None = None,
                   extra_discard: frozenset | None = None,
                   threshold_factor: int = 50) -> tuple[bool, str]:
@@ -151,6 +152,8 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
         person_types = _PERSON_TYPES
     if org_types is None:
         org_types = _ORG_TYPES
+    if country_types is None:
+        country_types = _COUNTRY_TYPES
     if extra_keep is None:
         extra_keep = frozenset()
     if extra_discard is None:
@@ -185,7 +188,7 @@ def _classify_one(name: str, etype: str, freq: int, total: int,
     # 4. 保留规则
     if etype in person_types and freq >= threshold:
         return True, f"角色-{etype}(freq≥{threshold})"
-    if etype in _COUNTRY_TYPES and freq >= threshold:
+    if etype in country_types and freq >= threshold:
         return True, f"国家-{etype}(freq≥{threshold})"
     if etype in org_types and freq >= threshold * 2:
         return True, f"组织-{etype}(freq≥{threshold*2})"
@@ -218,28 +221,32 @@ async def build_registry(
     # ── 动态类型推断：从 ontology 中自动识别"人物类"和"组织类"实体类型 ──
     dynamic_person: set[str] = set(_PERSON_TYPES)
     dynamic_org: set[str] = set(_ORG_TYPES)
+    dynamic_country: set[str] = set(_COUNTRY_TYPES)
     if ontology is not None:
         for et in getattr(ontology, "entities", []) or []:
             tn = (getattr(et, "name", "") or "").strip()
-            if not tn or tn in dynamic_person or tn in dynamic_org:
+            if not tn or tn in dynamic_person or tn in dynamic_org or tn in dynamic_country:
                 continue
             # 关键词推断："人物/人/角色/Person/Actor"→person
             if any(kw in tn for kw in ("人物", "人", "角色", "Person", "Actor",
                                          "Player", "Individual")):
                 dynamic_person.add(tn)
-            # 关键词推断："国家/组织/企业/政党/公司/机构/Country/Org/Party/Company"
-            elif any(kw in tn for kw in ("国家", "组织", "企业", "政党", "公司",
-                                           "机构", "集团", "Country", "Org",
+            # 关键词推断："国家/Country"→country（单倍阈值，同人物）
+            elif any(kw in tn for kw in ("国家", "国家", "Country")):
+                dynamic_country.add(tn)
+            # 关键词推断："组织/企业/政党/公司/机构/Org/Party/Company"→org（双倍阈值）
+            elif any(kw in tn for kw in ("组织", "企业", "政党", "公司",
+                                           "机构", "集团", "Org",
                                            "Party", "Company", "Union")):
                 dynamic_org.add(tn)
             elif any(kw in tn for kw in ("Location", "Document", "Event", "Concept",
                                            "Date", "Time", "Facility")):
-                pass  # 不加入任何博弈类型
+                pass
             else:
-                # 未知类型：如果 entity 中该类型实体的平均频次较高 → 视为 org
                 dynamic_org.add(tn)
     person_types = frozenset(dynamic_person)
     org_types = frozenset(dynamic_org)
+    country_types = frozenset(dynamic_country)
 
     # ── 领域配置：读取 domain_prompts.json 的 registry_tweak 字段 ──
     threshold_factor = 50
@@ -355,7 +362,7 @@ async def build_registry(
         cv = cov_map.get(pname, 0)
 
         keep, reason = _classify_one(pname, ptype, fm, registry.total,
-                                        person_types, org_types,
+                                        person_types, org_types, country_types,
                                         frozenset(extra_keep), frozenset(extra_discard),
                                         threshold_factor)
 
@@ -534,47 +541,47 @@ async def _llm_merge_and_supplement(
     freq_map: dict[str, int],
     log_fn: Any = None,
 ) -> None:
-    """LLM 合并审核：父子合并 + 从 DISCARD 中补充遗漏的核心博弈方。
+    """LLM 合并审核：父子合并 + KEEP复核 + 从 DISCARD 中补充遗漏的核心博弈方。
 
-    只看 KEEP 列表，做两件事：
+    做三件事：
     1. 父子合并：子实体的 parent 也在 KEEP 中 → 将子合并入父
-    2. 缺漏补充：从 DISCARD 列表中找出被代码规则遗漏的核心博弈方
+    2. KEEP 复核：全量 KEEP 列表中是否存在代码规则误判的无效博弈者
+    3. 缺漏补充：从 DISCARD 列表中找出被代码规则遗漏的核心博弈方
     """
     kept = registry.get_kept()
     discarded = [e for e in registry.entities.values() if e.decision == "DISCARD"]
     if len(kept) < 2:
         return
 
-    prompt_parts = ["你是实体合并审核员。当前有代码规则筛选出的博弈实体列表。"]
+    prompt_parts = ["你是实体治理审核员。检查代码规则筛选出的博弈实体是否合理。"]
     prompt_parts.append("## 种子材料采样")
-    prompt_parts.append(source[:2500])
+    prompt_parts.append(source[:3000])
 
-    prompt_parts.append("\n## 当前博弈实体 (KEEP)")
-    for e in kept[:20]:
+    prompt_parts.append("\n## 当前博弈实体 (KEEP) — 请逐条复核是否有误判")
+    for e in kept[:25]:
         p = e.parent or "无"
-        prompt_parts.append(f"  {e.name}  type={e.type}  freq={e.freq}  parent={p}")
+        prompt_parts.append(f"  {e.name}  type={e.type}  freq={e.freq}  parent={p}  理由={e.reason}")
 
-    # 找高频 DISCARD 实体（可能是被代码规则误排除的）
+    # 找所有 DISCARD 实体（不限于高频——LLM 可以从全文判断重要性）
     high_freq_discard = sorted(
-        [e for e in discarded if e.freq >= 2],
-        key=lambda e: -e.freq)[:10]
+        [e for e in discarded if e.freq >= 1],
+        key=lambda e: -e.freq)[:15]
     if high_freq_discard:
-        prompt_parts.append("\n## 被排除的高频实体 (DISCARD)")
+        prompt_parts.append("\n## 被排除的实体 (DISCARD) — 是否存在被代码规则错误排除的博弈方？")
         for e in high_freq_discard:
             prompt_parts.append(f"  {e.name}  type={e.type}  freq={e.freq}  排除理由={e.reason}")
 
     prompt_parts.append("""
 ## 任务
-1. 父子合并：如果实体 parent 是上述某个 KEEP 实体 → 把子实体合并入父实体（如 "特朗普 parent=美国" → 合并，"乌军 parent=乌克兰" → 合并）
-2. 缺漏补充：从 DISCARD 高频列表中，找出被错误排除的核心博弈方（如 "俄罗斯" 全文多次出现但不在 KEEP → 应补充）
-3. 维持代码规则的判定——只做明确的合并和补充，不做模糊判断
+1. 父子合并：如果实体 parent 是上述某个 KEEP 实体 → 把子实体合并入父实体
+2. KEEP 复核：KEEP 列表中是否存在应排除的（如"台海"是地理概念、"顿涅茨克"是地点、"欧洲"是泛指区域）→ 将其降级
+3. 缺漏补充：从 DISCARD 列表中，找出被错误排除的核心博弈方（如"俄罗斯"全文多次出现但不在 KEEP → 应恢复）
 
 ## 输出 JSON
-{"merge_into_parent": ["要合并的子实体名", ...],
- "supplement_from_discard": ["要恢复的实体名", ...],
- "supplement_reason": {"实体名": "≤20字理由"}}
-
-如果无需合并和补充，输出 {"merge_into_parent": [], "supplement_from_discard": []}
+{"merge_into_parent": ["要合并的子实体名"],
+ "demote_from_keep": ["要从KEEP降级的实体名"],
+ "supplement_from_discard": ["要恢复的实体名"],
+ "reasons": {"实体名": "≤20字理由"}}
 
 只输出 JSON。""")
     prompt = "\n".join(prompt_parts)
@@ -599,6 +606,7 @@ async def _llm_merge_and_supplement(
 
         # 处理父子合并
         merged = 0
+        reasons = data.get("reasons", {}) or {}
         for name in data.get("merge_into_parent", []):
             name = str(name).strip()
             if not name:
@@ -619,9 +627,24 @@ async def _llm_merge_and_supplement(
             registry.discarded += 1
             merged += 1
 
+        # 处理 KEEP 复核降级
+        demoted = 0
+        for name in data.get("demote_from_keep", []):
+            name = str(name).strip()
+            if not name:
+                continue
+            e = registry.find(name)
+            if e is None or e.decision != "KEEP":
+                continue
+            reason = str(reasons.get(name, "LLM复核降级"))[:40]
+            e.decision = "DISCARD"
+            e.reason = f"LLM复核({reason})"
+            registry.kept -= 1
+            registry.discarded += 1
+            demoted += 1
+
         # 处理缺漏补充
         supplemented = 0
-        reasons = data.get("supplement_reason", {}) or {}
         for name in data.get("supplement_from_discard", []):
             name = str(name).strip()
             if not name:
@@ -629,19 +652,25 @@ async def _llm_merge_and_supplement(
             e = registry.find(name)
             if e is None or e.decision != "DISCARD":
                 continue
-            reason = str(reasons.get(name, "LLM补充"))
+            reason = str(reasons.get(name, "LLM补充"))[:40]
             e.decision = "KEEP"
-            e.reason = f"LLM补充({reason[:30]})"
+            e.reason = f"LLM补充({reason})"
             registry.kept += 1
             registry.discarded -= 1
             supplemented += 1
 
-        if merged or supplemented:
-            logger.info("[EntityRegistry] LLM 合并审核: 合并%d 补充%d", merged, supplemented)
+        if merged or demoted or supplemented:
+            logger.info("[EntityRegistry] LLM 合并审核: 合并%d 降级%d 补充%d", merged, demoted, supplemented)
             if log_fn:
-                log_fn("agents", f"LLM 合并审核: 合并{merged}个(父子合并) + 补充{supplemented}个(遗漏恢复)")
+                parts = []
+                if merged: parts.append(f"合并{merged}个")
+                if demoted: parts.append(f"降级{demoted}个")
+                if supplemented: parts.append(f"补充{supplemented}个")
+                log_fn("agents", f"LLM 合并审核: {', '.join(parts)}")
     except Exception as e:
         logger.warning("[EntityRegistry] LLM 合并审核失败: %s", e)
+        if log_fn:
+            log_fn("agents", f"LLM 合并审核失败（维持代码规则判定）")
 
 
 # ── 调试入口 ──
