@@ -141,6 +141,7 @@ async def build_registry(
     preprocessor: Any = None,
     intel_list: list[dict] | None = None,
     source_material: str = "",
+    domain: str = "",
     log_fn: Any = None,
 ) -> EntityRegistry:
     """从 Kuzu 图谱构建实体注册表。
@@ -266,7 +267,7 @@ async def build_registry(
     # 5. LLM 单次全量分类
     from strategy_forge.core.config import config as _cfg
     if _cfg.deduction_llm_review and source_material:
-        await _llm_classify(registry, hard_kept, source_material, log_fn)
+        await _llm_classify(registry, hard_kept, source_material, domain, log_fn)
     else:
         _fallback_classify(registry, hard_kept, log_fn)
 
@@ -277,11 +278,18 @@ async def _llm_classify(
     registry: EntityRegistry,
     pending: list[RegisteredEntity],
     source: str,
+    domain: str,
     log_fn: Any = None,
 ) -> None:
     """LLM 单次调用：对所有非硬排除实体做 KEEP/DISCARD 分类。"""
 
     prompt_parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
+    # 注入领域特定规则
+    if domain:
+        from strategy_forge.core.rule_templates import get_domain_prompt
+        dr = get_domain_prompt(domain, "intel_extra_rules")
+        if dr:
+            prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
     prompt_parts.append("## 种子材料采样")
     prompt_parts.append(source[:3000])
     prompt_parts.append("\n## 待分类实体")

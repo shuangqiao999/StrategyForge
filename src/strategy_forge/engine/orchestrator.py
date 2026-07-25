@@ -246,6 +246,7 @@ class DeductionOrchestrator:
                     preprocessor=getattr(self, "_preprocessor", None),
                     intel_list=getattr(self, "_intel_list", None) or None,
                     source_material=self.session.source_material,
+                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
                     log_fn=self._log,
                 )
                 agents = await create_agents_from_graph(
@@ -504,6 +505,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             intel_list=getattr(self, "_intel_list", None) or None,
             source_material=self.session.source_material,
+            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
             log_fn=self._log,
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
