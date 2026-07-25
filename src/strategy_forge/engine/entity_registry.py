@@ -239,12 +239,12 @@ async def build_registry(
             discard_reason = "二元关系词"
         elif any(pname.endswith(s) for s in _TITLE_SUFFIX):
             discard_reason = "职务头衔"
+        elif any(pname.endswith(s) for s in _COLLECTIVE_SUFFIX):
+            discard_reason = "集合概念"
         elif any(pname.endswith(s) for s in _MILITARY_SUFFIX):
             discard_reason = "军队编制"
         elif any(w in pname for w in _DEPT_WORDS):
             discard_reason = "政府部门"
-        elif any(pname.endswith(s) for s in _COLLECTIVE_SUFFIX):
-            discard_reason = "集合概念"
 
         intel = intel_map.get(pname, {})
         entity = RegisteredEntity(
