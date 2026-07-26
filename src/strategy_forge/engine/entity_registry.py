@@ -293,88 +293,11 @@ async def build_registry(
     # 5. LLM 单次全量分类
     from strategy_forge.core.config import config as _cfg
     if _cfg.deduction_llm_review and source_material:
-        await _llm_classify(registry, hard_kept, source_material, domain, log_fn, preprocessor)
+        await _llm_classify(registry, hard_kept, source_material, domain, log_fn)
     else:
         _fallback_classify(registry, hard_kept, log_fn)
 
-    # 6. 实体层次修正（组织-成员国、人物-国家重叠检测）
-    _resolve_entity_hierarchy(registry, log_fn)
-
     return registry
-
-
-# ── LLM 分类提示词（共享方法论，所有批次复用）──
-_METHODOLOGY_PROMPT = """
-## 分类方法论：三步检验法（按序应用）
-对每个待分类实体，依次用以下三步检验。任何一步失败则 DISCARD，三步全通过则 KEEP。
-
-### 检验一：归属检验 — 该实体的决策权来源于自身，还是另一个实体？
-- 主权国家的决策权来源于自身主权 → 通过。
-- 政治人物的决策权来源于其所代表的国家/政府 → 不通过，应归入该国。
-- 跨国企业 CEO 的决策权来源于企业 → 若企业已保留则 CEO 不通过。
-- 政府部门的决策权来源于国家 → 不通过。
-- 军队编制的行动权来源于国家 → 不通过。
-- 关键判据：如果上级实体消失，该实体是否还能独立做出同样的决策？
-
-### 检验二：双重代表检验 — 保留该实体是否会造成"同一决策力量被重复计算"？
-- 如果"法国"已保留，再保留"欧盟"等于法国的外交/经济决策权被算两次 → 不通过。
-- 如果"美国"已保留，再保留"北约"等于美国的军事决策权被算两次 → 不通过。
-- 关键判据：该实体做的决策，是否必须通过另一个实体（的投票/军队/资金）才能生效？若是，则决策权实质上属于后者。
-- 例外：如果该组织内的主要成员国大多未被保留，且该组织有独立行动记录 → 可通过。
-
-### 检验三：残留行动检验 — 该实体在种子材料中是否做出了具体的、独立的战略行动？
-- "签署协议""发动攻击""实施制裁""被列入管制清单"是战略行动 → 通过。
-- "作为背景被提及""统计数据""地理位置描述"不是战略行动 → 不通过。
-- 大洲、地理区域永远无法"做出行动" → 不通过。
-- 关键判据：能否为这个实体写出一个"X 做了 Y，影响了 Z"的句子？如果不能，它就不是决策者。
-- 注意：频次低但行动关键（如1次被制裁）远强于频次高但无行动（如10次背景提及）。
-
-## 正例（三步全通过，应当 KEEP）
-  例1: [华为] type=科技企业 freq=3
-      → 检验一：企业自主决策 ✓
-      → 检验二：不与任何国家重叠 ✓
-      → 检验三：被列入实体清单/受制裁 ✓
-      → KEEP（独立企业，被制裁锚点）
-
-  例2: [乌克兰] type=国家 freq=5
-      → 检验一：主权国家 ✓
-      → 检验二：不与任何已保留实体重叠 ✓
-      → 检验三：发动攻击/签署协议/接受军援 ✓
-      → KEEP（独立主权决策者）
-
-  例3: [OPEC] type=国际组织 freq=2
-      → 检验一：组织有独立决策机制 ✓
-      → 检验二：核心成员国并未全部单独列出，不形成重复 ✓
-      → 检验三：做出产量决策，直接影响油价 ✓
-      → KEEP（有独立行动权的国际组织）
-
-## 反例（某一步失败，应当 DISCARD）
-  例1: [特朗普] type=人物 freq=6  — 假设"美国"已在待保留列表中
-      → 检验一失败：决策权来源于美国，不是独立主权体
-      → 检验二失败：与美国形成双重代表
-      → DISCARD（政治人物，归入其所属国家）
-
-  例2: [非洲] type=地理区域 freq=4
-      → 检验三失败：不能做决策的地理概念，从未"签署"或"发动"任何行动
-      → DISCARD（地理背景，非决策主体）
-
-  例3: [G7] type=国际组织 freq=3  — 假设"美国""日本""法国"已在待保留列表中
-      → 检验二失败：核心成员国美国/日本/法国均已独立保留，G7 无超出成员国的独立执行能力
-      → 检验三可能失败：G7 的决议需要成员国各自落地执行
-      → DISCARD（协调平台，决策权归于成员国）
-
-## 边界案例（需结合种子材料判断）
-  例4: [马斯克] type=人物 freq=3
-      → 检验一：若他以 SpaceX CEO 身份独立行动，决策权来自企业自身 → 可能通过
-      → 检验二：若 SpaceX 也在列表中 → 不通过；若不在 → 可能通过
-      → 检验三：若他绕过政府管制独立决策 → 通过；若仅为政府顾问 → 不通过
-      → 结论：取决于种子材料中该人物是否展现出超越国家的独立行动。
-
-## 输出格式
-严格输出 JSON。将具备独立战略决策权的实体名放入 "keep" 数组，将不具备的放入 "discard" 数组。
-关键区分：keep = 保留为博弈者（通过三步检验），discard = 排除出博弈（未通过检验）。
-{"keep": ["通过检验的实体"], "discard": ["未通过检验的实体"], "reasons": {"实体名": "≤20字简述"}}
-未出现在 keep 或 discard 中的实体默认视为 discard。仅输出 JSON。注意：keep 和 discard 必须互斥——一个实体不能同时出现在两个数组中。"""
 
 
 async def _llm_classify(
@@ -383,135 +306,62 @@ async def _llm_classify(
     source: str,
     domain: str,
     log_fn: Any = None,
-    preprocessor: Any = None,
 ) -> None:
-    """LLM 分批并行分类：将实体分组（每批≤15 个），各组独立调用 LLM 并并行执行。
+    """LLM 单次调用：对所有非硬排除实体做 KEEP/DISCARD 分类。"""
 
-    当 preprocessor 可用时，为每个实体检索 LanceDB 中的关联语义块作为证据上下文，
-    替代固定窗口 source[:5000] 的随机截断。"""
-    import time as _time
-    from strategy_forge.core.llm_client import DeductionLLMClient, Message
-    import json as _json
-    import re as _re
-
-    # ── 为每个实体检索关联证据（共享，不重复检索）──
-    entity_evidence: dict[str, list[str]] = {}
-    seen_prefixes: set[str] = set()
-    if preprocessor is not None:
-        t0 = _time.time()
-        for e in pending:
-            ename = str(e.name or "").strip()
-            if not ename or len(ename) < 2:
-                continue
-            try:
-                must_set = {ename}
-                for alias in (getattr(e, "aliases", None) or []):
-                    a = str(alias).strip()
-                    if a and len(a) >= 2:
-                        must_set.add(a)
-                must = must_set if ename and len(ename) >= 2 else None
-                chunks = await asyncio.to_thread(
-                    preprocessor.retrieve_for_entity, ename, top_k=3,
-                    must_contain=must,
-                )
-                if chunks:
-                    deduped: list[str] = []
-                    for c in chunks:
-                        c = str(c).strip()
-                        if not c:
-                            continue
-                        prefix = c[:80]
-                        if prefix in seen_prefixes:
-                            continue
-                        seen_prefixes.add(prefix)
-                        deduped.append(c)
-                        if len(deduped) >= 2:
-                            break
-                    if deduped:
-                        entity_evidence[ename] = deduped
-            except Exception:
-                pass
-        if log_fn and entity_evidence:
-            dt = _time.time() - t0
-            log_fn("agents", f"实体证据检索: {len(entity_evidence)}/{len(pending)} 实体有匹配段落 ({dt:.1f}s)")
-
-    # ── 构建领域摘要（各组共享）──
-    domain_preamble: list[str] = []
+    prompt_parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
     if domain:
         from strategy_forge.core.rule_templates import get_domain_prompt
         dr = get_domain_prompt(domain, "intel_extra_rules")
         if dr:
-            domain_preamble.append(f"## 当前领域：{domain}\n{dr}")
+            prompt_parts.append(f"## 当前领域：{domain}\n{dr}")
+    prompt_parts.append("## 种子材料采样")
+    prompt_parts.append(source[:5000])
+    prompt_parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
+    for i, e in enumerate(pending, 1):
+        p = f" (上级: {e.parent})" if e.parent else ""
+        prompt_parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
+    prompt_parts.append("""
+## 判定标准
+具有独立战略决策权：
+- 在种子材料中作为独立行动者出现（有独立立场、独立行为、影响格局）
+- 包括但不限于：主权国家、国际组织、跨国企业、核心政治人物、军事联盟、行业联盟、大型集团
+- 频次仅作参考——低频但关键行动（如被制裁、发动攻击、签署协议）的实体应保留
 
-    # ── 分批（优先类型分组，每批≤15）──
-    type_priority = {"国家": 0, "Country": 0, "国际组织": 1, "人物": 2, "Person": 2}
-    sorted_pending = sorted(
-        pending, key=lambda e: (type_priority.get(e.type, 9), -e.freq))
-    batch_size = max(8, min(15, 100 // max(1, len(pending) // 3)))
-    batches = [sorted_pending[i:i + batch_size] for i in range(0, len(sorted_pending), batch_size)]
+不具有独立战略决策权：
+- 地理概念、纯下属部门、军队编制、职务头衔、泛指集合概念
+- 纯经济指标、纯技术标准、纯贸易机制（如框架协议而非博弈者）
+- 仅在文本中作为背景提及、无独立行为的实体
 
-    if log_fn:
-        log_fn("agents", f"LLM 分批分类: {len(pending)} 实体 → {len(batches)} 批 (每批≤{batch_size})")
+## 正确示例（通用——适配所有领域和种子材料）
+  [某企业] freq=2 type=科技企业 → KEEP（被列入实体清单/受制裁，是博弈锚点而非背景板）
+  [某国家] freq=2 type=国家 → KEEP（在全文中是核心冲突方，虽频次低但以其他名称反复出现）
+  [某地点] freq=5 type=地点 → DISCARD（纯地理概念，无独立决策行为）
+  [某指标] freq=4 type=经济指标 → DISCARD（统计数据，非博弈实体）
+  [某论坛] freq=3 type=国际组织 → DISCARD（协调平台，非独立决策者）
 
-    # ── 并行处理各批次（Semaphore 控制并发 LLM 调用数）──
-    from strategy_forge.core.providers import registry as _prov_reg
-    sem = asyncio.Semaphore(max(1, _prov_reg.max_concurrent))
+## 输出 JSON
+{"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "≤20字理由"}}
+如果实体名未出现在 keep 或 discard 中，默认 discard。
 
-    async def _process_batch(batch_entities: list[RegisteredEntity], batch_idx: int) -> None:
-        parts = ["你是实体分类员。判断以下实体在种子材料中是否具有独立战略决策权。"]
-        parts.extend(domain_preamble)
-        if entity_evidence:
-            parts.append("\n## 待分类实体与关联证据")
-            parts.append("每个实体下方附有其在种子材料中最相关的段落，请据此判断「残留行动」（检验三）。频次仅供参考——1 次关键行动 > 10 次背景提及。\n")
-            for i, e in enumerate(batch_entities, 1):
-                p = f" (上级: {e.parent})" if e.parent else ""
-                parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
-                evidence = entity_evidence.get(e.name, [])
-                for j, chunk in enumerate(evidence[:2], 1):
-                    c = chunk[:280] + ("..." if len(chunk) > 280 else "")
-                    parts.append(f"     | 证据{j}: {c}")
-        else:
-            parts.append("## 种子材料采样")
-            parts.append(source[:5000])
-            parts.append("\n## 待分类实体（频次仅供参考——1 次关键行动 > 10 次背景提及）")
-            for i, e in enumerate(batch_entities, 1):
-                p = f" (上级: {e.parent})" if e.parent else ""
-                parts.append(f"  {i}. {e.name}  type={e.type}  freq={e.freq}{p}")
-        parts.append(_METHODOLOGY_PROMPT)
-        prompt = "\n".join(parts)
+只输出 JSON。""")
 
-        _MAX_RETRIES = 1
-        raw = ""
-        for _attempt in range(_MAX_RETRIES + 1):
-            try:
-                client = DeductionLLMClient()
-                async with sem:
-                    resp = await client.chat(
-                        [Message(role="user", content=prompt)],
-                        system="你是实体分类员，只输出 JSON。",
-                        temperature=0,
-                        max_tokens=max(400, min(3000, 80 + len(batch_entities) * 40)),
-                    )
-                content = resp.content if hasattr(resp, "content") else str(resp)
-                if isinstance(content, list):
-                    content = "".join(b.text for b in content if hasattr(b, "text"))
-                raw = str(content).strip()
-                break
-            except Exception as e:
-                if _attempt < _MAX_RETRIES:
-                    logger.warning("[EntityRegistry] 批次 %d 第%d次尝试失败: %s，重试中...",
-                                   batch_idx, _attempt + 1, e)
-                    await asyncio.sleep(0.5)
-                else:
-                    logger.warning("[EntityRegistry] 批次 %d 全部尝试失败: %s", batch_idx, e)
-                    for e in batch_entities:
-                        e.decision = "DISCARD"
-                        e.reason = f"LLM(批次{batch_idx}调用失败)"
-                        registry.discarded += 1
-                        registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
-                    return
-
-        # 多策略 JSON 解析
+    prompt = "\n".join(prompt_parts)
+    from strategy_forge.core.llm_client import DeductionLLMClient, Message
+    import json as _json
+    import re as _re
+    try:
+        client = DeductionLLMClient()
+        resp = await client.chat(
+            [Message(role="user", content=prompt)],
+            system="你是实体分类员，只输出 JSON。",
+            temperature=0,
+            max_tokens=max(500, min(5000, 100 + len(pending) * 40)),
+        )
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        if isinstance(content, list):
+            content = "".join(b.text for b in content if hasattr(b, "text"))
+        raw = str(content).strip()
         data = None
         strategies = [
             ("direct", lambda s: _json.loads(s)),
@@ -531,17 +381,11 @@ async def _llm_classify(
             except Exception:
                 continue
         if not isinstance(data, dict):
-            logger.warning("[EntityRegistry] 批次 %d JSON 解析失败，整批排除", batch_idx)
-            for e in batch_entities:
-                e.decision = "DISCARD"
-                e.reason = f"LLM(批次{batch_idx}解析失败)"
-                registry.discarded += 1
-                registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
-            return
+            raise ValueError(f"All strategies failed. Raw output(length={len(raw)}):\n{raw}")
 
         keep_set = set(str(n).strip() for n in data.get("keep", []))
         reasons = data.get("reasons", {}) or {}
-        for e in batch_entities:
+        for e in pending:
             if e.name in keep_set:
                 e.decision = "KEEP"
                 r = str(reasons.get(e.name, "LLM判定"))[:40]
@@ -554,26 +398,14 @@ async def _llm_classify(
                 registry.discarded += 1
                 registry.discard_reasons[e.reason] = registry.discard_reasons.get(e.reason, 0) + 1
 
-    tasks = [_process_batch(b, idx + 1) for idx, b in enumerate(batches)]
-    try:
-        await asyncio.gather(*tasks)
-    except Exception as ge:
-        logger.warning("[EntityRegistry] 分批分类全局异常 (%s): %s", type(ge).__name__, str(ge))
+        logger.info("[EntityRegistry] LLM 分类: %d KEEP / %d DISCARD", registry.kept, registry.discarded)
         if log_fn:
-            log_fn("agents", f"分批分类全局异常({type(ge).__name__})，回退规则兜底")
-
-    # 全局兜底：仍有 PENDING 实体未分类 → fallback
-    still_pending = [e for e in sorted_pending if e.decision == "PENDING"]
-    if still_pending:
-        logger.warning("[EntityRegistry] %d 实体仍为 PENDING，回退规则兜底", len(still_pending))
+            log_fn("agents", f"LLM 全量分类: {registry.kept} 保留 / {registry.discarded} 排除")
+    except Exception as e:
+        logger.warning("[EntityRegistry] LLM 分类失败 (%s): %s", type(e).__name__, str(e))
         if log_fn:
-            log_fn("agents", f"分批未覆盖 {len(still_pending)} 个实体，回退规则兜底")
-        _fallback_classify(registry, still_pending, log_fn)
-
-    logger.info("[EntityRegistry] 分批分类完成: %d 批, %d KEEP / %d DISCARD",
-                len(batches), registry.kept, registry.discarded)
-    if log_fn:
-        log_fn("agents", f"分批分类完成 ({len(batches)} 批): {registry.kept} 保留 / {registry.discarded} 排除")
+            log_fn("agents", f"LLM 分类失败({type(e).__name__})，回退规则兜底")
+        _fallback_classify(registry, pending, log_fn)
 
 
 def _fallback_classify(
