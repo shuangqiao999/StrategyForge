@@ -5,7 +5,7 @@
     - 快速路径 (≤12K字): 单次 LLM 全量归一化
     - 分片路径 (>12K字):  滑动分片 → 保守归一化 → 内存合并 → LLM 精修
   Layer 2: 逐批角色判定 — 10 个一组并行判定 KEEP/DISCARD + 证据
-  (Layer 3 预留): 交叉裁决 — 全局去冗余 + 层次修正
+  Layer 3: 交叉裁决 — LLM 全局冗余检测 + 层次修正 (默认启用)
 
 用法：
   registry = await build_registry(graph, preprocessor, intel_list, source_material=source)
@@ -804,6 +804,128 @@ def _fallback_classify(
         log_fn("agents", f"兜底规则分类: {registry.kept} 保留 (LLM不可用)")
 
 
+# ────────────────────────────────────────────────────────────
+# Layer 3: LLM 交叉裁决 — 全局冗余检测
+# ────────────────────────────────────────────────────────────
+
+_LAYER3_SYSTEM = """你是博弈实体冗余检测专家。你的任务不是重新判定 KEEP/DISCARD，而是在已保留的实体中，发现并消除语义重叠的冗余实体。
+
+## 冗余类型及处理
+1. 组织-成员国重叠：当国际联盟/军事联盟与其 3 个以上核心成员国同时 KEEP → 组织降级为 DISCARD（成员国已覆盖其决策空间）
+2. 人物-归属国重叠：当政治人物与其所属国家同时 KEEP → 若人物的独立行动仅限于执行国家意志（而非独立势力），降级人物
+3. 概念-实例重叠：两个实体描述高度重叠且覆盖同一战略空间 → 保留更具体/更活跃者，降级冗余者
+4. 上下级实体重叠：上级组织与下级部门同时 KEEP → 保留上级，降级下级
+
+## 判断原则
+- 宁可保留 3 个独立实体，不可误删 1 个关键角色
+- 仅当冗余证据明确时才降级（两个实体共享 60%+ 行动空间）
+- 若人物有超出其国家的独立影响（如跨国组织领导人、独立军阀），保留人物
+- 频次和描述均为辅助参考，核心依据是战略角色是否被其他实体完全覆盖
+
+## 输出 JSON
+{
+  "downgrades": [
+    {"name": "实体名", "reason": "≤25字降级理由"}
+  ],
+  "notes": "≤50字全局观察"
+}
+
+若无冗余，downgrades 为空数组。只输出 JSON。"""
+
+
+async def _layer3_cross_validate(
+    registry: EntityRegistry,
+    source: str,
+    log_fn: Any = None,
+) -> None:
+    """Layer 3: LLM 交叉裁决，全局检测并消除冗余 KEEP 实体。"""
+
+    kept = registry.get_kept()
+    total_kept = len(kept)
+    if total_kept <= 2:
+        if log_fn:
+            log_fn("agents", f"Layer3 跳过 (KEEP≤{total_kept}，无冗余风险)")
+        return
+
+    # 构建简洁的 KEEP 实体表格
+    lines = []
+    for i, e in enumerate(kept, 1):
+        tp = e.type or "?"
+        desc = (e.rich_description or e.reason or "")[:80]
+        lines.append(
+            f"{i}. {e.name} | {tp} | 频次={e.freq} | {desc}"
+        )
+    entity_table = "\n".join(lines)
+
+    sample = _smart_sample(source, 5000)
+    prompt = (
+        f"## 原文采样\n{sample}\n\n"
+        f"## 当前保留的博弈实体 ({total_kept} 个)\n{entity_table}\n\n"
+        f"请检测冗余实体并输出降级建议。只输出 JSON。"
+    )
+
+    from strategy_forge.core.llm_client import DeductionLLMClient, Message
+    try:
+        client = DeductionLLMClient()
+        resp = await client.chat(
+            [Message(role="user", content=prompt)],
+            system=_LAYER3_SYSTEM,
+            temperature=0,
+            max_tokens=min(2000, 300 + total_kept * 60),
+        )
+        content = resp.content if hasattr(resp, "content") else str(resp)
+        if isinstance(content, list):
+            content = "".join(b.text for b in content if hasattr(b, "text"))
+        data = _parse_llm_json(str(content))
+    except Exception as e:
+        logger.warning("[Layer3] LLM 调用失败: %s, 回退硬编码层次修正", e)
+        if log_fn:
+            log_fn("agents", f"Layer3 LLM 失败({type(e).__name__})，回退硬编码修正")
+        _resolve_hierarchy(registry, log_fn)
+        return
+
+    downgrades = data.get("downgrades", [])
+    notes = str(data.get("notes", ""))[:80]
+
+    if not isinstance(downgrades, list):
+        downgrades = []
+
+    applied = 0
+    for item in downgrades:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        reason = str(item.get("reason", "LLM冗余检测"))[:40]
+        if not name:
+            continue
+        entity = registry.entities.get(name)
+        if entity and entity.decision == "KEEP":
+            entity.decision = "DISCARD"
+            entity.reason = f"L3({reason})"
+            registry.kept -= 1
+            registry.discarded += 1
+            reason_key = f"L3({reason[:30]})"
+            registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
+            applied += 1
+            logger.info("[Layer3] 降级: %s → %s", name, reason)
+
+    if applied > 0:
+        log_msg = f"Layer3 交叉裁决: {total_kept} KEEP → {registry.kept} KEEP (降级 {applied} 个冗余: "
+        log_msg += ", ".join(
+            f"{d.get('name','?')}" for d in downgrades if isinstance(d, dict)
+        ) + ")"
+        if notes:
+            log_msg += f" [{notes}]"
+        if log_fn:
+            log_fn("agents", log_msg)
+    else:
+        if log_fn:
+            log_fn("agents", f"Layer3 交叉裁决: {total_kept} KEEP 无冗余"
+                   f"{' — ' + notes if notes else ''}"
+                   f"{' (≥8实体未检测到冗余，建议人工复核)' if total_kept >= 8 else ''}")
+    logger.info("[Layer3] 完成: %d KEEP → %d KEEP, 降级 %d", total_kept, registry.kept, applied)
+
+
 def _resolve_hierarchy(registry: EntityRegistry, log_fn: Any = None) -> None:
     kept_entities = registry.get_kept()
     kept_names = {e.name for e in kept_entities}
@@ -1059,8 +1181,8 @@ async def build_registry(
             reason_key = f"L2({re.reason[:30]})"
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
 
-    # ── 9. 层次修正 ──
-    _resolve_hierarchy(registry, log_fn)
+    # ── 9. Layer 3: 交叉裁决 ──
+    await _layer3_cross_validate(registry, source_material, log_fn)
 
     if log_fn:
         log_fn("agents", f"EntityRegistry: {registry.total} total, {registry.kept} KEEP, {registry.discarded} DISCARD")
