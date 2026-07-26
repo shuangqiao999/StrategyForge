@@ -5,7 +5,7 @@
     - 快速路径 (≤12K字): 单次 LLM 全量归一化
     - 分片路径 (>12K字):  滑动分片 → 保守归一化 → 内存合并 → LLM 精修
   Layer 2: 逐批角色判定 — 10 个一组并行判定 KEEP/DISCARD + 证据
-  Layer 3: 交叉裁决 — LLM 全局冗余检测 + 层次修正 (默认启用)
+  Layer 3: 交叉裁决 — LLM 全局冗余检测 (地缘/商业域)；文学/历史域跳过
 
 用法：
   registry = await build_registry(graph, preprocessor, intel_list, source_material=source)
@@ -977,8 +977,9 @@ def _load_layer3_config(domain: str) -> dict:
                     domain_cfg = data.get(domain, {})
                     if isinstance(domain_cfg, dict):
                         return domain_cfg
-                    # 尝试 _defaults 段
-                    defaults = data.get("geo_strategy", data.get(list(data.keys())[0], {}))
+                    # 文学/历史/叙事域回退到 novel 配置
+                    fallback_domain = "novel" if domain in ("novel", "history", "narrative") else "geo_strategy"
+                    defaults = data.get(fallback_domain, {})
                     if isinstance(defaults, dict):
                         return defaults
     # 内置默认
@@ -1067,22 +1068,29 @@ async def _layer3_cross_validate(
     registry: EntityRegistry,
     source: str,
     log_fn: Any = None,
+    domain: str = "",
 ) -> None:
     """Layer 3: LLM 交叉裁决 (改造版)。
 
-    新增流程:
-      0. 哈希缓存检查 (Defect #4)
-      1. 代码别名词典预合并 (Defect #2)
-      2. LLM 裁决 + merge 支持 (Defect #5)
-      3. 权重联动归一 (Defect #6)
-      4. 方差日志 (Defect #8)
+    文学/历史/叙事域跳过 Layer 3 —— 其角色冗余场景极少，
+    9B 模型易将核心角色误判为背景/附属，反而过杀。
+    地缘/商业/军事域正常执行 LLM 冗余检测。
     """
 
     # ── 0. 配置加载 (Defect #3) ──
     from strategy_forge.core.config import config as _cfg
-    domain = (getattr(_cfg, "active_domain", "") or
-              getattr(_cfg, "domain", "") or
-              "geo_strategy")
+    _domain_raw = domain or getattr(_cfg, "active_domain", "") or getattr(_cfg, "domain", "")
+    domain = _domain_raw or "geo_strategy"
+
+    # 文学叙事域跳过 Layer 3 —— 代码别名合并已在 _pre_merge_aliases 完成
+    # (domain 为空也跳过：规则引擎初始化失败时无法确定域，不应默认地缘规则)
+    if _domain_raw in ("novel", "history", "narrative") or not _domain_raw:
+        kept = registry.get_kept()
+        if log_fn:
+            log_fn("agents", f"Layer3 跳过 (文学/历史域: {len(kept)} KEEP，不执行冗余检测)")
+        # 仍执行权重联动
+        _reconcile_weights(registry)
+        return
     cfg = _load_layer3_config(domain)
     min_kept = cfg.get("min_kept_for_check", 3)
     warn_threshold = cfg.get("warn_threshold", 8)
@@ -1163,9 +1171,12 @@ async def _layer3_cross_validate(
         # 文学叙事使用独立方法论：角色≠博弈主体，每个有独立弧的角色都是独立实体
         extra_method.append("""## 文学叙事冗余判断规则
 - 文学叙事中，每个有【独立行动 + 独立对话 + 独立心理描写】的角色都是独立实体
+- 核心角色绝不可降级：皇帝/君主/领袖≠国家（其个人决策、内心挣扎、性格弧线构成叙事核心）
+- 「国家意志化身」「朝廷代表」等理由不可用于降级——统治者是独立角色，非工具
 - 角色-组织关系不适用「组织-成员」冗余检测：将军≠朝廷，书生≠书社
+- 主要反派/外部威胁≠「背景」——只要原文有具体描写其行动、动机、决策，即为核心叙事主体
 - 上下级不降级：除非角色在文中完全无独立行为（仅作为他人命令的执行工具）
-- 保守原则强化：文学叙事宁可多留角色，不可合并关键叙事主体""")
+- 保守原则强化：文学叙事宁可多留角色，不可合并关键叙事主体。5-10 个角色是合理的下限""")
     if extra_method:
         system_prompt = system_prompt.rstrip() + "\n\n" + "\n\n".join(extra_method)
 
@@ -1650,7 +1661,7 @@ async def build_registry(
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
 
     # ── 9. Layer 3: 交叉裁决 ──
-    await _layer3_cross_validate(registry, source_material, log_fn)
+    await _layer3_cross_validate(registry, source_material, log_fn, domain)
 
     if log_fn:
         log_fn("agents", f"EntityRegistry: {registry.total} total, {registry.kept} KEEP, {registry.discarded} DISCARD")
