@@ -47,7 +47,12 @@ a = Analysis(
     ['src/strategy_forge/main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('data/rule/rules.json', 'data/rule'),
+        ('data/rule/domain_prompts.json', 'data/rule'),
+        ('data/rule/entity_alias.json', 'data/rule'),
+        ('data/rule/layer3_config.yaml', 'data/rule'),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -1,0 +1,98 @@
+# Layer3 交叉裁决配置 — 默认配置，运行时可按 domain 切换
+# 日志路径兼容 log_file 为空时不写文件，仅用 Python logger
+
+_defaults: &defaults
+  min_kept_for_check: 3       # KEEP ≤ 此数跳过 Layer3
+  warn_threshold: 8           # KEEP ≥ 此数且无冗余时提示人工复核
+  sample_chars: 5000          # 原文采样长度
+  desc_truncate: 80           # 实体描述截断字数
+  max_tokens_base: 300        # max_tokens 基数
+  max_tokens_per_entity: 60   # 每个实体增加 token 数
+  max_tokens_cap: 2000        # max_tokens 上限
+  log_file: ""                # 方差日志文件 (空=仅 logger)
+  cache_enabled: true         # 是否启用哈希缓存
+  cache_max_entries: 64       # LRU 缓存最大条目 (P0-1)
+  # 超长文本分片参数 (P1-2)
+  shard_size: 7500            # 分片大小
+  shard_overlap: 800          # 重叠字符数
+  shard_threshold: 12000      # 超过此字数启用分片路径
+  l1_cache_enabled: true      # Layer1 归一化结果缓存 (P1-3)
+  l1_cache_max_entries: 16    # Layer1 缓存最大条目
+
+geo_strategy:
+  <<: *defaults
+  system_prompt: |
+    你是地缘战略冗余检测专家。在已保留的博弈实体中，发现并消除语义重叠的冗余。
+
+    ## 冗余类型
+    1. 组织-成员国重叠：军事联盟/国际组织与 3+ 核心成员国同时 KEEP → 组织降级
+    2. 人物-归属国重叠：政治人物与国家同时 KEEP，人物仅执行国家意志 → 降级人物
+    3. 概念-实例重叠：两个实体共享 60%+ 战略空间 → 保留更活跃者
+    4. 上下级重叠：上级组织与下级部门同时 KEEP → 降级下级
+
+    ## 判断原则
+    - 宁可保留 3 个独立实体，不可误删 1 个关键角色
+    - 人物有超出国家的独立影响（跨国领导人/军阀）→ 保留
+    - 地缘实体"大洲""方向"（亚太/印太/全球南方）非决策者 → 降级
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "实体名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  fallback_rules:
+    org_overlap_threshold: 3  # 成员国重叠 ≥ 此数 → 组织降级
+
+novel:
+  <<: *defaults
+  system_prompt: |
+    你是文学叙事冗余检测专家。在已提取的角色实体中，发现并消除重复或从属的冗余角色。
+
+    ## 冗余类型
+    1. 角色-组织重叠：角色始终作为组织代言人行动 → 降级角色或组织（视主导性而定）
+    2. 主从关系重叠：配角行为完全受主角支配、无独立叙事弧 → 降级配角
+    3. 同名异人：不同分片提取的同名实体需核实是否为同一人
+    4. 背景人物：仅被提及而无行动/对话/决策 → 降级
+
+    ## 判断原则
+    - 文学叙事：有独立心理描写、独立行动、独立对话的角色 → KEEP
+    - 纯粹环境描写提到的群体、地名、官职 → DISCARD
+    - 宁可保留边缘但有独立行动的角色，不保留高频但无行为的功能性角色
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "角色名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  fallback_rules:
+    org_overlap_threshold: 3
+
+business:
+  <<: *defaults
+  system_prompt: |
+    你是商业竞争冗余检测专家。在已保留的企业/行业实体中，发现并消除重复或从属的冗余主体。
+
+    ## 冗余类型
+    1. 集团-子公司重叠：母公司与子公司同时 KEEP → 降级子公司
+    2. 品牌-企业重叠：品牌与所属企业同时 KEEP → 降级品牌，保留企业
+    3. 人物-企业重叠：CEO/创始人与企业同时 KEEP → 若人物行为纯属企业意志 → 降级人物
+    4. 行业联盟-成员重叠：行业协会与核心成员企业同时 KEEP → 降级联盟
+
+    ## 判断原则
+    - 子公司若独立上市或有独立战略 → 保留
+    - 创始人有超出企业范畴的行业/政策影响力 → 保留人物
+    - 制裁清单/投资机构/评级机构 → 仅作为分析工具，无独立决策 → DISCARD
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "实体名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  fallback_rules:
+    org_overlap_threshold: 3
