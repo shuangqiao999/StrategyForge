@@ -42,6 +42,14 @@ _SHARD_SIZE = 7500
 _SHARD_OVERLAP = 800
 _SHARD_THRESHOLD = 12000  # 超过此字数启用分片路径
 
+# Jaccard 阈值：地缘政治实体名较短(2-4字)，文学叙事实体名较长(3-6字)
+_JACCARD_THRESHOLDS = {
+    "geo_strategy": 0.40,
+    "history": 0.50,
+    "business": 0.45,
+    "_default": 0.45,
+}
+
 
 # ── Data Classes ──
 
@@ -441,12 +449,13 @@ async def _layer1_shard_normalize(
 # 内存合并层 (纯代码, 无 LLM)
 # ────────────────────────────────────────────────────────────
 
-def _memory_merge(all_shard_entities: list[dict]) -> tuple[list[dict], list[dict]]:
+def _memory_merge(all_shard_entities: list[dict], domain: str = "") -> tuple[list[dict], list[dict]]:
     """纯内存合并所有分片的局部实体。返回 (merged, conflicts)。
 
     merged:   代码已合并的规范实体列表
     conflicts: 需 LLM 裁定的歧义实体对 [{"a":..., "b":..., "reason":...}, ...]
     """
+    jaccard_threshold = _JACCARD_THRESHOLDS.get(domain, _JACCARD_THRESHOLDS["_default"])
     # 1. HashIndex: name → 出现记录
     by_name: dict[str, list[dict]] = defaultdict(list)
     # alias → canonical_name
@@ -514,7 +523,7 @@ def _memory_merge(all_shard_entities: list[dict]) -> tuple[list[dict], list[dict
     for i in range(len(merged)):
         for j in range(i + 1, len(merged)):
             sim = _char_jaccard(merged_names[i], merged_names[j])
-            if sim > 0.45:
+            if sim > jaccard_threshold:
                 ti = merged[i]["type"]
                 tj = merged[j]["type"]
                 conflicts.append({
@@ -947,7 +956,7 @@ async def build_registry(
         try:
             if use_shard_path:
                 normalized = await _layer1_shard_pipeline(
-                    raw_fragments, source_material, freq_map, log_fn
+                    raw_fragments, source_material, freq_map, log_fn, domain
                 )
             else:
                 normalized = await _layer1_normalize(
@@ -1068,11 +1077,12 @@ async def _layer1_shard_pipeline(
     source: str,
     freq_map: dict[str, int],
     log_fn: Any = None,
+    domain: str = "",
 ) -> list[dict]:
     """超长文本分片路径：
     1. 滑动分片 7500+800
     2. 实体-分片文本匹配
-    3. 每分片独立 LLM 保守归一化 (并行)
+    3. 每分片独立 LLM 保守归一化 (受控并发)
     4. 内存池合并 (代码, 毫秒级)
     5. LLM 全局精修 (仅裁定歧义)
     """
@@ -1085,11 +1095,20 @@ async def _layer1_shard_pipeline(
     # 1. 实体-分片匹配
     shard_entities = _match_entities_to_shards(shards, raw_fragments)
 
-    # 2. 并行分片归一化
-    tasks = [
-        _layer1_shard_normalize(shards[i], shard_entities[i], i + 1, total, log_fn)
-        for i in range(total)
-    ]
+    # 2. 并发控制：使用 FORGE_MAX_CONCURRENT 限制并行分片数
+    from strategy_forge.core.providers import registry as _reg
+    max_conc = max(1, _reg.max_concurrent)
+    sem = asyncio.Semaphore(max_conc)
+    if log_fn and max_conc < total:
+        log_fn("agents", f"Layer1 分片并发控制: {total} 分片, 最大 {max_conc} 路并行")
+
+    async def _run_shard(idx: int) -> list[dict]:
+        async with sem:
+            return await _layer1_shard_normalize(
+                shards[idx], shard_entities[idx], idx + 1, total, log_fn
+            )
+
+    tasks = [_run_shard(i) for i in range(total)]
     all_batches = await asyncio.gather(*tasks, return_exceptions=True)
 
     # 3. 收集到内存池
@@ -1112,7 +1131,7 @@ async def _layer1_shard_pipeline(
         log_fn("agents", f"Layer1 内存池: {len(pool)} 局部实体 (来自 {total} 个分片)")
 
     # 4. 内存代码合并
-    merged, conflicts = _memory_merge(pool)
+    merged, conflicts = _memory_merge(pool, domain)
     if log_fn:
         log_fn("agents", f"Layer1 内存合并: {len(pool)} 局部 → {len(merged)} 预合并"
                f" (检测 {len(conflicts)} 对歧义)")
