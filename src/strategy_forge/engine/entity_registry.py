@@ -371,9 +371,10 @@ _METHODOLOGY_PROMPT = """
       → 结论：取决于种子材料中该人物是否展现出超越国家的独立行动。
 
 ## 输出格式
-严格输出 JSON，reasons 为 ≤20 字简述：
-{"keep": ["实体名", ...], "discard": ["实体名", ...], "reasons": {"实体名": "简述原因"}}
-未出现在 keep 或 discard 中的实体默认视为 discard。只输出 JSON。"""
+严格输出 JSON。将具备独立战略决策权的实体名放入 "keep" 数组，将不具备的放入 "discard" 数组。
+关键区分：keep = 保留为博弈者（通过三步检验），discard = 排除出博弈（未通过检验）。
+{"keep": ["通过检验的实体"], "discard": ["未通过检验的实体"], "reasons": {"实体名": "≤20字简述"}}
+未出现在 keep 或 discard 中的实体默认视为 discard。仅输出 JSON。注意：keep 和 discard 必须互斥——一个实体不能同时出现在两个数组中。"""
 
 
 async def _llm_classify(
