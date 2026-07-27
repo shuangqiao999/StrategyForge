@@ -39,7 +39,7 @@ $relation_types
 $candidate_entities
 
 ## 重要约束
-实体名必须严格来自上述白名单，禁止新增任何不在白名单中的实体名。如果文本提到了白名单外的概念，忽略它，不要将其作为实体输出。
+$entity_constraint
 
 ## 别名映射表（发现别名时必须归一化为标准名）
 $alias_map
@@ -146,6 +146,7 @@ async def _extract_from_chunks(
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
         candidate_entities="(无限制)",
+        entity_constraint="提取实体时优先使用上述白名单中的标准名；若白名单为空，可根据文本语义自行命名实体。",
         alias_map="{}",
     )
 
@@ -155,7 +156,7 @@ async def _extract_from_chunks(
         try:
             resp = await client.chat(
                 [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
-                system=system, temperature=0)
+                system=system, temperature=0, max_tokens=2000)
             return _extract_text(resp)
         except LLMConnectionError:
             raise

@@ -15,6 +15,9 @@ $res = "apps\strategy-forge\src-tauri\resources\strategy-forge-backend"
 Remove-Item "$res\_internal","$res\strategy-forge-backend.exe" -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item "dist\strategy-forge-backend\strategy-forge-backend.exe","dist\strategy-forge-backend\_internal" -Destination $res -Recurse -Force
 Copy-Item "data\rule\rules.json" -Destination "$res\data\rule\rules.json" -Force
+Copy-Item "data\rule\domain_prompts.json" -Destination "$res\data\rule\domain_prompts.json" -Force
+Copy-Item "data\rule\entity_alias.json" -Destination "$res\data\rule\entity_alias.json" -Force
+Copy-Item "data\rule\layer3_config.yaml" -Destination "$res\data\rule\layer3_config.yaml" -Force
 
 # 3. 构建前端 + Tauri + NSIS 安装包
 cd apps\strategy-forge

@@ -210,13 +210,11 @@ $recent_events
 {"action": "compete", "target": "中国", "content": "公司继续加大研发投入，提升竞争力。"}  ← 模糊、模板化、无具体行动
 
 ## 输出 JSON — 选择一种行动
-```json
 {
   "action": "initiate|respond|collaborate|compete|observe",
   "target": "目标实体名或留空",
   "content": "行动内容 (30-100字)"
 }
-```
 
 只返回 JSON，不要解释。"""
 
@@ -1128,9 +1126,10 @@ class SimulationEngine:
                 current_rules=current_rules,
             )
             _mt = 120
-        elif mode == "deep":
+        elif mode in ("deep", "reconstruct"):
             sev_label = {3: "重度—格局级", 4: "灾难—价值观重构级"}.get(severity, "重度")
-            prompt = self._PROMPT_DEEP.format(
+            template = self._PROMPT_RECONSTRUCT if mode == "reconstruct" else self._PROMPT_DEEP
+            prompt = template.format(
                 name=agent.name, persona=persona,
                 severity_label=sev_label,
                 trigger_summary=f"{trigger_category}({trigger_keyword})",
@@ -1365,7 +1364,7 @@ class SimulationEngine:
                     [Message(role="user", content=prompt)],
                     system="你是环境观察者，评估单一动作的环境影响。只输出 JSON。",
                     temperature=0.2,
-                    max_tokens=60,
+                    max_tokens=100,
                 )
                 data = extract_json(str(resp))
                 if isinstance(data, dict):
@@ -1504,7 +1503,7 @@ class SimulationEngine:
                     response = await asyncio.to_thread(self._chat_fn, messages, system, 0.7)
                     content = response
                 else:
-                    response = await client.chat(messages, system=system, temperature=0.7)
+                    response = await client.chat(messages, system=system, temperature=0.6, max_tokens=1500)
                     content = extract_text(response)
                 action_data = _parse_action_json(content)
             except Exception as e2:
@@ -2419,7 +2418,7 @@ class SimulationEngine:
             "只输出叙事段落，不要解释或列表。叙事只能基于上方列出的行动和数值变化，不得添加未发生的情节。"
         )
         resp = await client.chat([Message(role="user", content=prompt)],
-                                 system="你是推演解说员，把数值变化翻译成简洁叙事。", temperature=0.5)
+                                 system="你是推演解说员，把数值变化翻译成简洁叙事。", temperature=0.3)
         return extract_text(resp).strip()[:300]
 
 

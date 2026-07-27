@@ -112,9 +112,11 @@ _SHARD_THRESHOLD = 12000  # 超过此字数启用分片路径 (P1-2: 默认值�
 
 # Jaccard 阈值：地缘政治实体名较短(2-4字)，文学叙事实体名较长(3-6字)
 _JACCARD_THRESHOLDS = {
-    "geo_strategy": 0.40,
-    "history": 0.50,
-    "business": 0.45,
+    "geo_strategy": 0.40, "military": 0.40,
+    "business": 0.45, "politics": 0.40,
+    "novel": 0.50,
+    "ecology": 0.45, "urban": 0.45,
+    "tech": 0.45, "info_war": 0.40,
     "_default": 0.45,
 }
 
@@ -1142,9 +1144,13 @@ def _load_layer3_config(domain: str) -> dict:
         "warn_threshold": 8,
         "sample_chars": 5000,
         "desc_truncate": 80,
-        "max_tokens_base": 300,
-        "max_tokens_per_entity": 60,
-        "max_tokens_cap": 2000,
+        "token": {
+            "l1_normalize": {"base": 200, "per": 150, "cap": 12000},
+            "l1_shard":     {"base": 200, "per": 200, "cap": 6000},
+            "l1_refine":    {"base": 200, "per": 120, "cap": 8000},
+            "l2_classify":  {"base": 150, "per": 100, "cap": 4000},
+            "l3_cross":     {"base": 300, "per": 60,  "cap": 3000},
+        },
         "log_file": "",
         "cache_enabled": True,
         "fallback_rules": {"org_overlap_threshold": 3},

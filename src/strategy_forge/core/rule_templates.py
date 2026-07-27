@@ -140,6 +140,35 @@ _FALLBACK_RULES: dict[str, dict[str, Any]] = {
             "develop_industry": {"population": -3},
         },
     },
+    "tech": {
+        "metrics": {
+            "technology_level": {"base": 50, "decay": 0.0},
+            "chip_supply": {"base": 50, "decay": 0.0},
+            "patent_count": {"base": 30, "decay": 0.0},
+            "talent_pool": {"base": 40, "decay": 0.001},
+            "market_share": {"base": 30, "decay": 0.002},
+            "capital_reserve": {"base": 50, "decay": 0.001},
+        },
+    },
+    "info_war": {
+        "metrics": {
+            "public_trust": {"base": 50, "decay": 0.001},
+            "narrative_control": {"base": 50, "decay": 0.001},
+            "media_penetration": {"base": 40, "decay": 0.001},
+            "information_accuracy": {"base": 50, "decay": 0.0},
+            "censorship_level": {"base": 30, "decay": 0.0},
+        },
+    },
+    "geo_strategy": {
+        "metrics": {
+            "military_power": {"base": 50, "decay": 0.0},
+            "economic_power": {"base": 50, "decay": 0.0},
+            "diplomatic_influence": {"base": 40, "decay": 0.001},
+            "energy_security": {"base": 40, "decay": 0.0},
+            "alliance_strength": {"base": 30, "decay": 0.001},
+            "technology_advantage": {"base": 40, "decay": 0.0},
+        },
+    },
 }
 
 # ── 动态加载缓存 ──

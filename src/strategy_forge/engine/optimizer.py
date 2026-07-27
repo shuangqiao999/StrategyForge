@@ -206,7 +206,7 @@ class StrategyOptimizer:
             if cancel_event is not None and cancel_event.is_set():
                 return None
             seed = random.randint(1, 10_000_000)
-            temp = round(random.uniform(0.3, 0.9), 2)  # 温度抖动，增加结局多样性
+            temp = round(random.uniform(0.3, 0.7), 2)  # 温度抖动，增加结局多样性
             async with sem:
                 if cancel_event is not None and cancel_event.is_set():
                     return None

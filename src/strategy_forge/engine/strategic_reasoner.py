@@ -88,7 +88,7 @@ class StrategicReasoner:
       3. Select best candidate or fall back to LLM tiebreak
     """
 
-    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None, temperature: float = 0.7, enable_multi_action: bool = False, max_actions: int = 3):
+    def __init__(self, candidate_count: int = 3, preprocessor: DeductionPreprocessor | None = None, chat_fn: Any = None, immutable_goals: list[str] | None = None, temperature: float = 0.6, enable_multi_action: bool = False, max_actions: int = 3):
         self.candidate_count = candidate_count
         self._preprocessor = preprocessor
         self._chat_fn = chat_fn
@@ -282,7 +282,7 @@ class StrategicReasoner:
             if self._chat_fn is not None:
                 content = await asyncio.to_thread(self._chat_fn, messages, system, self._temperature)
             else:
-                response = await llm.chat(messages, system=system, temperature=self._temperature)
+                response = await llm.chat(messages, system=system, temperature=self._temperature, max_tokens=2000)
                 content = extract_text(response)
             candidates = _parse_candidates(content)
         except Exception as e:
