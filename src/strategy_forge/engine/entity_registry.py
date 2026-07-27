@@ -148,6 +148,7 @@ class RegisteredEntity:
     rich_description: str = ""
     tier: int = 0           # 1=核心博弈者 2=次级参与者 3=纯背景 0=未判定
     tier_evidence: str = "" # 分级证据（原文引用）
+    group: str = ""         # L2 归属分组（所属国家/组织）
 
 
 @dataclass
@@ -380,16 +381,16 @@ def _match_entities_to_shards(
 _LAYER1_SYSTEM = """你是一个实体归一化专家。你的任务是：接收一批从原文各段落中分别提取的"实体碎片"，将它们合并为规范实体列表。
 
 ## 任务
-1. 识别同义异名实体（例如"崇祯"与"朱由检"是同一人，"美国"与"美方"是同一个国家）
+1. 识别同义异名实体（例如"史密斯"与"史先生"是同一人，"X国"与"X方"是同一个国家）
 2. 融合描述：将同一实体的所有描述片段合并为一段完整描述（100字以内）
 3. 修正不一致的类型标签（如有的碎片标"国家"有的标"Organization"，统一为合理类型）
 4. 输出规范实体列表
 
 ## 规则
 - 同名实体在不同块出现，描述互补则融合，描述冲突则取多数
-- 别名字符重叠≥2且语义相同→合并（如"特朗普"与"川普"）
-- 上下级实体不合并（"国防部"≠"美国"）
-- 二元关系词不合并（"中美关系"≠"中国"也不合并，单独保留）
+- 别名字符重叠≥2且语义相同→合并（如"史密斯"与"史先生"）
+- 上下级实体不合并（"财政部"≠"X国政府"）
+- 二元关系词不合并（"X-Y贸易关系"≠"X"也不合并，单独保留）
 - 无法确定是否同义时，保守不合并
 - 每种类型统一为中文标签（国家/人物/组织/国际组织/企业/地点/概念/事件/...）
 
@@ -770,7 +771,7 @@ _REFINE_SYSTEM = """你是实体合并专家。以下是代码预合并后的实
 1. 每条实体描述精炼到 ≤100 字（合并重复信息，去除冗余）
 2. 裁定冲突对：
    - 高相似名且类型相同 → 基本可判定为同一实体，合并描述，任选一规范名作为主名
-   - 高相似名但类型不同 → 需结合原文裁决（如"华为公司"vs"华为手机"可能是同一企业的主品牌和产品线）
+   - 高相似名但类型不同 → 需结合原文裁决（如"X集团"vs"X手机"可能是同一企业的主品牌和产品线）
    - 无法确定 → 保守不合并，分别保留
 3. 类型标准化为中文标签：国家/政权/人物/军事组织/国际联盟/企业/机构/地理区域/经济概念/条约/事件
 
@@ -855,42 +856,49 @@ async def _layer1_global_refine(
 # Layer 2: 逐批角色判定
 # ────────────────────────────────────────────────────────────
 
-_LAYER2_SYSTEM = """你是战略分析专家。对每个实体进行三级分级判定，替代原有简单二元划分。
+_LAYER2_SYSTEM = """你是战略分析专家。对每个实体进行分层判定——先分组归属，再判定决策主权，最后分配 tier。
 
-## 一级核心博弈者（tier=1，强制KEEP，后续生成独立智能体）
-满足任意一条即划入：
-1. 独立主动发起外交/军事/财政/谈判/宣战/招安/制裁等完整战略决策
-2. 拥有专属势力/军队/地盘/派系，可单方面改变全局局势
-3. 多次主动制定方案、布局算计其他势力，具备完整自主谋划逻辑
-4. 君主/割据领袖/政权首领 → 无论文中有无独立行动描写，均划为一级
-5. 白名单内实体 → 无条件一级
+## 第一步：归属分组
+将每个实体归入其所属的博弈单元（通常是其所属主权国家或最高组织）：
 
-## 二级次级参与者（tier=2，保留实体，不生成独立主智能体，图谱永久留存）
-满足任意一条且未达一级标准：
-1. 无全局决策权，但持续参与多方博弈、提供关键情报、执行核心战略指令
-2. 地方中层官员/中小义军/地方世家/边疆守将，局部战场拥有自主行动
-3. 依附一级主体，但存在独立私心、私下谋划、背离上级的行为
-4. 核心战略地缘区域（如辽东/中原/江南/关中/巴蜀等），作为全局争夺核心舞台 → 划入二级
-5. 跨国企业/行业联盟/国际组织 → 被制裁或主动参与博弈者
+1. **政治人物**（总统/总理/主席/首相/部长/将领）→ 归入其所属**主权国家**
+2. **军事组织/军队/武装** → 归入其所属**国家**
+3. **政府机构/职能部门** → 归入其所属**上级主体**（国家或独立组织）
+4. **主权国家/最高政权** → 自身即根节点
+5. **跨国企业/国际组织/NGO** → 若原文明确其跨越多国管辖边界独立行动 → 独立成组；否则归入主要关联国
+6. **无法确定归属的实体** → 标记为 unaffiliated，后续独立评估
 
-## 三级纯背景（tier=3，DISCARD，不参与博弈推演）
-满足任意一条且不属于豁免/白名单：
-1. 纯地理点位/普通城镇/山川河流，仅作为场景无争夺价值
-2. 政府通用职能部门/国库/驿站/兵营等机构，仅作为名词提及无自主决策
-3. 宽泛集合概念：宦官集团/文官群体/流民等泛指群体，无统一行动主体
-4. 条约/货币/物资/兵器/律法等工具类名词
-5. 仅单次出场、无任何对话与行动的路人/配角
-6. 二元关系词（如"中美关系"）、纯统计指标、纯技术标准
+## 第二步：组内决策主权判定
 
-## 判定原则
-- 频次陷阱：高频≠重要，1次关键行动 > 10次背景提及
-- 保守上浮：无法明确判定层级 → 自动上浮一级（疑似三级→二级，疑似二级→一级，绝不直接丢弃）
-- 活性检验法：实体出现在「决定/下令/围剿/议和/起兵/割据/签署」等主动谓语前 → 一级/二级
-- 反向判定：实体仅出现在「遭受/位于/使用/听闻/隶属」等被动语境 → 默认三级（豁免清单除外）
-- 地名特殊处理：纯场景地点→三级，战略争夺核心区域→二级
+每个博弈单元（组）内最多产生 **1 个 tier1**——即该组在博弈中的最高决策代表：
+
+| 实体角色 | tier | 条件 |
+|---------|------|------|
+| 主权国家/最高政权 | tier1 | 始终——国家是不可再分的最高博弈单位 |
+| 该国元首/政府首脑 | tier2 | 其决策 = 该国决策，不应另建独立 agent |
+| 该国其他官员/部长/将领 | tier3 | 决策空间已被元首覆盖 |
+| 该国地方势力/中层将领 | tier3 | 除非原文提供 ≥3 项**独立于中央**的决策证据 |
+| 独立军阀/叛军/割据势力 | tier1 | 需原文明确 ≥3 项独立决策证据（独立交火/占领/征税/结盟） |
+| 跨国企业/独立机构 | tier1 | 若原文明确其决策跨越 3 个以上国家的管辖边界 |
+| 国际组织/军事联盟 | tier2 | 若其核心成员国 ≥3 已独立列席 → tier3 |
+| 战略地缘区域 | tier2 | 关键海峡/主要盆地/边境走廊作为争夺舞台 |
+| 工具/资源/概念/关系词 | tier3 | 永远——非决策实体 |
+
+## 第三步：tier 分配汇总
+
+- tier1（生成独立 agent）：主权国家、独立武装、跨国巨头——每一组最多 1 个
+- tier2（保留数据、不建 agent）：归入上级的核心人物、战略地缘区域、未满 3 国的国际组织
+- tier3（DISCARD）：被上级覆盖的官员/军队/机构、纯工具/资源/概念/背景名词
+
+## 特殊规则
+
+- 白名单中的实体 → 无条件 tier1（但其属下的官员仍按上述规则降级）
+- 原文确实出现独立军阀/叛乱实体的 → 独立建组，不影响原国家组保留 1 个 tier1
+- 频次陷阱：高频≠重要，1 次关键决策 > 10 次背景提及
+- 不确定归属时 → 保守保留为 tier2 并注明原因
 
 ## 输出 JSON
-{"results": [{"name":"实体名","tier":1,"reason":"≤30字理由及原文行为证据"}]}
+{"results": [{"name":"实体名","tier":1|2|3,"reason":"≤30字理由及原文行为证据","group":"所属组名或独立"}]}
 
 tier 取 1/2/3。只输出 JSON。"""
 
@@ -969,6 +977,7 @@ async def _layer2_classify_batch(
                 "tier": tier,
                 "reason": str(r.get("reason", ""))[:60],
                 "decision": "KEEP" if tier in (1, 2) else "DISCARD",
+                "group": str(r.get("group", "")).strip(),
             })
     if log_fn:
         log_fn("agents", f"  Layer2 批次{_tag}: tier1={t1} tier2={t2} tier3={len(out)-t1-t2}/{len(out)}")
@@ -1018,6 +1027,7 @@ async def _layer2_classify_all(
                         "decision": rr[0]["decision"],
                         "tier": rr[0].get("tier", 3),
                         "reason": rr[0]["reason"],
+                        "group": rr[0].get("group", ""),
                     }
                     recovered += 1
                 else:
@@ -1031,6 +1041,7 @@ async def _layer2_classify_all(
                 "decision": r["decision"],
                 "tier": r.get("tier", 3),
                 "reason": r["reason"],
+                "group": r.get("group", ""),
             }
 
     for e in entities:
@@ -1049,20 +1060,41 @@ def _fallback_classify(
     entities: list[RegisteredEntity],
     log_fn: Any = None,
 ) -> None:
-    t = max(1, registry.total // 50)
+    """LLM 不可用时的兜底规则。优先保留国家/组织为 tier1，人物降为 tier2。"""
+    # 按 group 分组（兜底时大多数实体无 group，从 entity_alias.json 推断）
+    country_group: dict[str, list[str]] = {}
     for e in entities:
-        if e.type in ("Country", "国家", "Organization", "组织", "国际组织") and e.freq >= 1:
+        if e.type in ("Country", "国家"):
+            country_group.setdefault(e.name, []).append(e.name)
+        elif e.type in ("Person", "人物") and e.group:
+            country_group.setdefault(e.group, []).append(e.name)
+
+    for e in entities:
+        if e.type in ("Country", "国家", "Organization", "组织") and e.freq >= 1:
             e.decision = "KEEP"
-            e.reason = "兜底(国家/组织≥1)"
+            e.tier = 1
+            e.reason = "兜底(国家/组织)"
             registry.kept += 1
-        elif e.type in ("Person", "人物") and e.freq >= t:
+            registry.tier1_count += 1
+        elif e.type in ("Person", "人物") and e.group:
+            # 有归属组 → tier2（决策被所属国家覆盖）
             e.decision = "KEEP"
-            e.reason = f"兜底(人物高≥{t})"
+            e.tier = 2
+            e.reason = f"兜底(人物归属{e.group})"
             registry.kept += 1
-        elif e.freq >= t * 3:
+            registry.tier2_count += 1
+        elif e.type in ("Person", "人物") and e.freq >= 5:
             e.decision = "KEEP"
-            e.reason = f"兜底(高频≥{t*3})"
+            e.tier = 2
+            e.reason = "兜底(高频人物)"
             registry.kept += 1
+            registry.tier2_count += 1
+        elif e.freq >= 8:
+            e.decision = "KEEP"
+            e.tier = 2
+            e.reason = f"兜底(高频≥8)"
+            registry.kept += 1
+            registry.tier2_count += 1
         else:
             e.decision = "DISCARD"
             e.reason = "兜底排除"
@@ -1374,22 +1406,54 @@ async def _layer3_cross_validate(
     sample = _smart_sample(source, sample_chars)
     system_prompt = cfg.get("system_prompt", "").strip()
     if not system_prompt:
-        system_prompt = """你是博弈实体冗余检测专家。基于整体种子材料的语义和语境，正确区分博弈实体。
+        system_prompt = """你是博弈实体冗余检测专家。基于整体种子材料，检测实体间是否存在决策权重叠。
 
-## 冗余类型
-1. 组织-成员国重叠 → 降级组织
-2. 人物-归属国重叠 → 降级人物
-3. 概念-实例重叠 → 保留更活跃者
-4. 上下级重叠 → 降级下级
-5. 军队-国家重叠 → 军队默认降级（仅当原文明确描述其独立政治决策行为时例外）
+## 核心原则：决策覆盖链
 
-## 判断原则
-- 军队实体（以"军""军队""部队""武装"结尾）默认降级——军队≠国家，军队是国家意志的执行工具
-- 同一国家的多变量体（如"特朗普"+"特朗普政府"+"美国"）→ 仅保留最具战略决策权的一个
-- 军队保留例外需同时满足：①原文明确其独立战略决策 ②有独立外交/政治行为 ③非纯执行者
+一个实体的决策空间 ⊆ 另一个实体的决策空间时 → 前者冗余。
+
+检测路由（沿归属链自上而下）：
+```
+主权国家/最高政权（根节点）
+ └─ 该国的政府首脑/元首 → 决策 = 国家决策 → 降级人物（tier2，不另建 agent）
+     └─ 该国的部长/将领/官员 → 决策被元首覆盖 → 降级（tier3）
+         └─ 地方势力/中层将领 → 无原文独立决策证据 → 降级（tier3）
+             └─ 独立军阀/叛军/割据势力 → 有独立证据 → 保留
+
+国际组织
+ └─ 核心成员国已独立列席 ≥3 个 → 组织的决策由其成员投票决定 → 降级组织
+ └─ 核心成员国未完全列席 → 组织有独立决策空间 → 保留
+     └─ 组织隶属的秘书长/主席 → 决策 = 组织决策 → 降级人物
+
+跨国企业/独立机构
+ └─ 原文明确其决策跨越 3 个以上国家的管辖边界 → 独立组 → 保留
+ └─ 主要依附单一国家 → 归入该国组 → 降级
+```
+
+## 冗余检测类型
+
+| 类型 | 检测对象 | 判定 |
+|------|---------|------|
+| 人物-国家重叠 | 元首/总理 vs 其所属国家 | 降级人物 → tier2 |
+| 人物-组织重叠 | 官员/职员 vs 其所属组织 | 降级人物 → tier3 |
+| 下级-上级重叠 | 部长/将领 vs 政府/国家 | 降级下级 → tier3 |
+| 组织-成员重叠 | 国际联盟 vs 其核心成员 | 核心成员 ≥3 已列席 → 降级组织 |
+| 政府机构重叠 | 职能部门 vs 国家 | 降级机构 → tier3 |
+| 军队-国家重叠 | 军队/武装 vs 所属国家 | 默认降级军队（仅原文明确独立军政行为时例外） |
+| 同义名重叠 | 两个名称指向同一实体 | 合并 |
+
+## 铁律
+
+- **每一国家组最多保留 1 个 tier1**——国家本身为其最高博弈代表
+- 独立军阀/叛军除外——它们是独立博弈单元，不受国家组 tier1 上限约束
+- 优先保留国家/最高组织，降级其下属人员——而非反过来
+- 无法确定归属 → 保留，不降级
 
 ## 输出 JSON
-{"downgrades": [...], "merges": [...], "notes": ""}
+{"downgrades": [{"name":"实体名","new_tier":2|3,"reason":"≤30字"}],
+ "merges": [{"source":"被合并名","target":"保留名","reason":"≤30字"}],
+ "notes": "≤80字总结合并/降级逻辑"}
+
 只输出 JSON。"""
 
     # 注入方法论 (entity_alias.json) — 文学叙事域不注入代理力/冗余，小说角色规则不同
@@ -1403,9 +1467,9 @@ async def _layer3_cross_validate(
         # 文学叙事使用独立方法论：角色≠博弈主体，每个有独立弧的角色都是独立实体
         extra_method.append("""## 文学叙事冗余判断规则
 - 文学叙事中，每个有【独立行动 + 独立对话 + 独立心理描写】的角色都是独立实体
-- 核心角色绝不可降级：皇帝/君主/领袖≠国家（其个人决策、内心挣扎、性格弧线构成叙事核心）
-- 「国家意志化身」「朝廷代表」等理由不可用于降级——统治者是独立角色，非工具
-- 角色-组织关系不适用「组织-成员」冗余检测：将军≠朝廷，书生≠书社
+- 核心角色绝不可降级：统治者/领袖≠其所属国家/组织（其个人决策、内心挣扎、性格弧线构成叙事核心）
+- 「国家意志化身」「组织代表」等理由不可用于降级——个体角色是独立叙事主体，非工具
+- 角色-组织关系不适用「组织-成员」冗余检测：将领≠其所属军队，个体≠其所属团体
 - 主要反派/外部威胁≠「背景」——只要原文有具体描写其行动、动机、决策，即为核心叙事主体
 - 上下级不降级：除非角色在文中完全无独立行为（仅作为他人命令的执行工具）
 - 保守原则强化：文学叙事宁可多留角色，不可合并关键叙事主体。5-10 个角色是合理的下限""")
@@ -1506,6 +1570,46 @@ async def _layer3_cross_validate(
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
             downgrade_applied += 1
             logger.info("[Layer3 Downgrade] %s → %s", name, reason)
+
+    # ── 3c. 组内去重：每一博弈单元最多 1 个 tier1 ──
+    tier1_entities = [e for e in registry.entities.values() if e.tier == 1]
+    # 收集 group 信息（L2 输出的 group 字段 + 从 tier1 实体名推断）
+    group_map: dict[str, list[str]] = {}  # group_name → [entity_names]
+    for e in tier1_entities:
+        g = e.group.strip() if e.group else ""
+        if not g:
+            # 从类型推断归属：Person 类型 → 其描述/别名中可能含国家名
+            # 无 group 则自成一族
+            g = f"__{e.name}"
+        group_map.setdefault(g, []).append(e.name)
+
+    group_overrides = 0
+    for group_name, members in group_map.items():
+        if group_name.startswith("__"):
+            continue  # 独立组，无需处理
+        if len(members) <= 1:
+            continue
+        # 优先保留类型为 Country/Organization 的实体，降级其他
+        prioritized: list[str] = []
+        rest: list[str] = []
+        for mname in members:
+            ent = registry.entities.get(mname)
+            if ent and ent.type in ("Country", "国家", "Organization", "组织", "政权"):
+                prioritized.append(mname)
+            else:
+                rest.append(mname)
+        keep_list = prioritized[:1] or [members[0]]
+        for mname in members:
+            if mname in keep_list:
+                continue
+            ent = registry.entities.get(mname)
+            if ent and ent.tier == 1:
+                ent.tier = 2
+                ent.tier_evidence = f"L3组内去重({group_name})"
+                group_overrides += 1
+
+    if group_overrides:
+        logger.info("[Layer3 Group] 组内去重: %d 个实体 tier1→2", group_overrides)
 
     # ── 4. 写缓存 (Defect #4) ──
     if cache_enabled:
@@ -1990,6 +2094,7 @@ async def build_registry(
             parent=e["parent"], aliases=e["aliases"],
             rich_description=e["description"],
             tier=tier, tier_evidence=d.get("reason", "")[:80],
+            group=d.get("group", ""),
         )
         registry.entities[e["name"]] = re
         if tier in (1, 2):
