@@ -106,14 +106,18 @@ async def create_agents_from_graph(
 
     # ── 如果传入了 EntityRegistry，直接从中读取 ——
     if entity_registry is not None:
-        kept_entities = entity_registry.get_kept()
-        log_fn("agents", f"从注册中心读取 {len(kept_entities)} 个博弈实体（共 {entity_registry.total} 个）")
+        # 仅一级核心博弈者生成独立智能体
+        tier1_entities = entity_registry.get_tier1()
+        tier2_entities = entity_registry.get_tier2()
+        log_fn("agents", f"从注册中心读取: tier1={len(tier1_entities)}核心 tier2={len(tier2_entities)}次级 (共{entity_registry.total}个)")
+        if tier2_entities:
+            log_fn("agents", f"  二级实体保留但不生成智能体: {', '.join(e.name for e in tier2_entities[:20])}")
         log_fn("agents", entity_registry.summary()[:200])
 
-        # 构建统一的 persons 列表
+        # 构建统一的 persons 列表（仅 tier1）
         persons: list[dict] = [
             {"id": e.id, "name": e.name, "type": e.type, "description": ""}
-            for e in kept_entities
+            for e in tier1_entities
         ]
         # 构建 persona 用的 intel_map
         intel_map: dict[str, dict] = {}
@@ -128,7 +132,7 @@ async def create_agents_from_graph(
                         intel_map[a] = e
 
         # freq_map
-        freq_map: dict[str, int] = {e.name: e.freq for e in kept_entities}
+        freq_map: dict[str, int] = {e.name: e.freq for e in tier1_entities}
         if preprocessor and preprocessor.result:
             fm = getattr(preprocessor.result, "entity_frequencies", {}) or {}
             freq_map = {**fm, **freq_map}

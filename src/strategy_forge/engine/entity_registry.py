@@ -124,6 +124,8 @@ class RegisteredEntity:
     parent: str = ""
     aliases: list[str] = field(default_factory=list)
     rich_description: str = ""
+    tier: int = 0           # 1=核心博弈者 2=次级参与者 3=纯背景 0=未判定
+    tier_evidence: str = "" # 分级证据（原文引用）
 
 
 @dataclass
@@ -132,11 +134,31 @@ class EntityRegistry:
     total: int = 0
     kept: int = 0
     discarded: int = 0
+    tier1_count: int = 0
+    tier2_count: int = 0
     discard_reasons: dict[str, int] = field(default_factory=dict)
 
     def get_kept(self) -> list[RegisteredEntity]:
         return sorted(
             [e for e in self.entities.values() if e.decision == "KEEP"],
+            key=lambda e: -e.freq)
+
+    def get_tier1(self) -> list[RegisteredEntity]:
+        """一级核心博弈者 → 生成独立智能体。"""
+        return sorted(
+            [e for e in self.entities.values() if e.tier == 1],
+            key=lambda e: -e.freq)
+
+    def get_tier2(self) -> list[RegisteredEntity]:
+        """二级次级参与者 → 保留不生成智能体。"""
+        return sorted(
+            [e for e in self.entities.values() if e.tier == 2],
+            key=lambda e: -e.freq)
+
+    def get_tier12(self) -> list[RegisteredEntity]:
+        """全部保留实体（一级+二级），向后兼容旧 get_kept()。"""
+        return sorted(
+            [e for e in self.entities.values() if e.tier in (1, 2)],
             key=lambda e: -e.freq)
 
     def get_by_type(self, etype: str) -> list[RegisteredEntity]:
@@ -690,36 +712,44 @@ async def _layer1_global_refine(
 # Layer 2: 逐批角色判定
 # ────────────────────────────────────────────────────────────
 
-_LAYER2_SYSTEM = """你是战略分析专家。你的任务是判断给定实体在原文中是否具有"独立战略决策权"——即是否为博弈参与者。
+_LAYER2_SYSTEM = """你是战略分析专家。对每个实体进行三级分级判定，替代原有简单二元划分。
 
-## 判定标准
+## 一级核心博弈者（tier=1，强制KEEP，后续生成独立智能体）
+满足任意一条即划入：
+1. 独立主动发起外交/军事/财政/谈判/宣战/招安/制裁等完整战略决策
+2. 拥有专属势力/军队/地盘/派系，可单方面改变全局局势
+3. 多次主动制定方案、布局算计其他势力，具备完整自主谋划逻辑
+4. 君主/割据领袖/政权首领 → 无论文中有无独立行动描写，均划为一级
+5. 白名单内实体 → 无条件一级
 
-**KEEP（具有独立战略决策权）：**
-- 在原文中作为独立行动者出现（有独立立场、独立行为、影响格局）
-- 包括：主权国家、国际组织、核心政治人物、跨国企业、军事联盟、反叛武装
-- 低频但有关键行动（发动攻击、签署协议、被制裁、做出决策）→ KEEP
+## 二级次级参与者（tier=2，保留实体，不生成独立主智能体，图谱永久留存）
+满足任意一条且未达一级标准：
+1. 无全局决策权，但持续参与多方博弈、提供关键情报、执行核心战略指令
+2. 地方中层官员/中小义军/地方世家/边疆守将，局部战场拥有自主行动
+3. 依附一级主体，但存在独立私心、私下谋划、背离上级的行为
+4. 核心战略地缘区域（如辽东/中原/江南/关中/巴蜀等），作为全局争夺核心舞台 → 划入二级
+5. 跨国企业/行业联盟/国际组织 → 被制裁或主动参与博弈者
 
-**DISCARD（不具有独立战略决策权）：**
-- 纯地理概念（地名、海域）、纯经济指标、纯技术标准
-- 纯下属部门、军队编制名、职务头衔
-- 泛指集合概念、背景提及但无独立行为的实体
-- 二元关系词（如"中美关系"）、协议/条约名
+## 三级纯背景（tier=3，DISCARD，不参与博弈推演）
+满足任意一条且不属于豁免/白名单：
+1. 纯地理点位/普通城镇/山川河流，仅作为场景无争夺价值
+2. 政府通用职能部门/国库/驿站/兵营等机构，仅作为名词提及无自主决策
+3. 宽泛集合概念：宦官集团/文官群体/流民等泛指群体，无统一行动主体
+4. 条约/货币/物资/兵器/律法等工具类名词
+5. 仅单次出场、无任何对话与行动的路人/配角
+6. 二元关系词（如"中美关系"）、纯统计指标、纯技术标准
 
-## 特别注意
-- 一个人物如果原文详细描写其独立决策过程 → KEEP
-- 一个组织如果仅是背景或研究机构 → DISCARD
-- 频次仅作参考：1 次关键行动 > 10 次背景提及
-- 地点型实体（如城市名）→ 大概率 DISCARD，除非明确作为政治主体行动
+## 判定原则
+- 频次陷阱：高频≠重要，1次关键行动 > 10次背景提及
+- 保守上浮：无法明确判定层级 → 自动上浮一级（疑似三级→二级，疑似二级→一级，绝不直接丢弃）
+- 活性检验法：实体出现在「决定/下令/围剿/议和/起兵/割据/签署」等主动谓语前 → 一级/二级
+- 反向判定：实体仅出现在「遭受/位于/使用/听闻/隶属」等被动语境 → 默认三级（豁免清单除外）
+- 地名特殊处理：纯场景地点→三级，战略争夺核心区域→二级
 
 ## 输出 JSON
-{
-  "results": [
-    {"name": "实体名", "decision": "KEEP", "reason": "≤30字理由及证据"},
-    {"name": "实体名", "decision": "DISCARD", "reason": "≤30字理由"}
-  ]
-}
+{"results": [{"name":"实体名","tier":1,"reason":"≤30字理由及原文行为证据"}]}
 
-只输出 JSON。"""
+tier 取 1/2/3。只输出 JSON。"""
 
 _LAYER2_USER = """## 原文全文
 {source}
@@ -727,7 +757,7 @@ _LAYER2_USER = """## 原文全文
 ## 待判定实体（已归一化，含融合描述）
 {batch}
 
-请逐实体判定 KEEP 或 DISCARD。只输出 JSON。"""
+请逐实体判定 tier (1/2/3)。只输出 JSON。"""
 
 
 async def _layer2_classify_batch(
@@ -773,23 +803,32 @@ async def _layer2_classify_batch(
         raise ValueError(f"Layer 2 batch {batch_idx} bad format: {str(content)[:200]}")
 
     _tag = f"L2[{batch_idx}/{total_batches}]"
-    keep = 0
+    t1 = t2 = 0
     out = []
     for r in results:
         if isinstance(r, dict) and r.get("name"):
-            d = str(r.get("decision", "")).upper().strip()
-            if d not in ("KEEP", "DISCARD"):
-                d = "DISCARD"
-            if d == "KEEP":
-                keep += 1
+            # 优先读 tier，兼容旧 decision 格式
+            tier_raw = r.get("tier")
+            if tier_raw is not None:
+                tier = int(tier_raw)
+                if tier not in (1, 2, 3):
+                    tier = 3
+            else:
+                d = str(r.get("decision", "")).upper().strip()
+                tier = 1 if d == "KEEP" else 3
+            if tier == 1:
+                t1 += 1
+            elif tier == 2:
+                t2 += 1
             out.append({
                 "name": str(r["name"]).strip(),
-                "decision": d,
+                "tier": tier,
                 "reason": str(r.get("reason", ""))[:60],
+                "decision": "KEEP" if tier in (1, 2) else "DISCARD",
             })
     if log_fn:
-        log_fn("agents", f"  Layer2 批次{_tag}: {keep}/{len(out)} KEEP")
-    logger.info("[Layer2] 批次%s: %d/%d KEEP", _tag, keep, len(out))
+        log_fn("agents", f"  Layer2 批次{_tag}: tier1={t1} tier2={t2} tier3={len(out)-t1-t2}/{len(out)}")
+    logger.info("[Layer2] 批次%s: t1=%d t2=%d / %d", _tag, t1, t2, len(out))
     return out
 
 
@@ -819,14 +858,18 @@ async def _layer2_classify_all(
             if log_fn:
                 log_fn("agents", f"  Layer2 批次{i+1} 失败: {result}")
             for e in batches[i]:
-                decisions[e["name"]] = {"decision": "DISCARD", "reason": f"批次{i+1}LLM失败"}
+                decisions[e["name"]] = {"decision": "DISCARD", "tier": 3, "reason": f"批次{i+1}LLM失败"}
             continue
         for r in result:
-            decisions[r["name"]] = {"decision": r["decision"], "reason": r["reason"]}
+            decisions[r["name"]] = {
+                "decision": r["decision"],
+                "tier": r.get("tier", 3),
+                "reason": r["reason"],
+            }
 
     for e in entities:
         if e["name"] not in decisions:
-            decisions[e["name"]] = {"decision": "DISCARD", "reason": "LLM未覆盖"}
+            decisions[e["name"]] = {"decision": "DISCARD", "tier": 3, "reason": "LLM未覆盖"}
 
     return decisions
 
@@ -1644,28 +1687,45 @@ async def build_registry(
 
     # ── 8. 应用判定 ──
     for e in entity_list:
-        d = decisions.get(e["name"], {"decision": "DISCARD", "reason": "未判定"})
+        d = decisions.get(e["name"], {"decision": "DISCARD", "tier": 3, "reason": "未判定"})
+        tier = int(d.get("tier", 3))
+        if tier not in (1, 2, 3):
+            tier = 3
         re = RegisteredEntity(
             id=e.get("id", ""),
             name=e["name"], type=e["type"], freq=e["freq"],
             decision=d["decision"], reason=d["reason"],
             parent=e["parent"], aliases=e["aliases"],
             rich_description=e["description"],
+            tier=tier, tier_evidence=d.get("reason", "")[:80],
         )
         registry.entities[e["name"]] = re
-        if re.decision == "KEEP":
+        if tier in (1, 2):
             registry.kept += 1
+            if tier == 1:
+                registry.tier1_count += 1
+            else:
+                registry.tier2_count += 1
         else:
             registry.discarded += 1
             reason_key = f"L2({re.reason[:30]})"
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
 
+    if log_fn:
+        log_fn("agents",
+               f"注册中心: tier1={registry.tier1_count}核心 tier2={registry.tier2_count}次级 "
+               f"tier3={registry.discarded}丢弃 / {registry.total}总计")
+    logger.info("[EntityRegistry] tier1=%d tier2=%d tier3=%d",
+                registry.tier1_count, registry.tier2_count, registry.discarded)
+
     # ── 9. Layer 3: 交叉裁决 ──
     await _layer3_cross_validate(registry, source_material, log_fn, domain)
 
     if log_fn:
-        log_fn("agents", f"EntityRegistry: {registry.total} total, {registry.kept} KEEP, {registry.discarded} DISCARD")
-    logger.info("[EntityRegistry] 完成: %d/%d KEEP", registry.kept, registry.total)
+        log_fn("agents", f"EntityRegistry: {registry.total} total, "
+               f"tier1={registry.tier1_count} tier2={registry.tier2_count} DISCARD={registry.discarded}")
+    logger.info("[EntityRegistry] 完成: tier1=%d tier2=%d / %d",
+                registry.tier1_count, registry.tier2_count, registry.total)
     return registry
 
 

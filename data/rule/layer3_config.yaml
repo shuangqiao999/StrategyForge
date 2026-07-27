@@ -18,9 +18,16 @@ _defaults: &defaults
   shard_threshold: 12000      # 超过此字数启用分片路径
   l1_cache_enabled: true      # Layer1 归一化结果缓存 (P1-3)
   l1_cache_max_entries: 16    # Layer1 缓存最大条目
+  # 豁免规则
+  monarchs_force_tier1: true   # 君主强制一级
+  warlord_force_tier1: true    # 割据领袖强制一级
+  strategic_geo_tier2: true    # 战略地缘划为二级
 
 geo_strategy:
   <<: *defaults
+  exceptions:
+    monarchs_force_tier1: true
+    strategic_geo_tier2: true
   system_prompt: |
     你是地缘战略冗余检测专家。在已保留的博弈实体中，发现并消除语义重叠的冗余。
 

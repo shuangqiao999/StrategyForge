@@ -1,5 +1,12 @@
 {
-  "_comment": "Layer3 代码前置同义词词典。合并后实体不送入LLM，直接降低Token消耗和LLM方差。_builtin_* 段为兜底层级修正规则。_methodology 段为 LLM 推理方法论，注入 Layer1/Layer3 Prompt。",
+  "_comment": "Layer3 代码前置同义词词典。合并后实体不送入LLM，直接降低Token消耗和LLM方差。_builtin_* 段为兜底层级修正规则。_methodology 段为 LLM 推理方法论。_force_keep 为白名单，内实体无条件一级保留。",
+  "_force_keep": {
+    "all": [],
+    "geo_strategy": ["中国", "美国", "俄罗斯", "伊朗", "以色列", "朝鲜"],
+    "history": ["大明", "崇祯", "朱由检", "李自成", "张献忠", "皇太极", "周延儒", "温体仁", "杨嗣昌", "黄宗羲", "陈子龙", "阮大铖"],
+    "novel": []
+  },
+  "_strategic_regions": ["辽东", "中原", "江南", "关中", "巴蜀", "湖广", "山东", "河南", "陕西"],
   "_methodology": {
     "_note": "以下方法论块用于Layer1归一化和Layer3交叉裁决的LLM Prompt。代码不执行此段——仅注入给LLM作为推理框架。",
     "entity_agency": {
