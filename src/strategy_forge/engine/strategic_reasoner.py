@@ -57,7 +57,12 @@ $relationship_context
 
 ## 领域行动指引
 $strategic_context
-- observe 仅在没有明确威胁且局势不明时使用——如核心目标未达成，应选择低风险主动行动（collaborate/respond）而非被动观察。
+- **observe 禁止规则**：observe 仅在没有明确威胁且局势不明时才可使用。以下情况一律禁止 observe：
+  1. 你的核心目标未达成 → 必须选择主动行动（collaborate/compete/respond/initiate）
+  2. 近期事件中有涉及你的行动 → 必须做出回应
+  3. 你有明确的对手或盟友 → 必须对其采取行动
+  4. 即使没有明确对手，也应通过 diplomatic_statement/initiate 主动塑造局势、测试对手意图或巩固自身地位
+- 无事可做时的最优策略不是"观察"——而是"主动制造事件获取信息"或"巩固盟友确保安全"
 
 ## 行动示例
 正确（具体、有因果逻辑、与人格相关）：
