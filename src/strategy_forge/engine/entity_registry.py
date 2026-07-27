@@ -27,29 +27,40 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# ── LRU 缓存 (P0-1: 防止内存溢出) ──
+# ── LRU 缓存 (P0-1: 防止内存溢出 + TTL过期) ──
 class _LRUCache:
-    """简易 LRU 缓存，基于 OrderedDict。"""
-    def __init__(self, maxsize: int = 64):
+    """简易 LRU 缓存，带 TTL 过期（默认30分钟）。"""
+    def __init__(self, maxsize: int = 64, ttl_sec: int = 1800):
         self._maxsize = maxsize
+        self._ttl = ttl_sec
         self._data: dict[str, object] = {}
+        self._timestamps: dict[str, float] = {}
         self._order: list[str] = []
 
     def get(self, key: str) -> object | None:
+        import time
         if key in self._data:
+            if self._ttl > 0 and time.time() - self._timestamps.get(key, 0) > self._ttl:
+                self._order.remove(key)
+                del self._data[key]
+                del self._timestamps[key]
+                return None
             self._order.remove(key)
             self._order.append(key)
             return self._data[key]
         return None
 
     def set(self, key: str, value: object) -> None:
+        import time
         if key in self._data:
             self._order.remove(key)
         elif len(self._data) >= self._maxsize:
             oldest = self._order.pop(0)
             del self._data[oldest]
+            self._timestamps.pop(oldest, None)
             logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
         self._data[key] = value
+        self._timestamps[key] = time.time()
         self._order.append(key)
 
     def __contains__(self, key: str) -> bool:
@@ -66,11 +77,11 @@ _layer3_variance_log: list[dict] = []      # P0-2: 方差日志
 _token_defaults: dict | None = None        # 统一 token 配置缓存
 
 
-def _token_cfg(key: str, n: int) -> int:
+def _token_cfg(key: str, n: int, domain: str = "geo_strategy") -> int:
     """读取统一 token 配置。模块级缓存避免重复 YAML 解析。"""
     global _token_defaults
     if _token_defaults is None:
-        _token_defaults = _load_layer3_config("geo_strategy").get("token", {})
+        _token_defaults = _load_layer3_config(domain).get("token", {})
     return _get_token_limit({"token": _token_defaults}, key, n)
 
 
@@ -272,27 +283,39 @@ def _repair_json(s: str) -> str:
 # 工具函数
 # ────────────────────────────────────────────────────────────
 
-def _smart_sample(source: str, max_chars: int = 8000) -> str:
-    """智能采样：头 + 均匀中段 + 尾，覆盖全文叙事弧。"""
+def _smart_sample(source: str, max_chars: int = 8000, domain: str = "") -> str:
+    """智能采样：头 + 均匀中段 + 尾，覆盖全文叙事弧。
+    文学域增加中段权重（关键剧情多在中段），地缘域保持均匀。"""
     n = len(source)
     if n <= max_chars:
         return source
-    head = source[:2000]
-    tail = source[-2000:]
-    remaining = max_chars - 4000
+    # 文学域：头1500 + 中段(多取) + 尾1500
+    # 其他域：头2000 + 中段(均匀) + 尾2000
+    _lit = domain in ("novel", "history", "narrative")
+    head_size = 1500 if _lit else 2000
+    tail_size = 1500 if _lit else 2000
+    mid_budget = max_chars - head_size - tail_size
+    if mid_budget <= 0:
+        mid_budget = max_chars // 2
+        head_size = max_chars // 4
+        tail_size = max_chars // 4
+    head = source[:head_size]
+    tail = source[-tail_size:]
+    mid_start = head_size
+    mid_end = n - tail_size
     if remaining <= 0:
         return head + "\n...(中段省略)...\n" + tail
     # 均匀采样中段
     mid_start = 2000
     mid_end = n - 2000
     mid_len = mid_end - mid_start
-    if mid_len <= remaining:
+    if mid_len <= mid_budget:
         return source
     step = max(1, mid_len // 4)
     samples = []
     for i in range(4):
         pos = mid_start + i * step
-        chunk = source[pos:pos + remaining // 4]
+        chunk = source[pos:pos + mid_budget // 4]
         samples.append(f"\n--- [片段 {i+1}] ---\n{chunk}")
     return head + "".join(samples) + "\n--- [结尾] ---\n" + tail
 
@@ -711,14 +734,18 @@ def _memory_merge(all_shard_entities: list[dict], domain: str = "") -> tuple[lis
         })
 
     # 4. Jaccard 高相似名检测 → 输出为冲突对供 LLM 裁定
+    # 仅同类型实体对比，避免"美军"(Military) vs "美企"(Company) 误匹配
     conflicts = []
     merged_names = [m["name"] for m in merged]
+    merged_types = [m["type"] for m in merged]
     for i in range(len(merged)):
         for j in range(i + 1, len(merged)):
+            ti, tj = merged_types[i], merged_types[j]
+            # 类型过滤：不同类型直接跳过（Unknown 除外）
+            if ti != tj and ti != "Unknown" and tj != "Unknown":
+                continue
             sim = _char_jaccard(merged_names[i], merged_names[j])
             if sim > jaccard_threshold:
-                ti = merged[i]["type"]
-                tj = merged[j]["type"]
                 conflicts.append({
                     "a": merged[i]["name"],
                     "b": merged[j]["name"],
@@ -968,9 +995,31 @@ async def _layer2_classify_all(
         if isinstance(result, Exception):
             logger.warning("[Layer2] 批次 %d 失败: %s", i + 1, result)
             if log_fn:
-                log_fn("agents", f"  Layer2 批次{i+1} 失败: {result}")
-            for e in batches[i]:
-                decisions[e["name"]] = {"decision": "DISCARD", "tier": 3, "reason": f"批次{i+1}LLM失败"}
+                log_fn("agents", f"  Layer2 批次{i+1} 失败，拆为单实体重试...")
+            # 拆分失败批次为单实体重试
+            retry_tasks = [
+                _layer2_classify_batch([e], source, 0, 1, log_fn)
+                for e in batches[i]
+            ]
+            retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
+            recovered = 0
+            for j, rr in enumerate(retry_results):
+                e = batches[i][j]
+                if isinstance(rr, Exception):
+                    decisions[e["name"]] = {"decision": "DISCARD", "tier": 3,
+                                            "reason": f"批次{i+1}重试失败"}
+                elif rr and len(rr) > 0:
+                    decisions[e["name"]] = {
+                        "decision": rr[0]["decision"],
+                        "tier": rr[0].get("tier", 3),
+                        "reason": rr[0]["reason"],
+                    }
+                    recovered += 1
+                else:
+                    decisions[e["name"]] = {"decision": "DISCARD", "tier": 3,
+                                            "reason": f"批次{i+1}LLM失败"}
+            if log_fn and recovered:
+                log_fn("agents", f"  Layer2 重试恢复 {recovered}/{len(batches[i])} 个实体")
             continue
         for r in result:
             decisions[r["name"]] = {
@@ -1711,10 +1760,10 @@ async def build_registry(
     use_shard_path = source_len > shard_threshold
 
     normalized = None
-    # P1-3: Layer1 结果缓存
+    # P1-3: Layer1 结果缓存 (domain加入cache key防止跨域误复用)
     l1_cache_enabled = bool(l3cfg.get("l1_cache_enabled", True))
     if l1_cache_enabled and source_material:
-        l1_key = hashlib.md5(source_material.encode("utf-8")).hexdigest()
+        l1_key = hashlib.md5(f"{source_material}|{domain}".encode("utf-8")).hexdigest()
         cached_l1 = _layer1_normalize_cache.get(l1_key)
         if cached_l1:
             normalized = list(cached_l1)  # type: list[dict]
@@ -1733,7 +1782,7 @@ async def build_registry(
                 )
             # 写 L1 缓存
             if l1_cache_enabled and source_material and normalized:
-                l1_key = hashlib.md5(source_material.encode("utf-8")).hexdigest()
+                l1_key = hashlib.md5(f"{source_material}|{domain}".encode("utf-8")).hexdigest()
                 _layer1_normalize_cache.set(l1_key, normalized)
         except Exception as e:
             logger.warning("[Layer1] 归一化失败: %s, 回退到去重", e)
