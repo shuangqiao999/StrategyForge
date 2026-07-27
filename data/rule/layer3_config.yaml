@@ -6,9 +6,13 @@ _defaults: &defaults
   warn_threshold: 8           # KEEP ≥ 此数且无冗余时提示人工复核
   sample_chars: 5000          # 原文采样长度
   desc_truncate: 80           # 实体描述截断字数
-  max_tokens_base: 300        # max_tokens 基数
-  max_tokens_per_entity: 60   # 每个实体增加 token 数
-  max_tokens_cap: 2000        # max_tokens 上限
+  # 统一 max_tokens 公式: min(cap, base + n*per)
+  token:
+    l1_normalize:   { base: 200, per: 150, cap: 12000 }
+    l1_shard:       { base: 200, per: 200, cap: 6000 }
+    l1_refine:      { base: 200, per: 120, cap: 8000 }
+    l2_classify:    { base: 150, per: 100, cap: 4000 }
+    l3_cross:       { base: 300, per: 60,  cap: 3000 }
   log_file: ""                # 方差日志文件 (空=仅 logger)
   cache_enabled: true         # 是否启用哈希缓存
   cache_max_entries: 64       # LRU 缓存最大条目 (P0-1)

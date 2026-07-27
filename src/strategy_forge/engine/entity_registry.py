@@ -63,6 +63,15 @@ class _LRUCache:
 _layer3_decision_cache = _LRUCache(64)     # Layer3 哈希缓存
 _layer1_normalize_cache = _LRUCache(16)    # Layer1 归一化结果缓存
 _layer3_variance_log: list[dict] = []      # P0-2: 方差日志
+_token_defaults: dict | None = None        # 统一 token 配置缓存
+
+
+def _token_cfg(key: str, n: int) -> int:
+    """读取统一 token 配置。模块级缓存避免重复 YAML 解析。"""
+    global _token_defaults
+    if _token_defaults is None:
+        _token_defaults = _load_layer3_config("geo_strategy").get("token", {})
+    return _get_token_limit({"token": _token_defaults}, key, n)
 
 
 # ── 字典加载 (P0-3: 统一数据源) ──
@@ -292,6 +301,15 @@ def _shard_source(text: str, shard_size: int = _SHARD_SIZE,
     return shards
 
 
+def _get_token_limit(cfg: dict, key: str, n: int) -> int:
+    """从统一 token 配置读取 max_tokens: min(cap, base + n*per)。"""
+    tk = cfg.get("token", {}).get(key, {})
+    base = tk.get("base", 200)
+    per = tk.get("per", 100)
+    cap = tk.get("cap", 4000)
+    return min(cap, base + n * per)
+
+
 def _char_jaccard(a: str, b: str) -> float:
     """字符级 Jaccard 相似度。"""
     sa, sb = set(a), set(b)
@@ -391,7 +409,7 @@ async def _layer1_normalize(
         [Message(role="user", content=prompt)],
         system=_LAYER1_SYSTEM,
         temperature=0,
-        max_tokens=max(4000, min(10000, 100 + len(raw_fragments) * 200)),
+        max_tokens=_token_cfg("l1_normalize", len(raw_fragments)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -507,7 +525,7 @@ async def _layer1_shard_normalize(
         [Message(role="user", content=prompt)],
         system=_SHARD_SYSTEM,
         temperature=0,
-        max_tokens=3000,
+        max_tokens=_token_cfg("l1_shard", len(shard_entities)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -709,7 +727,7 @@ async def _layer1_global_refine(
         [Message(role="user", content=prompt)],
         system=_REFINE_SYSTEM,
         temperature=0,
-        max_tokens=4000,
+        max_tokens=_token_cfg("l1_refine", len(merged)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -822,7 +840,7 @@ async def _layer2_classify_batch(
         [Message(role="user", content=prompt)],
         system=_LAYER2_SYSTEM,
         temperature=0,
-        max_tokens=2000,
+        max_tokens=_token_cfg("l2_classify", len(batch)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -1170,9 +1188,6 @@ async def _layer3_cross_validate(
     warn_threshold = cfg.get("warn_threshold", 8)
     sample_chars = cfg.get("sample_chars", 5000)
     desc_trunc = cfg.get("desc_truncate", 80)
-    token_base = cfg.get("max_tokens_base", 300)
-    token_per = cfg.get("max_tokens_per_entity", 60)
-    token_cap = cfg.get("max_tokens_cap", 2000)
     cache_enabled = cfg.get("cache_enabled", True)
 
     kept = registry.get_kept()
@@ -1267,7 +1282,7 @@ async def _layer3_cross_validate(
             [Message(role="user", content=prompt)],
             system=system_prompt,
             temperature=0,
-            max_tokens=min(token_cap, token_base + total_kept * token_per),
+            max_tokens=_get_token_limit(cfg, "l3_cross", total_kept),
         )
         content = resp.content if hasattr(resp, "content") else str(resp)
         if isinstance(content, list):
