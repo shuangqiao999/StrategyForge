@@ -1827,6 +1827,27 @@ async def build_registry(
             "id": "",
         })
 
+    # ── 5.1 描述富化层：从 Kuzu 原始碎片补全缺失的描述 ──
+    # Layer1 JSON 解析失败回退 dedup 时描述会丢失——此步用 Kuzu 原始节点描述补救
+    enriched = 0
+    for e in entity_list:
+        if e.get("description", "").strip():
+            continue  # 已有富描述，跳过
+        nm = e["name"]
+        aliases = set(e.get("aliases", [])) | {nm}
+        descs = []
+        for frag in raw_fragments:
+            fname = frag.get("name", "")
+            if fname in aliases or (len(fname) >= 2 and fname in nm) or (len(nm) >= 2 and nm in fname):
+                d = (frag.get("description") or "").strip()
+                if d and d not in descs:
+                    descs.append(d)
+        if descs:
+            e["description"] = "；".join(descs)[:300]
+            enriched += 1
+    if enriched and log_fn:
+        log_fn("agents", f"描述富化: {enriched} 个实体补全了 Kuzu 原始描述")
+
     # ── 6. 构建 Registry 骨架 ──
     registry = EntityRegistry()
     registry.total = len(entity_list)
