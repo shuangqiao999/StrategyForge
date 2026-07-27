@@ -1616,8 +1616,9 @@ class SimulationEngine:
         return candidates
 
     async def _reflect_and_adapt(self, agent: Any, round_number: int,
-                                   client: Any) -> str | None:
-        """人格动态化：根据近期经历微调 agent 的行为准则。
+                                   client: Any, mode: str = None) -> str | None:
+        """人格动态化：根据近期经历微调 agent 的行为准则（量化模式）。
+        mode: None=默认, "strategic"=D2长期理性, "internal"=D6.1内源自省。
 
         仅修改 system_prompt_extra，不覆盖原始 persona/background。
         返回新 system_prompt_extra 字符串，或 None（无变化）。
@@ -2286,7 +2287,7 @@ class SimulationEngine:
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
 
-        # ── 共享反思闸门（量化模式调用 _reflect_and_adapt）──
+        # ── 共享反思闸门（量化模式：完整 P0-P2 六维反思）──
         if not hasattr(self, "_reflection_baselines"):
             self._reflection_baselines: dict[str, dict[str, float]] = {}
             self._last_reflection_round_n: dict[str, int] = {}
@@ -2295,20 +2296,72 @@ class SimulationEngine:
                 self._last_reflection_round_n[agent.entity_id] = _random.randint(0, 2)
 
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        from strategy_forge.core.providers import registry as _reg
         _rc = LLMClient()
-        for agent in self.agents:
-            eid = agent.entity_id
-            reason = self._should_reflect(eid, round_number, states.get(eid), re_engine)
-            if reason is not None:
-                result = await self._reflect_and_adapt(agent, round_number, _rc)
-                if result and "无需调整" not in result:
-                    self._reflection_baselines[eid] = dict(self._narrative_env)
-                    self._last_reflection_round_n[eid] = round_number
-                    self._log("simulation",
-                        f"[人格演化] {agent.name}: {reason} (R{round_number})")
+        _max_conc = max(1, _reg.max_concurrent)
+        _sem = asyncio.Semaphore(_max_conc)
+
+        # D4-phase2: 并行纠错
+        async def _q_correct_one(eid: str, remaining: list, agent, snapshots) -> None:
+            async with _sem:
+                for snap in snapshots:
+                    if round_number - snap["round"] >= 1:
+                        corrected = await self._reflect_correct(agent, snap, round_number, _rc)
+                        if corrected and agent.system_prompt_extra:
+                            old_rules = agent.system_prompt_extra.split("；")
+                            if snap["raw_rule"] in old_rules:
+                                new_rules = [r for r in old_rules if r != snap["raw_rule"]]
+                                new_rules.append(corrected)
+                                agent.system_prompt_extra = "；".join(new_rules)
+                        self._log("simulation",
+                            f"[D4纠错] {agent.name}: {snap['trigger']} (R{round_number})")
+                    else:
+                        remaining.append(snap)
+                if remaining:
+                    self._pending_corrections[eid] = remaining
                 else:
+                    self._pending_corrections.pop(eid, None)
+
+        d4_tasks = []
+        for eid, snapshots in list(self._pending_corrections.items()):
+            agent = next((a for a in self.agents if a.entity_id == eid), None)
+            if agent:
+                remaining: list = []
+                d4_tasks.append(_q_correct_one(eid, remaining, agent, snapshots))
+        if d4_tasks:
+            await asyncio.gather(*d4_tasks)
+
+        # 主要反思循环：并行 + D2/D6.1 路由
+        async def _q_reflect_one(agent) -> None:
+            async with _sem:
+                eid = agent.entity_id
+                state = states.get(eid)
+                reason = self._should_reflect(eid, round_number, state, re_engine)
+                if reason is not None:
+                    result = await self._reflect_and_adapt(agent, round_number, _rc,
+                                                           mode="strategic" if ("环境" in reason or "累计" in reason)
+                                                           else "internal" if "内源" in reason else None)
+                    tag = (
+                        "[D2数值复盘]" if "环境" in reason or "累计" in reason
+                        else "[内源自省]" if "内源" in reason
+                        else "[反思]")
+                    if result and "无需调整" not in result:
+                        self._reflection_baselines[eid] = dict(self._narrative_env)
+                        self._last_reflection_round_n[eid] = round_number
                     self._log("simulation",
-                        f"[反思] {agent.name}: {reason} → 无需调整 (R{round_number})")
+                        f"{tag} {agent.name}: {reason} → "
+                        f"{'新增准则' if (result and '无需调整' not in result) else '无需调整'} (R{round_number})")
+
+        reflect_tasks = [_q_reflect_one(a) for a in self.agents]
+        await asyncio.gather(*reflect_tasks)
+
+        # D6.2: 并行回溯悔悟
+        if round_number > 0 and round_number % 5 == 0:
+            async def _q_retrospect_one(agent) -> None:
+                async with _sem:
+                    await self._reflect_retrospect(agent, round_number, _rc)
+            retro_tasks = [_q_retrospect_one(a) for a in self.agents]
+            await asyncio.gather(*retro_tasks)
 
         # 保存本轮关系网络快照供下轮对比
         self._prev_rel_map = dict(getattr(self, "_rel_context", {}))
