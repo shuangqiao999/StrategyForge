@@ -20,7 +20,13 @@ from .preprocessor import DeductionPreprocessor
 logger = logging.getLogger(__name__)
 
 
-_PERSONA_PROMPT = """基于以下实体信息和原文背景，为该$domain_role生成一个独立人格档案。返回 JSON。
+_PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基于实体信息和原文事实，避免任何意识形态偏好或价值判断，为该$domain_role生成一个独立人格档案。返回 JSON。
+
+## 中立性原则（严格遵守）
+- 基于原文中对实体的实际行为和处境描述，不做主观褒贬
+- 不赋予任何实体"道德优越性"或"邪恶本质"标签
+- 如实反映实体的战略矛盾、内部压力和决策困境
+- 避免使用"扩张者""霸权者""追随者"等预设立场词汇
 
 ## 来自用户的特殊期望（必须严肃考虑）
 $user_expectations
@@ -212,7 +218,7 @@ async def create_agents_from_graph(
             if chat_fn is not None:
                 content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
             else:
-                response = await client.chat_json(messages, system=system, schema_name="persona", temperature=0.5)
+                response = await client.chat_json(messages, system=system, schema_name="persona", temperature=0.3)
                 content = extract_text(response)
             profile_data = _parse_persona_json(content)
             if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
