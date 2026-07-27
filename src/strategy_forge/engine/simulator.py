@@ -916,7 +916,18 @@ class SimulationEngine:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
                                      action.agent_id, e)
 
-        # ── 事件驱动反思：检测关键事件，D1 情绪应激 + D3 深度（L3+）──
+        # ── 事件驱动反思：初始化基础设施 + 检测关键事件 ──
+        if not hasattr(self, "_reflection_baselines"):
+            self._reflection_baselines: dict[str, dict[str, float]] = {}
+            self._last_reflection_round_n: dict[str, int] = {}
+            import random as _random
+            for agent in self.agents:
+                self._last_reflection_round_n[agent.entity_id] = _random.randint(0, 2)
+        if not hasattr(self, "_pending_corrections"):
+            self._pending_corrections = {}
+        if not hasattr(self, "_event_category_log"):
+            self._event_category_log = {}
+
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         _erc = LLMClient()
         for action in sim_round.actions:
