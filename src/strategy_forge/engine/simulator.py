@@ -575,6 +575,71 @@ class SimulationEngine:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
         return static_text or "无特定背景", dynamic_text or "无近期模拟事件"
 
+    # ── 事件驱动反思：触发规则（纯关键词匹配，0 LLM 成本）──
+    _TRIGGER_RULES: dict[str, list[str]] = {
+        # 军事冲突
+        "遭攻击": ["遭到攻击", "被袭击", "被入侵", "被轰炸", "受到打击", "遭到空袭",
+                   "被伏击", "被围困", "防线被突破", "阵地失守"],
+        # 战败
+        "战败": ["战败", "溃败", "大败", "撤退", "失守", "全军覆没",
+                 "损失惨重", "伤亡巨大", "被歼灭", "败退"],
+        # 主动战争
+        "开战": ["开战", "宣战", "发动攻击", "入侵", "进攻", "突袭",
+                 "空袭", "打击", "轰炸", "出兵"],
+        # 外交背叛
+        "遭背叛": ["背叛", "被出卖", "被欺骗", "被利用", "背信弃义",
+                   "违约", "撕毁协议", "毁约", "背弃承诺", "倒戈",
+                   "投敌", "叛变", "内奸", "间谍", "两面三刀"],
+        # 断交/关系恶化
+        "关系恶化": ["断交", "断绝关系", "撕毁条约", "退出联盟", "关系破裂",
+                     "分道扬镳", "决裂", "反目成仇", "盟友倒向敌方"],
+        # 战略重大失败
+        "重大失败": ["失败", "未能", "功亏一篑", "计划落空", "无功而返",
+                     "重大失误", "战略失误", "判断错误", "失策", "功败垂成",
+                     "未达预期", "空手而归", "无法达成", "受阻"],
+        # 意外（负面）
+        "意外转折": ["意外", "突然", "出乎意料", "措手不及", "始料未及",
+                     "突发", "变故", "晴天霹雳", "逆转", "翻盘",
+                     "意外失败", "出人意料"],
+        # 被制裁/封锁
+        "遭制裁": ["被制裁", "被封锁", "被禁运", "被冻结资产", "被列入黑名单",
+                   "被孤立", "被排挤", "被切断", "被禁", "受限",
+                   "被遏制", "被围堵"],
+        # 资源危机
+        "资源危机": ["资源枯竭", "粮草不足", "资金断裂", "供应中断", "物资匮乏",
+                     "能源危机", "断供", "储备耗尽", "入不敷出", "弹尽粮绝"],
+        # 内部动荡
+        "内乱": ["政变", "内乱", "叛乱", "分裂", "内讧", "哗变",
+                 "抗议", "暴动", "暗杀", "刺杀", "内部分裂",
+                 "权力斗争", "派系冲突", "民怨沸腾"],
+        # 情报相关
+        "情报泄露": ["情报泄露", "秘密暴露", "被发现", "暴露", "泄密",
+                     "走漏风声", "被识破", "被揭穿", "阴谋败露"],
+        # 联盟变化
+        "联盟变动": ["结盟", "结为新盟友", "缔结同盟", "联手", "联合",
+                     "瓦解联盟", "盟友倒戈", "投靠", "投诚", "归附"],
+        # 意外成功（正面触发反思）
+        "意外成功": ["意外成功", "大获全胜", "超出预期", "意外收获", "重大突破",
+                     "不战而胜", "意外得利", "趁火打劫得手"],
+        # 被威胁/勒索
+        "被胁迫": ["被威胁", "被勒索", "被要挟", "被逼无奈", "被迫让步",
+                   "身不由己", "受制于人", "被裹挟"],
+        # 舆论/声誉
+        "声誉危机": ["舆论压力", "声誉受损", "形象崩塌", "被谴责", "被孤立",
+                     "信任危机", "信用崩塌", "名誉扫地", "千夫所指"],
+    }
+
+    def _has_trigger_event(self, action) -> tuple[str, str] | None:
+        """检测 action 是否包含触发反思的关键事件。返回 (类别, 匹配词) 或 None。"""
+        content = getattr(action, "content", "") or ""
+        action_type = getattr(action, "action_type", "") or ""
+        text = f"{action_type} {content}"
+        for category, keywords in self._TRIGGER_RULES.items():
+            for kw in keywords:
+                if kw in text:
+                    return category, kw
+        return None
+
     def _should_reflect(self, agent_id: str, round_number: int,
                          state: Any = None, rule_engine: Any = None) -> str | None:
         """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
@@ -720,6 +785,28 @@ class SimulationEngine:
                     except Exception as e:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
                                      action.agent_id, e)
+
+        # ── 事件驱动反思：检测关键事件，立即触发 Agent 反思 ──
+        from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        _erc = LLMClient()
+        for action in sim_round.actions:
+            trigger = self._has_trigger_event(action)
+            if trigger:
+                category, keyword = trigger
+                agent = next((a for a in self.agents if a.entity_id == action.agent_id), None)
+                if agent:
+                    eid = agent.entity_id
+                    # 距上次反思不足 1 轮则跳过（防止同一事件反复触发）
+                    last_r = self._last_reflection_round_n.get(eid, 0)
+                    if round_number - last_r < 1:
+                        continue
+                    rule_added = await self._reflect_narrative(agent, round_number, _erc)
+                    if rule_added:
+                        self._reflection_baselines[eid] = dict(self._narrative_env)
+                        self._last_reflection_round_n[eid] = round_number
+                    self._log("simulation",
+                        f"[事件触发反思] {agent.name}: {category}({keyword}) → "
+                        f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
 
         # ── 叙事模式环境评估（每轮最多 3 个 Agent 抽样）──
         await self._assess_env_impact(sim_round, round_number)
