@@ -1174,12 +1174,28 @@ async def _layer3_cross_validate(
     _domain_raw = domain or getattr(_cfg, "active_domain", "") or getattr(_cfg, "domain", "")
     domain = _domain_raw or "geo_strategy"
 
-    # 文学叙事域跳过 Layer 3 —— 代码别名合并已在 _pre_merge_aliases 完成
-    # (domain 为空也跳过：规则引擎初始化失败时无法确定域，不应默认地缘规则)
-    if _domain_raw in ("novel", "history", "narrative") or not _domain_raw:
+    # 内容特征检测：决定是否跳过 Layer 3
+    kept_before = registry.get_kept() if hasattr(registry, "get_kept") else []
+    _skip = False
+    if _domain_raw in ("novel", "history", "narrative"):
+        _skip = True
+    elif _domain_raw == "geo_strategy":
+        _skip = False
+    elif not _domain_raw:
+        # 域名未知 → 内容特征检测
+        person_types = {"Person", "人物"}
+        geo_types = {"Country", "国家", "Organization", "组织", "国际组织"}
+        n_person = sum(1 for e in kept_before if e.type in person_types)
+        n_geo = sum(1 for e in kept_before if e.type in geo_types)
+        total = len(kept_before)
+        if total > 0 and n_person / total > 0.5 and n_geo < 3:
+            _skip = True  # 人物为主+少组织 → 文学叙事
+        # 否则不跳过 → 按地缘处理
+
+    if _skip:
         kept = registry.get_kept()
         if log_fn:
-            log_fn("agents", f"Layer3 跳过 (文学/历史域: {len(kept)} KEEP，不执行冗余检测)")
+            log_fn("agents", f"Layer3 跳过 (域={_domain_raw or '未知/文学特征'}: {len(kept)} KEEP，不执行冗余检测)")
         # 仍执行权重联动
         _reconcile_weights(registry)
         return
@@ -1732,6 +1748,38 @@ async def build_registry(
         return registry
 
     # ── 8. 应用判定 ──
+    # 白名单强制一级：_force_keep 中的实体无视 Layer 2 分类
+    force_keep_list = _alias_data.get("_force_keep", {})
+    force_base = set(force_keep_list.get("all", []))
+    force_base.update(force_keep_list.get(domain, []))
+    # 扩增：白名单条目 + 它们的别名 (从别名词典中获取)
+    force_expanded: set[str] = set(force_base)
+    alias_dict = _alias_data.get(domain, {})
+    for fname in force_base:
+        aliases = alias_dict.get(fname, [])
+        force_expanded.update(str(a) for a in aliases if a)
+    if force_expanded:
+        overridden = 0
+        # 先构建实体名→别名 的反向索引
+        ent_aliases: dict[str, set[str]] = {}
+        for e in entity_list:
+            nm = e["name"]
+            aliases_set = set(e.get("aliases", []))
+            ent_aliases[nm] = aliases_set
+        for name in list(decisions.keys()):
+            # 匹配：决策键名 或 实体别名 命中白名单
+            matched = name in force_expanded
+            if not matched:
+                for fa in ent_aliases.get(name, set()):
+                    if fa in force_expanded:
+                        matched = True
+                        break
+            if matched and decisions[name].get("tier", 3) != 1:
+                decisions[name] = {"decision": "KEEP", "tier": 1, "reason": "白名单强制一级"}
+                overridden += 1
+        if overridden and log_fn:
+            log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
+
     for e in entity_list:
         d = decisions.get(e["name"], {"decision": "DISCARD", "tier": 3, "reason": "未判定"})
         tier = int(d.get("tier", 3))
