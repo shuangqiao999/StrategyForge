@@ -70,6 +70,78 @@ class LLMConnectionError(Exception):
         self.cause = cause
 
 
+# ── 预置 JSON Schema 定义，供 DeductionLLMClient.chat_json() 使用 ──
+_JSON_SCHEMAS: dict[str, dict] = {
+    "l1_entities": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "aliases": {"type": "array", "items": {"type": "string"}},
+                        "type": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["name", "type"]
+                }
+            }
+        },
+        "required": ["entities"]
+    },
+    "l2_results": {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "tier": {"type": "integer", "minimum": 1, "maximum": 3},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["name", "tier"]
+                }
+            }
+        },
+        "required": ["results"]
+    },
+    "l3_decisions": {
+        "type": "object",
+        "properties": {
+            "downgrades": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["name"]
+                }
+            },
+            "merges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "keep": {"type": "string"},
+                        "discard": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["keep"]
+                }
+            },
+            "notes": {"type": "string"},
+        },
+        "required": ["downgrades", "merges"]
+    },
+}
+
+
 class DeductionLLMClient:
     """Lightweight LLM client for StrategyForge deduction engine."""
 
@@ -244,6 +316,31 @@ class DeductionLLMClient:
                     pass
         # 指数退避 + 抖动，封顶 cap
         return min(base * (2 ** attempt) + random.uniform(0, base), cap)
+
+    async def chat_json(
+        self,
+        messages: list[dict] | list[Message],
+        system: str = "",
+        schema_name: str = "l1_entities",
+        max_tokens: int = 0,
+        temperature: float = 0,
+        **kwargs,
+    ) -> DeductionLLMResponse:
+        """使用 JSON Schema 约束的 chat 调用，根治 JSON 格式错误。
+        
+        schema_name 可选:
+          l1_entities:  Layer1 归一化实体输出
+          l2_results:   Layer2 分级判定结果
+          l3_decisions: Layer3 交叉裁决输出
+        """
+        schema = _JSON_SCHEMAS.get(schema_name)
+        if schema:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "schema": schema},
+            }
+        return await self.chat(messages, system=system,
+                               max_tokens=max_tokens, temperature=temperature, **kwargs)
 
     async def close(self):
         if self._http:

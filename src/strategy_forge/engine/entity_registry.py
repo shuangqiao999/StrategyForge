@@ -491,9 +491,10 @@ async def _layer1_normalize_batch(
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
-    resp = await client.chat(
+    resp = await client.chat_json(
         [Message(role="user", content=prompt)],
         system=_LAYER1_SYSTEM,
+        schema_name="l1_entities",
         temperature=0,
         max_tokens=_token_cfg("l1_normalize", len(raw_fragments)),
     )
@@ -607,9 +608,10 @@ async def _layer1_shard_normalize(
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
-    resp = await client.chat(
+    resp = await client.chat_json(
         [Message(role="user", content=prompt)],
         system=_SHARD_SYSTEM,
+        schema_name="l1_entities",
         temperature=0,
         max_tokens=_token_cfg("l1_shard", len(shard_entities)),
     )
@@ -813,9 +815,10 @@ async def _layer1_global_refine(
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
-    resp = await client.chat(
+    resp = await client.chat_json(
         [Message(role="user", content=prompt)],
         system=_REFINE_SYSTEM,
+        schema_name="l1_entities",
         temperature=0,
         max_tokens=_token_cfg("l1_refine", len(merged)),
     )
@@ -926,9 +929,10 @@ async def _layer2_classify_batch(
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
-    resp = await client.chat(
+    resp = await client.chat_json(
         [Message(role="user", content=prompt)],
         system=_LAYER2_SYSTEM,
+        schema_name="l2_results",
         temperature=0,
         max_tokens=_token_cfg("l2_classify", len(batch)),
     )
@@ -1415,9 +1419,10 @@ async def _layer3_cross_validate(
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     try:
         client = DeductionLLMClient()
-        resp = await client.chat(
+        resp = await client.chat_json(
             [Message(role="user", content=prompt)],
             system=system_prompt,
+            schema_name="l3_decisions",
             temperature=0,
             max_tokens=_get_token_limit(cfg, "l3_cross", total_kept),
         )
