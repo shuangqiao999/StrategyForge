@@ -980,59 +980,73 @@ class SimulationEngine:
                 self._last_reflection_round_n[agent.entity_id] = _random.randint(0, 2)
 
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+        from strategy_forge.core.providers import registry as _reg
         _rc = LLMClient()
-        # ── 轮末反思：D2 数值复盘 + D6.1 内源自省 + D6.2 悔悟 + D4-phase2 纠错 ──
-        # D4-phase2: 处理待纠错的冲动快照
+        _max_conc = max(1, _reg.max_concurrent)
+        _sem = asyncio.Semaphore(_max_conc)
+
+        # ── D4-phase2: 并行纠错 ──
+        async def _correct_one(eid: str, remaining: list, agent, snapshots) -> None:
+            async with _sem:
+                for snap in snapshots:
+                    if round_number - snap["round"] >= 1:
+                        corrected = await self._reflect_correct(agent, snap, round_number, _rc)
+                        if corrected and agent.system_prompt_extra:
+                            old_rules = agent.system_prompt_extra.split("；")
+                            if snap["raw_rule"] in old_rules:
+                                new_rules = [r for r in old_rules if r != snap["raw_rule"]]
+                                new_rules.append(corrected)
+                                agent.system_prompt_extra = "；".join(new_rules)
+                            self._log("simulation",
+                                f"[D4纠错] {agent.name}: {snap['trigger']} 冲动准则已修正 (R{round_number})")
+                    else:
+                        remaining.append(snap)
+                if remaining:
+                    self._pending_corrections[eid] = remaining
+                else:
+                    self._pending_corrections.pop(eid, None)
+
+        d4_tasks = []
         for eid, snapshots in list(self._pending_corrections.items()):
             agent = next((a for a in self.agents if a.entity_id == eid), None)
-            if not agent:
-                continue
-            remaining = []
-            for snap in snapshots:
-                if round_number - snap["round"] >= 1:
-                    corrected = await self._reflect_correct(agent, snap, round_number, _rc)
-                    if corrected and agent.system_prompt_extra:
-                        # 修复：替换旧情绪准则为非情绪化的修正版
-                        old_rules = agent.system_prompt_extra.split("；")
-                        if snap["raw_rule"] in old_rules:
-                            new_rules = [r for r in old_rules if r != snap["raw_rule"]]
-                            new_rules.append(corrected)
-                            agent.system_prompt_extra = "；".join(new_rules)
-                        self._log("simulation",
-                            f"[D4纠错] {agent.name}: {snap['trigger']} 冲动准则已修正 (R{round_number})")
-                else:
-                    remaining.append(snap)
-            if remaining:
-                self._pending_corrections[eid] = remaining
-            else:
-                del self._pending_corrections[eid]
+            if agent:
+                remaining: list = []
+                d4_tasks.append(_correct_one(eid, remaining, agent, snapshots))
+        if d4_tasks:
+            await asyncio.gather(*d4_tasks)
 
-        # 主要反思循环
-        for agent in self.agents:
-            eid = agent.entity_id
-            reason = self._should_reflect(eid, round_number)
-            if reason:
-                # 路由：D6.1 内源自省 vs D2 数值复盘
-                if "内源" in reason:
-                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
-                    tag = "[内源自省]"
-                elif "环境" in reason or "累计" in reason:
-                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
-                    tag = "[D2数值复盘]"
-                else:
-                    rule_added = await self._reflect_narrative(agent, round_number, _rc)
-                    tag = "[反思]"
-                if rule_added:
-                    self._reflection_baselines[eid] = dict(self._narrative_env)
-                    self._last_reflection_round_n[eid] = round_number
-                self._log("simulation",
-                    f"{tag} {agent.name}: {reason} → "
-                    f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
+        # ── 主要反思循环：并行 ──
+        async def _reflect_one(agent) -> None:
+            async with _sem:
+                eid = agent.entity_id
+                reason = self._should_reflect(eid, round_number)
+                if reason:
+                    if "内源" in reason:
+                        rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
+                        tag = "[内源自省]"
+                    elif "环境" in reason or "累计" in reason:
+                        rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
+                        tag = "[D2数值复盘]"
+                    else:
+                        rule_added = await self._reflect_narrative(agent, round_number, _rc)
+                        tag = "[反思]"
+                    if rule_added:
+                        self._reflection_baselines[eid] = dict(self._narrative_env)
+                        self._last_reflection_round_n[eid] = round_number
+                    self._log("simulation",
+                        f"{tag} {agent.name}: {reason} → "
+                        f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
 
-        # D6.2: 每 5 轮触发一次回溯悔悟
+        reflect_tasks = [_reflect_one(a) for a in self.agents]
+        await asyncio.gather(*reflect_tasks)
+
+        # ── D6.2: 并行回溯悔悟 ──
         if round_number > 0 and round_number % 5 == 0:
-            for agent in self.agents:
-                await self._reflect_retrospect(agent, round_number, _rc)
+            async def _retrospect_one(agent) -> None:
+                async with _sem:
+                    await self._reflect_retrospect(agent, round_number, _rc)
+            retro_tasks = [_retrospect_one(a) for a in self.agents]
+            await asyncio.gather(*retro_tasks)
 
         # 保存本轮关系网络快照供下轮对比
         if not hasattr(self, "_prev_rel_map"):
