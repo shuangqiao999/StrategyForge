@@ -282,7 +282,7 @@ class StrategicReasoner:
             if self._chat_fn is not None:
                 content = await asyncio.to_thread(self._chat_fn, messages, system, self._temperature)
             else:
-                response = await llm.chat(messages, system=system, temperature=self._temperature, max_tokens=2000)
+                response = await llm.chat_json(messages, system=system, schema_name="strategy_candidates", temperature=self._temperature, max_tokens=2000)
                 content = extract_text(response)
             candidates = _parse_candidates(content)
         except Exception as e:
@@ -489,8 +489,8 @@ class StrategicReasoner:
                 content = await asyncio.to_thread(
                     self._chat_fn, [Message(role="user", content=prompt)], system, self._temperature)
             else:
-                resp = await llm.chat([Message(role="user", content=prompt)],
-                                      system=system, temperature=self._temperature)
+                resp = await llm.chat_json([Message(role="user", content=prompt)],
+                                      system=system, schema_name="strategy_single", temperature=self._temperature)
                 content = extract_text(resp)
             data = extract_json(content)
             if not isinstance(data, dict):

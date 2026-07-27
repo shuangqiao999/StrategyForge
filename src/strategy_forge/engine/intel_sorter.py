@@ -111,10 +111,10 @@ async def sort_entities(
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
     try:
-        resp = await client.chat(
+        resp = await client.chat_json(
             [Message(role="user", content=prompt)],
             system="你是情报分析师，输出结构化 JSON。只输出 JSON。",
-            temperature=0,
+            schema_name="intel_sort", temperature=0,
             max_tokens=config.deduction_intel_max_tokens,
         )
     except LLMConnectionError:

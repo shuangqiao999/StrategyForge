@@ -73,7 +73,7 @@ async def generate_ontology(text: str) -> Ontology:
     system = "你是知识本体分析专家，只输出 JSON。"
 
     try:
-        response = await client.chat(messages, system=system, temperature=0.1, max_tokens=1500)
+        response = await client.chat_json(messages, system=system, schema_name="ontology_gen", temperature=0.1)
         content = extract_text(response)
         result = _parse_ontology(content)
     except Exception as e:

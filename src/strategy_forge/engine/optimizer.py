@@ -398,10 +398,10 @@ class StrategyOptimizer:
             events=events,
         )
         try:
-            resp = await client.chat(
+            resp = await client.chat_json(
                 [Message(role="user", content=prompt)],
                 system="你是推演结果评估专家，只输出 JSON。",
-                temperature=0.1,
+                schema_name="optimizer_eval", temperature=0.1,
             )
             data = extract_json(extract_text(resp))
             if isinstance(data, dict):

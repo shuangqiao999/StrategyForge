@@ -212,7 +212,7 @@ async def create_agents_from_graph(
             if chat_fn is not None:
                 content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
             else:
-                response = await client.chat(messages, system=system, temperature=0.5, max_tokens=600)
+                response = await client.chat_json(messages, system=system, schema_name="persona", temperature=0.5)
                 content = extract_text(response)
             profile_data = _parse_persona_json(content)
             if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):

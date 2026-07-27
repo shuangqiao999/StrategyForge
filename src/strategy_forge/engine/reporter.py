@@ -575,8 +575,13 @@ async def generate_report(
     )
 
     try:
-        response = await client.chat(messages, system=system, temperature=report_temp,
-                                     max_tokens=report_max_tokens)
+        # 量化模式用 json_schema 约束，叙事模式保持原有调用（温度高+Scchema 冲突创意）
+        if report_temp <= 0.5:
+            response = await client.chat_json(messages, system=system, schema_name="report_quantified",
+                                              temperature=report_temp, max_tokens=report_max_tokens)
+        else:
+            response = await client.chat(messages, system=system, temperature=report_temp,
+                                         max_tokens=report_max_tokens)
         content = extract_text(response)
         report_data = _parse_report_json(content)
     except Exception as e:
@@ -585,8 +590,12 @@ async def generate_report(
             _retry = max(1500, report_max_tokens // 2)
             log_fn("report", f"LLM 调用失败(可能上下文超限)，减半重试(max_tokens={_retry})")
             try:
-                response = await client.chat(messages, system=system, temperature=report_temp,
-                                             max_tokens=_retry)
+                if report_temp <= 0.5:
+                    response = await client.chat_json(messages, system=system, schema_name="report_quantified",
+                                                      temperature=report_temp, max_tokens=_retry)
+                else:
+                    response = await client.chat(messages, system=system, temperature=report_temp,
+                                                 max_tokens=_retry)
                 content = extract_text(response)
                 report_data = _parse_report_json(content)
             except Exception as e2:

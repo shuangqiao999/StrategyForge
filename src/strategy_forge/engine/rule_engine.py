@@ -393,8 +393,8 @@ class RuleEngine:
         # 用 replace 注入文本。
         prompt = _detect_base.replace("{text}", text[:4000])
         try:
-            resp = await chat_client.chat([Message(role="user", content=prompt)],
-                                          system="你是领域分类器，只输出 JSON。", temperature=0.1)
+            resp = await chat_client.chat_json([Message(role="user", content=prompt)],
+                                          system="你是领域分类器，只输出 JSON。", schema_name="domain_detect", temperature=0.1)
             data = extract_json(extract_text(resp))
             if isinstance(data, dict):
                 dom = str(data.get("domain", "narrative"))

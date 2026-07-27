@@ -139,6 +139,219 @@ _JSON_SCHEMAS: dict[str, dict] = {
         },
         "required": ["downgrades", "merges"]
     },
+    # ── 扩展 Schema ──
+    "persona": {
+        "type": "object",
+        "properties": {
+            "persona": {"type": "string"},
+            "background": {"type": "string"},
+            "goals": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["persona", "background", "goals"]
+    },
+    "graph_extract": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "entity": {"type": "string"},
+                        "type": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["entity", "type"]
+                }
+            },
+            "relations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "target": {"type": "string"},
+                        "relation": {"type": "string"},
+                        "evidence": {"type": "string"},
+                    },
+                    "required": ["source", "target", "relation"]
+                }
+            },
+        },
+        "required": ["entities", "relations"]
+    },
+    "intel_sort": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string"},
+                        "aliases": {"type": "array", "items": {"type": "string"}},
+                        "parent": {"type": "string"},
+                        "sub_entities": {"type": "array", "items": {"type": "string"}},
+                        "role": {"type": "string"},
+                    },
+                    "required": ["name"]
+                }
+            }
+        },
+        "required": ["entities"]
+    },
+    "ontology_gen": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "properties": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["name"]
+                }
+            },
+            "relations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "from_type": {"type": "string"},
+                        "to_type": {"type": "string"},
+                    },
+                    "required": ["name"]
+                }
+            },
+        },
+        "required": ["entities", "relations"]
+    },
+    "narrative_sort": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "aliases": {"type": "array", "items": {"type": "string"}},
+                        "include": {"type": "boolean"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["name", "include"]
+                }
+            }
+        },
+        "required": ["entities"]
+    },
+    "optimizer_eval": {
+        "type": "object",
+        "properties": {
+            "success": {"type": "boolean"},
+            "win_score": {"type": "number"},
+            "cost": {"type": "number"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["success", "win_score", "cost"]
+    },
+    "convergence": {
+        "type": "object",
+        "properties": {
+            "resolved": {"type": "boolean"},
+            "verdict": {"type": "string"},
+        },
+        "required": ["resolved"]
+    },
+    "domain_detect": {
+        "type": "object",
+        "properties": {
+            "domain": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+        "required": ["domain", "confidence"]
+    },
+    "seed_extract": {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "metrics": {"type": "object"},
+                    },
+                    "required": ["name", "metrics"]
+                }
+            }
+        },
+        "required": ["entities"]
+    },
+    "strategy_single": {
+        "type": "object",
+        "properties": {
+            "action_type": {"type": "string"},
+            "target": {"type": "string"},
+            "intensity": {"type": "number"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["action_type"]
+    },
+    "strategy_candidates": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "selected": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "target": {"type": "string"},
+                        "content": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "risk_level": {"type": "string"},
+                    },
+                    "required": ["action"]
+                }
+            }
+        },
+    },
+    "report_quantified": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "key_events": {"type": "array", "items": {"type": "string"}},
+            "risk_alerts": {"type": "array", "items": {"type": "string"}},
+            "conclusion": {"type": "string"},
+        },
+        "required": ["summary"]
+    },
+    "env_impact": {
+        "type": "object",
+        "properties": {
+            "舆论风向": {"type": "number"},
+            "抗议规模": {"type": "number"},
+            "媒体关注": {"type": "number"},
+            "国际压力": {"type": "number"},
+            "社会分裂": {"type": "number"},
+        },
+    },
+    "action_fallback": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string"},
+            "target": {"type": "string"},
+            "content": {"type": "string"},
+        },
+        "required": ["action"]
+    },
 }
 
 

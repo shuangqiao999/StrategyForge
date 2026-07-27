@@ -1371,10 +1371,10 @@ class SimulationEngine:
                 f"只输出 JSON。"
             )
             try:
-                resp = await client.chat(
+                resp = await client.chat_json(
                     [Message(role="user", content=prompt)],
                     system="你是环境观察者，评估单一动作的环境影响。只输出 JSON。",
-                    temperature=0.2,
+                    schema_name="env_impact", temperature=0.2,
                     max_tokens=100,
                 )
                 data = extract_json(str(resp))
@@ -1514,7 +1514,7 @@ class SimulationEngine:
                     response = await asyncio.to_thread(self._chat_fn, messages, system, 0.7)
                     content = response
                 else:
-                    response = await client.chat(messages, system=system, temperature=0.6, max_tokens=1500)
+                    response = await client.chat_json(messages, system=system, schema_name="action_fallback", temperature=0.6, max_tokens=1500)
                     content = extract_text(response)
                 action_data = _parse_action_json(content)
             except Exception as e2:

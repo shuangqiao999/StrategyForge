@@ -122,10 +122,10 @@ async def extract_seed_metrics(
     from strategy_forge.core.config import config
     from strategy_forge.core.llm_client import Message
     try:
-        resp = await client.chat(
+        resp = await client.chat_json(
             [Message(role="user", content=prompt)],
             system="你是战略数据提取器，只输出 JSON。",
-            temperature=0.1,
+            schema_name="seed_extract", temperature=0.1,
             max_tokens=config.deduction_seed_max_tokens,
         )
     except Exception as e:

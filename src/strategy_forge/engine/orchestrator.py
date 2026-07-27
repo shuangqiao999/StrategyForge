@@ -816,10 +816,10 @@ class DeductionOrchestrator:
         )
         try:
             client = LLMClient()
-            resp = await client.chat(
+            resp = await client.chat_json(
                 [Message(role="user", content=prompt)],
                 system="你是推演收敛判定裁判，只输出 JSON。",
-                temperature=0.2, max_tokens=300)
+                schema_name="convergence", temperature=0.2, max_tokens=300)
             data = extract_json(extract_text(resp))
             if isinstance(data, dict):
                 return bool(data.get("resolved")), str(data.get("verdict", ""))[:200]
