@@ -629,16 +629,145 @@ class SimulationEngine:
                      "信任危机", "信用崩塌", "名誉扫地", "千夫所指"],
     }
 
-    def _has_trigger_event(self, action) -> tuple[str, str] | None:
-        """检测 action 是否包含触发反思的关键事件。返回 (类别, 匹配词) 或 None。"""
+    def _has_trigger_event(self, action) -> tuple[str, str, int] | None:
+        """检测 action 是否包含触发反思的关键事件。返回 (类别, 匹配词, 严重度1-4) 或 None。"""
         content = getattr(action, "content", "") or ""
         action_type = getattr(action, "action_type", "") or ""
         text = f"{action_type} {content}"
         for category, keywords in self._TRIGGER_RULES.items():
             for kw in keywords:
                 if kw in text:
-                    return category, kw
+                    severity = self._get_severity(category)
+                    return category, kw, severity
         return None
+
+    @staticmethod
+    def _get_severity(category: str) -> int:
+        """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。"""
+        _heavy = {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"}
+        _medium = {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"}
+        _light = {"意外转折", "联盟变动", "意外成功"}
+        if category in _heavy:
+            return 3
+        if category in _medium:
+            return 2
+        if category in _light:
+            return 1
+        return 1
+
+    # ── D4: 二阶复盘数据结构 ──
+    _pending_corrections: dict = {}      # agent_id → list[{round, raw_rule, trigger}]
+    _event_category_log: dict = {}       # agent_id → {category: [rounds]}
+    _rule_history: dict = {}             # agent_id → [{"round":R, "rule":str, "status":"active"|"retired"}]
+    _strategy_depth: dict = {}           # agent_id → 0=正常 1=谨慎 2=危机 3=重构
+
+    # ── D1-D4 多模式 Prompt 模板 ──
+    _PROMPT_EMOTIONAL = """你是 {name} 的本能反应层。刚刚经历了：{trigger_summary}
+这是人类的即时情绪反应——允许短期偏激，允许防卫过当，允许非理性。
+
+## 你的核心人格（不可撼动）
+{persona}
+
+## 触发事件内容
+{action_content}
+
+## 输出
+一行代表人遭遇此类事件时本能情绪反应的准则（≤15字）。
+示例："被背叛后复仇心压倒一切" "遭受攻击后全面戒备"
+只输出准则本身。"""
+
+    _PROMPT_STRATEGIC = """你是 {name} 的理性分析层。基于长期数据趋势，做全局战略判断。
+
+## 核心人格
+{persona}
+
+## 当前宏观环境（0-100）
+{env_stats}
+
+## 近期变化趋势
+{delta_summary}
+
+## 现有准则
+{current_rules}
+
+## 输出
+一行基于长期趋势的战略修正准则（≤20字），保持理性和远见。
+示例："资源持续下滑应收缩防线保核心区"
+只输出准则本身，如果当前战略正确输出"无需调整"。"""
+
+    _PROMPT_DEEP = """你是 {name} 的深度战略重构层。{severity_label} 事件触发了你的全盘重思。
+
+## 核心人格（不可撼动）
+{persona}
+
+## 触发事件
+{trigger_summary}
+
+## 现有准则（将被替换）
+{current_rules}
+
+## 历史同类经历
+{history_patterns}
+
+## 任务
+这次打击极其严重——你需要生成一条根本性的新战略准则（≤25字），用于完全替代旧准则。
+这条准则必须是经历过重大打击后产生的深层次策略转变。
+示例："永不以信任作为博弈筹码" "在确保绝对实力前停止一切冒险扩张"
+只输出准则本身。"""
+
+    _PROMPT_RECONSTRUCT = """你是 {name} 的价值观重构层。毁灭级事件彻底瓦解了你的旧世界观。
+
+## 仅存的核心人格
+{persona}
+
+## 毁灭级事件
+{trigger_summary}
+
+## 历史伤痛
+{history_patterns}
+
+## 旧准则（全部作废）
+{current_rules}
+
+## 任务
+输出一条全新的、从根本上重构你行为方式的准则（≤30字）。
+这不应该是对旧准则的修补——而是彻底的范式转变。
+示例："从多边协作彻底转向自给自足的孤立主义" "放弃一切外交幻想，武力是唯一语言"
+只输出准则本身。"""
+
+    _PROMPT_INTERNAL = """你是 {name} 的自我审视层。当前一切平稳——但你需要主动检查。
+
+## 核心人格
+{persona}
+
+## 现有准则
+{current_rules}
+
+## 近期行动
+{recent_events}
+
+## 自查清单
+- 你的策略有无隐性漏洞？
+- 是否过于保守或激进？
+- 是否有未利用的机会窗口？
+
+如果发现需修正，输出新准则（≤20字）。如果一切妥当，输出"无需调整"。"""
+
+    _PROMPT_RETROSPECT = """你是 {name} 的纠错层。定期回溯你的全部行为准则，清理过时项。
+
+## 现有准则
+{current_rules}
+
+## 判断标准
+- 局势已变→准则过时→删除
+- 过于极端→需要缓和→标记修正
+- 曾因冲动产生→冷静后不适用→删除
+
+## 输出
+每行一个操作：
+  删除：<准则原文>
+  修正：<旧准则> → <新准则>
+无变化输出"无需调整"。"""
 
     def _should_reflect(self, agent_id: str, round_number: int,
                          state: Any = None, rule_engine: Any = None) -> str | None:
@@ -675,6 +804,9 @@ class SimulationEngine:
                 thr = thr_map.get(m, 0)
                 if thr > 0 and v <= thr * 1.3:
                     return f"指标告急({m}={v:.0f},阈={thr:.0f})"
+        # 条件5: 内源主动自省（每5轮强制触发一次）
+        if round_number > 0 and round_number % 5 == 0:
+            return "内源主动自省"
         return None
 
     def _append_event(self, event: dict) -> None:
@@ -786,27 +918,50 @@ class SimulationEngine:
                         logger.warning("[Simulator] Event memory write failed for %s: %s",
                                      action.agent_id, e)
 
-        # ── 事件驱动反思：检测关键事件，立即触发 Agent 反思 ──
+        # ── 事件驱动反思：检测关键事件，D1 情绪应激 + D3 深度（L3+）──
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         _erc = LLMClient()
         for action in sim_round.actions:
             trigger = self._has_trigger_event(action)
             if trigger:
-                category, keyword = trigger
+                category, keyword, severity = trigger
                 agent = next((a for a in self.agents if a.entity_id == action.agent_id), None)
                 if agent:
                     eid = agent.entity_id
-                    # 距上次反思不足 1 轮则跳过（防止同一事件反复触发）
                     last_r = self._last_reflection_round_n.get(eid, 0)
                     if round_number - last_r < 1:
                         continue
-                    rule_added = await self._reflect_narrative(agent, round_number, _erc)
+                    content = getattr(action, "content", "")[:200]
+                    # D1: 情绪应激反思
+                    rule_added = await self._reflect_narrative(
+                        agent, round_number, _erc, mode="emotional",
+                        trigger_category=category, trigger_keyword=keyword,
+                        action_content=content, severity=severity)
                     if rule_added:
+                        # D4: 存入快照供下轮冷静纠错
+                        self._pending_corrections.setdefault(eid, []).append({
+                            "round": round_number, "rounds_ago": 1,
+                            "raw_rule": agent.system_prompt_extra.split("；")[-1]
+                            if agent.system_prompt_extra else "",
+                            "trigger": f"{category}({keyword})",
+                        })
                         self._reflection_baselines[eid] = dict(self._narrative_env)
                         self._last_reflection_round_n[eid] = round_number
+                    # D5: 记录到历史分类日志
+                    self._log_category_event(eid, category, round_number)
                     self._log("simulation",
-                        f"[事件触发反思] {agent.name}: {category}({keyword}) → "
+                        f"[事件反思-D1] {agent.name}: {category}({keyword}) severity={severity} → "
                         f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
+                    # D3: L3+ 重度事件 → 深度/价值观重构反思
+                    if severity >= 3 and rule_added:
+                        deep_mode = "reconstruct" if severity >= 4 else "deep"
+                        depth_label = "重构" if severity >= 4 else "深度"
+                        await self._reflect_narrative(
+                            agent, round_number, _erc, mode=deep_mode,
+                            trigger_category=category, trigger_keyword=keyword,
+                            action_content=content, severity=severity)
+                        self._log("simulation",
+                            f"[事件反思-D3{depth_label}] {agent.name}: severity={severity} (R{round_number})")
 
         # ── 叙事模式环境评估（每轮最多 3 个 Agent 抽样）──
         await self._assess_env_impact(sim_round, round_number)
@@ -826,18 +981,58 @@ class SimulationEngine:
 
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
         _rc = LLMClient()
+        # ── 轮末反思：D2 数值复盘 + D6.1 内源自省 + D6.2 悔悟 + D4-phase2 纠错 ──
+        # D4-phase2: 处理待纠错的冲动快照
+        for eid, snapshots in list(self._pending_corrections.items()):
+            agent = next((a for a in self.agents if a.entity_id == eid), None)
+            if not agent:
+                continue
+            remaining = []
+            for snap in snapshots:
+                if round_number - snap["round"] >= 1:
+                    corrected = await self._reflect_correct(agent, snap, round_number, _rc)
+                    if corrected and agent.system_prompt_extra:
+                        # 修复：替换旧情绪准则为非情绪化的修正版
+                        old_rules = agent.system_prompt_extra.split("；")
+                        if snap["raw_rule"] in old_rules:
+                            new_rules = [r for r in old_rules if r != snap["raw_rule"]]
+                            new_rules.append(corrected)
+                            agent.system_prompt_extra = "；".join(new_rules)
+                        self._log("simulation",
+                            f"[D4纠错] {agent.name}: {snap['trigger']} 冲动准则已修正 (R{round_number})")
+                else:
+                    remaining.append(snap)
+            if remaining:
+                self._pending_corrections[eid] = remaining
+            else:
+                del self._pending_corrections[eid]
+
+        # 主要反思循环
         for agent in self.agents:
             eid = agent.entity_id
             reason = self._should_reflect(eid, round_number)
             if reason:
-                rule_added = await self._reflect_narrative(agent, round_number, _rc)
+                # 路由：D6.1 内源自省 vs D2 数值复盘
+                if "内源" in reason:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
+                    tag = "[内源自省]"
+                elif "环境" in reason or "累计" in reason:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
+                    tag = "[D2数值复盘]"
+                else:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc)
+                    tag = "[反思]"
                 if rule_added:
                     self._reflection_baselines[eid] = dict(self._narrative_env)
                     self._last_reflection_round_n[eid] = round_number
-                # 仅记录轮次（即使"无需调整"也记录，防止同轮重复触发）
                 self._log("simulation",
-                    f"[叙事人格演化] {agent.name}: {reason} (R{round_number})" if rule_added
-                    else f"[叙事反思] {agent.name}: {reason} → 无需调整 (R{round_number})")
+                    f"{tag} {agent.name}: {reason} → "
+                    f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
+
+        # D6.2: 每 5 轮触发一次回溯悔悟
+        if round_number > 0 and round_number % 5 == 0:
+            for agent in self.agents:
+                await self._reflect_retrospect(agent, round_number, _rc)
 
         # 保存本轮关系网络快照供下轮对比
         if not hasattr(self, "_prev_rel_map"):
@@ -868,8 +1063,12 @@ class SimulationEngine:
 
     async def _reflect_narrative(
         self, agent: DeductionAgentProfile, round_number: int, client: Any,
+        mode: str = "default",
+        trigger_category: str = "", trigger_keyword: str = "",
+        action_content: str = "", severity: int = 1,
     ) -> bool:
-        """叙事模式人格反思。返回 True=新增规则，False=无需调整。"""
+        """叙事模式人格反思。mode: default/emotional/strategic/deep/internal。
+        返回 True=新增规则，False=无需调整。"""
         from strategy_forge.core.llm_client import Message
         from ._utils import extract_text
 
@@ -890,7 +1089,50 @@ class SimulationEngine:
                 f"- [R{e.get('round','?')}] {e.get('content','')[:100]}"
                 for e in my_events[-15:]
             )
-        prompt = (
+        # ── 模版路由：根据不同反思维度选择 prompt 和参数 ──
+        history_patterns = self._get_history_patterns(agent.entity_id)
+        current_rules = agent.system_prompt_extra or "（无）"
+        env_stats = "\n".join(f"- {k}: {v:.0f}" for k, v in self._narrative_env.items())
+        persona = agent.persona or "（无）"
+
+        if mode == "emotional":
+            prompt = self._PROMPT_EMOTIONAL.format(
+                name=agent.name, persona=persona,
+                trigger_summary=f"{trigger_category}({trigger_keyword})",
+                action_content=action_content[:200],
+            )
+            _mt = 80
+        elif mode == "strategic":
+            baseline = self._reflection_baselines.get(agent.entity_id, dict(self._narrative_env))
+            deltas = []
+            for k in self._narrative_env:
+                d = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
+                deltas.append(f"- {k}: {d:+.0f}")
+            prompt = self._PROMPT_STRATEGIC.format(
+                name=agent.name, persona=persona,
+                env_stats=env_stats, delta_summary="\n".join(deltas),
+                current_rules=current_rules,
+            )
+            _mt = 120
+        elif mode == "deep":
+            sev_label = {3: "重度—格局级", 4: "灾难—价值观重构级"}.get(severity, "重度")
+            prompt = self._PROMPT_DEEP.format(
+                name=agent.name, persona=persona,
+                severity_label=sev_label,
+                trigger_summary=f"{trigger_category}({trigger_keyword})",
+                current_rules=current_rules,
+                history_patterns=history_patterns or "首次遭遇此类事件",
+            )
+            _mt = 250 if severity == 3 else 400
+        elif mode == "internal":
+            prompt = self._PROMPT_INTERNAL.format(
+                name=agent.name, persona=persona,
+                current_rules=current_rules,
+                recent_events=events_text,
+            )
+            _mt = 120
+        else:
+            prompt = (
             f"你是 {agent.name} 的潜意识。回顾你近期的行动经历，"
             f"判断你的性格是否需要微调。\n\n"
             f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
@@ -913,12 +1155,13 @@ class SimulationEngine:
             f"  没有重要人际事件则省略此行。\n"
             f"\n只输出准则本身或\"无需调整\"，不要解释。"
         )
+            _mt = 80
         try:
             resp = await client.chat(
                 [Message(role="user", content=prompt)],
                 system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
-                temperature=0.3,
-                max_tokens=80,
+                temperature=0.3 if mode != "emotional" else 0.5,
+                max_tokens=_mt,
             )
             text = extract_text(resp).strip()
             if not text:
@@ -962,6 +1205,115 @@ class SimulationEngine:
         except Exception as e:
             logger.debug("[Simulator] 叙事反思失败: %s", e)
             return False
+
+    def _get_history_patterns(self, agent_id: str) -> str:
+        """D5: 聚合同类历史事件模式。"""
+        log = self._event_category_log.get(agent_id, {})
+        if not log:
+            return ""
+        patterns = []
+        for cat, rounds in log.items():
+            if len(rounds) >= 2:
+                r_str = ", ".join(f"R{r}" for r in rounds[-5:])
+                patterns.append(f"- {cat}: {len(rounds)}次 ({r_str})")
+        return "\n".join(patterns) if patterns else ""
+
+    def _log_category_event(self, agent_id: str, category: str, round_number: int) -> None:
+        """D5: 将触发事件分类记录到历史日志。"""
+        self._event_category_log.setdefault(agent_id, {}).setdefault(category, []).append(round_number)
+        # 只保留最近 20 次
+        if len(self._event_category_log[agent_id][category]) > 20:
+            self._event_category_log[agent_id][category] = \
+                self._event_category_log[agent_id][category][-20:]
+
+    async def _reflect_correct(
+        self, agent: DeductionAgentProfile, snapshot: dict,
+        round_number: int, client: Any,
+    ) -> str | None:
+        """D4-phase2: 二阶冷静纠错。对比冲动快照，生成修正。返回修正后准则或 None。"""
+        from strategy_forge.core.llm_client import Message
+        from ._utils import extract_text
+        my_events = [
+            e for e in self._event_history[-20:]
+            if e.get("agent") == agent.entity_id or e.get("agent_name") == agent.name
+        ]
+        events_since = "\n".join(
+            f"- [R{e.get('round','?')}] {e.get('content','')[:80]}"
+            for e in my_events[-8:]
+        ) or "无后续事件"
+        prompt = (
+            f"你是 {agent.name} 的理性纠错层。{snapshot['rounds_ago']} 轮前，你因"
+            f"「{snapshot['trigger']}」产生了冲动反应：\n\n"
+            f"## 当时的冲动准则\n\"{snapshot['raw_rule']}\"\n\n"
+            f"## 此后发生的事\n{events_since}\n\n"
+            f"## 任务\n这条冲动准则在冷静后是否需要修正？如果需要，输出修正后准则（≤20字）。"
+            f"如果当时判断正确无需修正，输出\"无需修正\"。\n只输出准则或\"无需修正\"。"
+        )
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是冷静的纠错分析师，输出修正准则或'无需修正'。",
+                temperature=0.1, max_tokens=80,
+            )
+            text = extract_text(resp).strip()
+            if not text or "无需修正" in text or len(text) < 2:
+                return None
+            return text
+        except Exception as e:
+            logger.debug("[Simulator] D4纠错失败: %s", e)
+            return None
+
+    async def _reflect_retrospect(
+        self, agent: DeductionAgentProfile, round_number: int, client: Any,
+    ) -> int:
+        """D6.2: 回溯悔悟。检查当前全部准则，删除过时项。返回被删除数。"""
+        current = agent.system_prompt_extra
+        if not current:
+            return 0
+        from strategy_forge.core.llm_client import Message
+        from ._utils import extract_text
+        prompt = self._PROMPT_RETROSPECT.format(
+            name=agent.name, current_rules=current,
+        )
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是准则审计师。逐条判断现有准则是否过时。",
+                temperature=0.1, max_tokens=200,
+            )
+            text = extract_text(resp).strip()
+            if not text or "无需调整" in text or len(text) < 2:
+                return 0
+            deleted = 0
+            for line in text.split("\n"):
+                line = line.strip()
+                if line.startswith("删除：") or line.startswith("删除:"):
+                    old_rule = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    if old_rule and old_rule in current:
+                        current = current.replace("；" + old_rule, "")
+                        current = current.replace(old_rule + "；", "")
+                        current = current.replace(old_rule, "")
+                        deleted += 1
+                elif line.startswith("修正：") or line.startswith("修正:"):
+                    mapping = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    if "→" in mapping:
+                        old_str, new_str = mapping.split("→", 1)
+                        old_str, new_str = old_str.strip(), new_str.strip()
+                        if old_str in current and new_str:
+                            current = current.replace(old_str, new_str)
+                            deleted += 1
+            # Clean up double semicolons
+            while "；；" in current:
+                current = "；".join(p for p in current.split("；") if p)
+            current = current.strip("；")
+            agent.system_prompt_extra = current or None
+            if deleted:
+                self._log("simulation",
+                    f"[回溯悔悟] {agent.name}: 清理了 {deleted} 条过时准则 (R{round_number})")
+            return deleted
+        except Exception as e:
+            logger.debug("[Simulator] D6.2回溯失败: %s", e)
+            return 0
 
     async def _assess_env_impact(self, sim_round: SimulationRound, round_number: int) -> None:
         """叙事模式环境评估：随机抽 3 个 Agent 用 LLM 评估其动作对环境的影响。"""
