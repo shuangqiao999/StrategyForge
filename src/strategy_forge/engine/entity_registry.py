@@ -221,6 +221,7 @@ def _parse_llm_json(raw: str) -> dict:
         ("balanced", lambda x: _json.loads(_extract_balanced(x, '{', '}') or x)),
         ("last_brace", lambda x: _json.loads(
             x[:x.rfind('}') + 1] if '}' in x else "")),
+        ("repair",   lambda x: _json.loads(_repair_json(x))),
     ]:
         try:
             data = parser(s)
@@ -229,6 +230,22 @@ def _parse_llm_json(raw: str) -> dict:
         except Exception:
             continue
     raise ValueError(f"JSON parse failed. Raw(length={len(s)}):\n{s[:500]}")
+
+
+def _repair_json(s: str) -> str:
+    """修复常见的 LLM JSON 语法错误：双逗号、截断数组、孤立逗号。"""
+    # 1. 去除多余逗号：`, ,` → `,`
+    s = _re.sub(r',\s*,', ',', s)
+    # 2. 逗号后无值截断：`"aliases": ,` → `"aliases": []`
+    s = _re.sub(r'":\s*,', '": [],', s)
+    # 3. 截断的未完成条目：删掉最后一个不完整的 key-value
+    s = _re.sub(r',\s*"[a-z_]+\s*$', '', s)
+    # 4. 孤立方括号修复：`, ]` → `]`
+    s = _re.sub(r',\s*\]', ']', s)
+    # 5. 丢失的闭合：如果 `]` 缺失但 `}` 存在，补 `]}`
+    if _re.search(r'"[a-z_]+\s*":\s*$', s):
+        s = s.rstrip().rstrip(',') + ']}'
+    return s
 
 
 # ────────────────────────────────────────────────────────────
@@ -374,13 +391,27 @@ async def _layer1_normalize(
         [Message(role="user", content=prompt)],
         system=_LAYER1_SYSTEM,
         temperature=0,
-        max_tokens=4000,
+        max_tokens=max(4000, min(10000, 100 + len(raw_fragments) * 200)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
         content = "".join(b.text for b in content if hasattr(b, "text"))
 
-    data = _parse_llm_json(str(content))
+    raw = str(content)
+    # 主解析 + 截断恢复（输出过长被 max_tokens 截断时）
+    try:
+        data = _parse_llm_json(raw)
+    except Exception:
+        last_complete = raw.rfind('"name"')
+        if last_complete > 0:
+            truncated = raw[:last_complete - 1] + "\n]}"
+            try:
+                data = _parse_llm_json(truncated)
+                logger.warning("[Layer1] 输出被截断，恢复到最后一个完整条目")
+            except Exception:
+                raise
+        else:
+            raise
     entities = data.get("entities", [])
     if not isinstance(entities, list) or len(entities) == 0:
         raise ValueError(f"Layer 1 empty entities. Raw: {str(content)[:300]}")
