@@ -444,7 +444,8 @@ async def _layer1_normalize(
                 nm = p.get("name", "")
                 if nm and nm not in merged:
                     merged[nm] = {"name": nm, "aliases": [], "type": p.get("type", "Unknown"),
-                                  "description": (p.get("description") or "")[:200]}
+                                  "description": (p.get("description") or "")[:200],
+                                  "id": p.get("id", "")}
             continue
         for e in result:
             nm = e["name"]
@@ -1663,7 +1664,8 @@ def _dedup_fallback(
             continue
         seen.add(std_name)
         d = {"name": std_name, "type": p.get("type", "Unknown"),
-             "description": p.get("description", ""), "aliases": []}
+             "description": p.get("description", ""), "aliases": [],
+             "id": p.get("id", "")}
         if std_name != name:
             d.setdefault("aliases", []).append(name)
         deduped.append(d)
@@ -1815,6 +1817,26 @@ async def build_registry(
                 if a and a not in intel_map:
                     intel_map[a] = e
 
+    # ── 5.0 从 raw_fragments 构建 name→id 映射，回填 Layer1 丢失的 Kuzu 实体 ID ──
+    name_to_kuzu_id: dict[str, str] = {}
+    alias_to_kuzu_id: dict[str, str] = {}
+    for frag in raw_fragments:
+        fid = (frag.get("id") or "").strip()
+        fname = (frag.get("name") or "").strip()
+        if fid and fname:
+            name_to_kuzu_id[fname] = fid
+    # 从 intel_map 扩增别名映射（解决 Layer1 查重后名称变更的归位问题）
+    for nm, info in intel_map.items():
+        if nm in name_to_kuzu_id:
+            for a in info.get("aliases", []):
+                a = str(a).strip()
+                if a and a not in alias_to_kuzu_id:
+                    alias_to_kuzu_id[a] = name_to_kuzu_id[nm]
+        for a in info.get("aliases", []):
+            a = str(a).strip()
+            if a in name_to_kuzu_id and nm not in name_to_kuzu_id:
+                name_to_kuzu_id[nm] = name_to_kuzu_id[a]
+
     entity_list: list[dict] = []
     for ne in normalized:
         nm = ne["name"]
@@ -1823,6 +1845,17 @@ async def build_registry(
         aliases = list(ne.get("aliases", []))
         if not aliases and intel.get("aliases"):
             aliases = [str(a) for a in intel["aliases"] if a != nm]
+        # 已保留的 ID（分片归一化合并时保留）
+        raw_id = (ne.get("id") or "").strip()
+        # 从 raw_fragments 回填（同名匹配 → 别名匹配 → 空）
+        kuzu_id = raw_id or name_to_kuzu_id.get(nm) or ""
+        if not kuzu_id:
+            for a in [nm] + aliases:
+                if a in name_to_kuzu_id:
+                    kuzu_id = name_to_kuzu_id[a]
+                    break
+        if not kuzu_id:
+            kuzu_id = alias_to_kuzu_id.get(nm) or ""
         entity_list.append({
             "name": nm,
             "type": ne.get("type", "Unknown"),
@@ -1830,7 +1863,7 @@ async def build_registry(
             "aliases": aliases,
             "description": ne.get("description", ""),
             "parent": str(intel.get("parent") or ""),
-            "id": "",
+            "id": kuzu_id,
         })
 
     # ── 5.1 描述富化层：从 Kuzu 原始碎片补全缺失的描述 ──
@@ -1862,7 +1895,7 @@ async def build_registry(
         reg_entities = []
         for e in entity_list:
             reg_entities.append(RegisteredEntity(
-                id=raw_fragments[0].get("id", "") if raw_fragments else "",
+                id=e.get("id", ""),
                 name=e["name"], type=e["type"], freq=e["freq"],
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
@@ -1884,6 +1917,7 @@ async def build_registry(
         reg_entities = []
         for e in entity_list:
             reg_entities.append(RegisteredEntity(
+                id=e.get("id", ""),
                 name=e["name"], type=e["type"], freq=e["freq"],
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
@@ -1940,13 +1974,17 @@ async def build_registry(
         if overridden and log_fn:
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
 
+    missing_ids: list[str] = []
     for e in entity_list:
         d = decisions.get(e["name"], {"decision": "DISCARD", "tier": 3, "reason": "未判定"})
         tier = int(d.get("tier", 3))
         if tier not in (1, 2, 3):
             tier = 3
+        kuzu_id = e.get("id", "").strip()
+        if not kuzu_id and tier in (1, 2):
+            missing_ids.append(e["name"])
         re = RegisteredEntity(
-            id=e.get("id", ""),
+            id=kuzu_id,
             name=e["name"], type=e["type"], freq=e["freq"],
             decision=d["decision"], reason=d["reason"],
             parent=e["parent"], aliases=e["aliases"],
@@ -1971,6 +2009,12 @@ async def build_registry(
                f"tier3={registry.discarded}丢弃 / {registry.total}总计")
     logger.info("[EntityRegistry] tier1=%d tier2=%d tier3=%d",
                 registry.tier1_count, registry.tier2_count, registry.discarded)
+    if missing_ids:
+        logger.warning("[EntityRegistry] %d tier1/2 entities missing Kuzu ID: %s",
+                       len(missing_ids), ", ".join(missing_ids[:10]))
+        if log_fn:
+            log_fn("agents", f"⚠ 实体注册中 {len(missing_ids)} 个实体缺失 Kuzu ID (关系反哺将跳过): "
+                   + ", ".join(missing_ids[:8]))
 
     # ── 9. Layer 3: 交叉裁决 ──
     await _layer3_cross_validate(registry, source_material, log_fn, domain)
@@ -2038,6 +2082,7 @@ async def _layer1_shard_pipeline(
                     "aliases": e.get("aliases", []),
                     "type": e.get("type", "Unknown"),
                     "description": (e.get("description") or "")[:150],
+                    "id": e.get("id", ""),
                 })
             continue
         pool.extend(batch)

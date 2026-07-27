@@ -182,7 +182,11 @@ async def _extract_from_chunks(
             graph.upsert_relation(sid, tid, rel.get("relation", ""),
                                  evidence=rel.get("evidence", ""))
             total_relations += 1
-        log_fn("graph", f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系")
+        _report = f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系"
+        if relations:
+            _sample = [r.get("relation","?") for r in relations[:5]]
+            _report += f" | 关系采样: {_sample}"
+        log_fn("graph", _report)
 
 
 def _build_reverse_alias(alias_map: dict[str, set[str]]) -> dict[str, str]:
@@ -199,6 +203,9 @@ def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, An
     data = extract_json(raw)
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
+    if data is None:
+        logger.warning("[Graph] extract_json returned None for raw (len=%d): %.200s", len(raw), raw[:200])
+        return entities, relations
     if isinstance(data, dict):
         entities = data.get("entities", [])
         relations = data.get("relations", [])
@@ -209,6 +216,8 @@ def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, An
                     entities.append(item)
                 elif "source" in item:
                     relations.append(item)
+    else:
+        logger.warning("[Graph] Unexpected parse result type: %s", type(data).__name__)
     return entities, relations
 
 

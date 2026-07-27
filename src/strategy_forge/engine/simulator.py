@@ -349,17 +349,25 @@ class SimulationEngine:
         不在并发 decide() 里查图。量化经 relationship_context 注入 Prompt，
         定性额外经 seed_trust 影响打分/信任摘要。
         """
-        if self.graph is None or not self.agents:
+        if self.graph is None:
+            self._log("simulation", "关系反哺跳过: self.graph is None (图数据库未初始化)")
             return
+        if not self.agents:
+            self._log("simulation", "关系反哺跳过: self.agents 为空")
+            return
+        self._log("simulation", f"关系反哺开始: {len(self.agents)} 个智能体, 图状态={self.graph is not None}")
+        total_neighbors = 0
         for a in self.agents:
             allies: list[str] = []
             foes: list[str] = []
             try:
                 data = self.graph.get_entity_neighbors(a.entity_id, max_depth=1)
             except Exception as e:
-                logger.debug("[Simulator] 关系预取失败 %s: %s", a.name, e)
+                logger.debug("[Simulator] 关系预取失败 %s (%s): %s", a.name, a.entity_id, e)
                 continue
-            for nb in data.get("neighbors", []):
+            nebs = data.get("neighbors", [])
+            total_neighbors += len(nebs)
+            for nb in nebs:
                 nm = nb.get("name", "")
                 if not nm or nm == a.name:
                     continue
@@ -377,6 +385,10 @@ class SimulationEngine:
                 "allies": allies, "opponents": foes, "summary": "；".join(parts)}
             if allies or foes:
                 self.reasoner.seed_trust(a.entity_id, allies, foes)
+            if nebs:
+                rel_types = list({nb.get("relation","?") for nb in nebs})
+                self._log("simulation", f"  {a.name}: {len(nebs)} 邻居, 关系类型={rel_types}, 盟友={len(allies)}, 对手={len(foes)}")
+        self._log("simulation", f"关系反哺概况: 全图 {total_neighbors} 条邻居边")
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
