@@ -1452,6 +1452,30 @@ class SimulationEngine:
         world = {"recent_events": context_text, "static_knowledge": static_text,
                   "dynamic_memory": dynamic_text,
                   "relationship_context": self._rel_context.get(agent.entity_id, {}).get("summary", "")}
+
+        # ── D6.3: 对手镜像博弈视角 ──
+        if "relationship_context" in world:
+            rel_ctx = self._rel_context.get(agent.entity_id, {})
+            opponents = rel_ctx.get("opponents", [])
+            allies = rel_ctx.get("allies", [])
+            key_targets = opponents[:3] + allies[:1]  # 前3对手 + 1盟友
+            if key_targets:
+                mirror_parts = ["## 对手视角预判（站在对方立场思考）"]
+                for target_id in key_targets:
+                    tgt = next((a for a in self.agents if a.entity_id == target_id), None)
+                    if not tgt:
+                        continue
+                    tgt_events = [e for e in self._event_history[-10:]
+                                  if e.get("agent") == target_id]
+                    tgt_recent = "; ".join(e.get("content", "")[:50] for e in tgt_events[-3:]) or "无记录"
+                    mirror_parts.append(
+                        f"### {tgt.name}\n"
+                        f"人格: {tgt.persona[:80] if tgt.persona else '未知'}\n"
+                        f"行为准则: {tgt.system_prompt_extra or '未知'}\n"
+                        f"近三轮行动: {tgt_recent}\n"
+                        f"→ 站在 {tgt.name} 的角度预判：如果 TA 推测到你的意图，TA 会如何反制？"
+                    )
+                world["recent_events"] = context_text + "\n\n" + "\n".join(mirror_parts)
         try:
             decision = await self.reasoner.reason(agent, world, round_number, client=client)
             sel = decision.get("selected", {})
