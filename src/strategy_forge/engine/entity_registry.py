@@ -242,18 +242,27 @@ def _parse_llm_json(raw: str) -> dict:
 
 
 def _repair_json(s: str) -> str:
-    """修复常见的 LLM JSON 语法错误：双逗号、截断数组、孤立逗号。"""
+    """修复常见的 LLM JSON 语法错误：双逗号、截断数组、孤立逗号、缺失值。"""
     # 1. 去除多余逗号：`, ,` → `,`
     s = _re.sub(r',\s*,', ',', s)
     # 2. 逗号后无值截断：`"aliases": ,` → `"aliases": []`
     s = _re.sub(r'":\s*,', '": [],', s)
+    # 2b. 截断在 `"aliases": ` 处（换行或末尾）
+    s = _re.sub(r'":\s*$', '": []', s, flags=_re.MULTILINE)
+    s = _re.sub(r'":\s*\n', '": [],\n', s)
+    # 2c. `"key":` 后跟换行 + 另一个 key（值完全丢失）
+    s = _re.sub(r'":\s*\n\s*"', '": "",\n  "', s)
     # 3. 截断的未完成条目：删掉最后一个不完整的 key-value
     s = _re.sub(r',\s*"[a-z_]+\s*$', '', s)
     # 4. 孤立方括号修复：`, ]` → `]`
     s = _re.sub(r',\s*\]', ']', s)
+    # 4b. `"],\n]"` → `"\n]`
+    s = _re.sub(r'"\],\s*\n\s*\]', '"]\n]', s)
     # 5. 丢失的闭合：如果 `]` 缺失但 `}` 存在，补 `]}`
     if _re.search(r'"[a-z_]+\s*":\s*$', s):
         s = s.rstrip().rstrip(',') + ']}'
+    # 6. 双冒号：`"": "` → `": "`
+    s = _re.sub(r'""\s*:\s*"', '": "', s)
     return s
 
 
@@ -388,7 +397,57 @@ async def _layer1_normalize(
     freq_map: dict[str, int],
     log_fn: Any = None,
 ) -> list[dict]:
-    """Layer 1 快速路径：单次 LLM 全量归一化。"""
+    """Layer 1 快速路径：单次 LLM 全量归一化。>15 实体自动拆批并行。"""
+    n_total = len(raw_fragments)
+    batch_size = 15  # qwen3.5-9b 在此规模 JSON 输出稳定
+
+    if n_total <= batch_size:
+        return await _layer1_normalize_batch(raw_fragments, source, freq_map, 1, 1, log_fn)
+
+    # 拆批 + 并行 + 代码合并
+    batches = [raw_fragments[i:i + batch_size] for i in range(0, n_total, batch_size)]
+    total = len(batches)
+    tasks = [_layer1_normalize_batch(b, source, freq_map, i + 1, total, log_fn) for i, b in enumerate(batches)]
+    all_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: dict[str, dict] = {}
+    for i, result in enumerate(all_results):
+        if isinstance(result, Exception):
+            logger.warning("[Layer1] 批次 %d 失败: %s", i + 1, result)
+            # 失败批次 → 保守保留原始碎片
+            for p in batches[i]:
+                nm = p.get("name", "")
+                if nm and nm not in merged:
+                    merged[nm] = {"name": nm, "aliases": [], "type": p.get("type", "Unknown"),
+                                  "description": (p.get("description") or "")[:200]}
+            continue
+        for e in result:
+            nm = e["name"]
+            if nm in merged:
+                # 合并：描述拼接，别名归并，类型投票
+                existing = merged[nm]
+                if e.get("description") and e["description"] != existing.get("description"):
+                    existing["description"] = existing["description"] + "；" + e["description"]
+                existing.setdefault("aliases", []).extend(a for a in e.get("aliases", []) if a not in existing.get("aliases", []))
+            else:
+                merged[nm] = dict(e)
+
+    final = list(merged.values())
+    if log_fn:
+        log_fn("agents", f"Layer1 分批归一化: {n_total} 碎片(×{total}批) → {len(final)} 规范实体")
+    logger.info("[Layer1] 分批: %d 碎片(×%d批) → %d 规范实体", n_total, total, len(final))
+    return final
+
+
+async def _layer1_normalize_batch(
+    raw_fragments: list[dict],
+    source: str,
+    freq_map: dict[str, int],
+    batch_idx: int,
+    total_batches: int,
+    log_fn: Any = None,
+) -> list[dict]:
+    """Layer 1 单批归一化。"""
 
     lines = []
     for i, p in enumerate(raw_fragments, 1):
@@ -402,6 +461,8 @@ async def _layer1_normalize(
     source_trim = _smart_sample(source, 8000)
 
     prompt = _LAYER1_USER.format(source=source_trim, fragments=frags_text)
+    if total_batches > 1:
+        prompt += f"\n\n（批次{batch_idx}/{total_batches}，{len(raw_fragments)} 个碎片。仅合并本批内同义实体——跨批合并由后续步骤处理。）"
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
