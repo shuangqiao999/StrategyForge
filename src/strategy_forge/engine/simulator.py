@@ -601,7 +601,7 @@ class SimulationEngine:
         if prev_allies != curr_allies or prev_opps != curr_opps:
             return "关系网络变化"
         # 条件3：长期无反思保护（超过 6 轮）
-        if (round_number - last_r) > 6:
+        if (round_number - last_r) > 4:
             return "长期无反思保护"
         # 量化模式补充：指标告急触发反思
         if state is not None and rule_engine is not None:
@@ -743,11 +743,14 @@ class SimulationEngine:
             eid = agent.entity_id
             reason = self._should_reflect(eid, round_number)
             if reason:
-                await self._reflect_narrative(agent, round_number, _rc)
-                self._reflection_baselines[eid] = dict(self._narrative_env)
-                self._last_reflection_round_n[eid] = round_number
+                rule_added = await self._reflect_narrative(agent, round_number, _rc)
+                if rule_added:
+                    self._reflection_baselines[eid] = dict(self._narrative_env)
+                    self._last_reflection_round_n[eid] = round_number
+                # 仅记录轮次（即使"无需调整"也记录，防止同轮重复触发）
                 self._log("simulation",
-                    f"[叙事人格演化] {agent.name}: {reason} (R{round_number})")
+                    f"[叙事人格演化] {agent.name}: {reason} (R{round_number})" if rule_added
+                    else f"[叙事反思] {agent.name}: {reason} → 无需调整 (R{round_number})")
 
         # 保存本轮关系网络快照供下轮对比
         if not hasattr(self, "_prev_rel_map"):
@@ -778,13 +781,13 @@ class SimulationEngine:
 
     async def _reflect_narrative(
         self, agent: DeductionAgentProfile, round_number: int, client: Any,
-    ) -> None:
-        """叙事模式人格反思：基于事件历史而非指标数据触发性格演化。"""
+    ) -> bool:
+        """叙事模式人格反思。返回 True=新增规则，False=无需调整。"""
         from strategy_forge.core.llm_client import Message
         from ._utils import extract_text
 
         my_events = [
-            e for e in self._event_history[-20:]
+            e for e in self._event_history[-30:]
             if e.get("agent") == agent.entity_id or e.get("agent_name") == agent.name
         ]
         if not my_events:
@@ -798,7 +801,7 @@ class SimulationEngine:
         else:
             events_text = "\n".join(
                 f"- [R{e.get('round','?')}] {e.get('content','')[:100]}"
-                for e in my_events[-8:]
+                for e in my_events[-15:]
             )
         prompt = (
             f"你是 {agent.name} 的潜意识。回顾你近期的行动经历，"
@@ -832,7 +835,7 @@ class SimulationEngine:
             )
             text = extract_text(resp).strip()
             if not text:
-                return
+                return False
             # 提取私人记忆行（"记忆：..."），与人格准则分离处理
             if "记忆：" in text:
                 parts = text.split("记忆：", 1)
@@ -848,7 +851,7 @@ class SimulationEngine:
                             self._character_journal[agent.entity_id][-5:]
                 text = rule_text
             if not text or "无需调整" in text or len(text) < 2:
-                return
+                return False
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
                 # 最多保留 3 条准则，超限时替换最旧
@@ -861,15 +864,17 @@ class SimulationEngine:
             elif not old_extra:
                 agent.system_prompt_extra = text
             else:
-                return
+                return False
             self._personality_log.append({
                 "round": round_number, "agent": agent.name,
                 "old_extra": old_extra, "new_extra": agent.system_prompt_extra,
             })
             self._log("simulation",
                        f"[叙事人格演化] {agent.name} 新增准则: {text} (R{round_number})")
+            return True
         except Exception as e:
             logger.debug("[Simulator] 叙事反思失败: %s", e)
+            return False
 
     async def _assess_env_impact(self, sim_round: SimulationRound, round_number: int) -> None:
         """叙事模式环境评估：随机抽 3 个 Agent 用 LLM 评估其动作对环境的影响。"""
@@ -1818,12 +1823,15 @@ class SimulationEngine:
             eid = agent.entity_id
             reason = self._should_reflect(eid, round_number, states.get(eid), re_engine)
             if reason is not None:
-                # 量化模式使用指标驱动反思（比叙事模式的事件驱动更适合数值推演）
-                await self._reflect_and_adapt(agent, round_number, _rc)
-                self._reflection_baselines[eid] = dict(self._narrative_env)
-                self._last_reflection_round_n[eid] = round_number
-                self._log("simulation",
-                    f"[人格演化] {agent.name}: {reason} (R{round_number})")
+                result = await self._reflect_and_adapt(agent, round_number, _rc)
+                if result and "无需调整" not in result:
+                    self._reflection_baselines[eid] = dict(self._narrative_env)
+                    self._last_reflection_round_n[eid] = round_number
+                    self._log("simulation",
+                        f"[人格演化] {agent.name}: {reason} (R{round_number})")
+                else:
+                    self._log("simulation",
+                        f"[反思] {agent.name}: {reason} → 无需调整 (R{round_number})")
 
         # 保存本轮关系网络快照供下轮对比
         self._prev_rel_map = dict(getattr(self, "_rel_context", {}))

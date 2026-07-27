@@ -1760,18 +1760,30 @@ async def build_registry(
         force_expanded.update(str(a) for a in aliases if a)
     if force_expanded:
         overridden = 0
-        # 先构建实体名→别名 的反向索引
         ent_aliases: dict[str, set[str]] = {}
         for e in entity_list:
             nm = e["name"]
             aliases_set = set(e.get("aliases", []))
             ent_aliases[nm] = aliases_set
         for name in list(decisions.keys()):
-            # 匹配：决策键名 或 实体别名 命中白名单
+            # 匹配 1: 精确匹配 expanded 集合
             matched = name in force_expanded
+            # 匹配 2: 实体别名命中
             if not matched:
                 for fa in ent_aliases.get(name, set()):
                     if fa in force_expanded:
+                        matched = True
+                        break
+            # 匹配 3: 白名单条目是实体名的子串 (e.g. "中国" matches "中方")
+            if not matched:
+                for fname in force_base:
+                    if len(fname) >= 2 and fname in name:
+                        matched = True
+                        break
+            # 匹配 4: 逆: 实体名是白名单条目的子串 (e.g. "美" matches "美国")
+            if not matched:
+                for fname in force_base:
+                    if len(name) >= 2 and name in fname:
                         matched = True
                         break
             if matched and decisions[name].get("tier", 3) != 1:
