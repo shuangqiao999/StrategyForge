@@ -102,6 +102,7 @@ _JSON_SCHEMAS: dict[str, dict] = {
                         "name": {"type": "string"},
                         "tier": {"type": "integer", "minimum": 1, "maximum": 3},
                         "reason": {"type": "string"},
+                        "group": {"type": "string"},
                     },
                     "required": ["name", "tier"]
                 }

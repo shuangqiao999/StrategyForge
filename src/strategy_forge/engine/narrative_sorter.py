@@ -130,15 +130,15 @@ async def sort_narrative_entities(
             entity_stats="\n".join(stat_lines),
             entity_names=", ".join(batch_names),
             example_good=(
-                '{"name": "李振国", "aliases": ["李总理"], "include": true, "reason": "核心决策者，贯穿全文"}\n'
-                '  {"name": "维东共和国", "aliases": ["维东"], "include": false, "reason": "国家背景，非独立博弈者"}\n'
-                '  {"name": "国家复兴党", "aliases": ["复兴党"], "include": false, "reason": "组织，成员(李振国)已在角色中"}\n'
-                '  {"name": "宪法法院", "aliases": ["法院"], "include": false, "reason": "机构背景，由张正源代表"}'
+                '{"name": "王建国", "aliases": ["王总理"], "include": true, "reason": "核心决策者，贯穿全文"}\n'
+                '  {"name": "北境共和国", "aliases": ["北境"], "include": false, "reason": "国家背景，非独立博弈者"}\n'
+                '  {"name": "民族复兴党", "aliases": ["复兴党"], "include": false, "reason": "组织，成员(王建国)已在角色中"}\n'
+                '  {"name": "宪法法院", "aliases": ["法院"], "include": false, "reason": "机构背景，由其法官代表"}'
             ),
             example_bad=(
                 '{"name": "共和国", "aliases": [], "include": true, "reason": "国家"}  ← 国家名做角色\n'
-                '  {"name": "维东", "aliases": [], "include": true, "reason": "地名"}    ← 与维东共和国重复且为地理名\n'
-                '  {"name": "总理", "aliases": [], "include": true, "reason": "职务"}    ← 职务名，应作李振国的别名'
+                '  {"name": "北境", "aliases": [], "include": true, "reason": "地名"}    ← 与北境共和国重复且为地理名\n'
+                '  {"name": "总理", "aliases": [], "include": true, "reason": "职务"}    ← 职务名，应作王建国的别名'
             ),
         )
         batch_label = f"[NarrativeSorter batch {len(batch_names)} entities]"

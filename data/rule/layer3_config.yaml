@@ -11,7 +11,7 @@ _defaults: &defaults
     l1_normalize:   { base: 200, per: 150, cap: 12000 }
     l1_shard:       { base: 200, per: 200, cap: 6000 }
     l1_refine:      { base: 200, per: 120, cap: 8000 }
-    l2_classify:    { base: 150, per: 100, cap: 4000 }
+    l2_classify:    { base: 200, per: 120, cap: 6000 }
     l3_cross:       { base: 300, per: 60,  cap: 3000 }
   log_file: ""                # 方差日志文件 (空=仅 logger)
   cache_enabled: true         # 是否启用哈希缓存

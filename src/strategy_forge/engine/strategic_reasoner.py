@@ -66,7 +66,7 @@ $strategic_context
 
 ## 行动示例
 正确（具体、有因果逻辑、与人格相关）：
-  {"action": "compete", "target": "OpenAI", "content": "DeepSeek宣布开源MoE训练框架，同步将商业API价格下调60%——以开源+降价双重施压对手企业客户迁移", "rationale": "利用对手API稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium"}
+  {"action": "compete", "target": "竞品Y", "content": "X企业宣布开源核心训练框架，同步将商用API价格下调60%——以开源+降价双重施压对手客户迁移", "rationale": "利用对手服务稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium"}
 错误（模糊、模板化）：
   {"action": "compete", "target": "对手", "content": "继续加大研发投入，推出新产品，提升核心竞争力", "rationale": "为了发展", "risk_level": "low"}
 

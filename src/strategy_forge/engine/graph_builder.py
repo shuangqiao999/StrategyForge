@@ -58,8 +58,8 @@ $alias_map
 5. 如果以上实体类型无一匹配该实体的本质特征，type 字段请填 "_UNKNOWN"
 
 ## 正确示例
-文本片段："美国商务部将DeepSeek等多家中国科技企业列入实体清单"
-→ {"entities": [{"entity": "美国", "type": "国家", "description": "实施制裁的主权国家"}], "relations": [{"source": "美国", "target": "DeepSeek", "relation": "制裁", "evidence": "将...列入实体清单"}]}
+文本片段："A国商务部将X科技等多家新兴市场科技企业列入贸易限制清单"
+→ {"entities": [{"entity": "A国", "type": "国家", "description": "实施贸易限制的主权国家"}], "relations": [{"source": "A国", "target": "X科技", "relation": "制裁", "evidence": "将...列入清单"}]}
 
 ## 错误示例（禁止）
 文本片段："全球经济增长率从3.4%下降至2.8%"

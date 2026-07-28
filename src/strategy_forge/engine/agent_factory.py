@@ -20,15 +20,17 @@ from .preprocessor import DeductionPreprocessor
 logger = logging.getLogger(__name__)
 
 
-_PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基于实体信息和原文事实，避免任何意识形态偏好或价值判断，为该$domain_role生成一个独立人格档案。返回 JSON。
+_PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基于实体信息和原文事实，为该$domain_role生成一个独立人格档案。返回 JSON。
 
-## 中立性原则（严格遵守）
-- 基于原文中对实体的实际行为和处境描述，不做主观褒贬
-- 不赋予任何实体"道德优越性"或"邪恶本质"标签
-- 如实反映实体的战略矛盾、内部压力和决策困境
-- 避免使用"扩张者""霸权者""追随者"等预设立场词汇
+## 铁律（强制执行）
+1. 每个实体的 persona 必须同时包含三个要素：
+   A. 优势或能力 — 该实体在博弈中的独特筹码
+   B. 矛盾或制约 — 该实体面临的内部困境、外部压力、两难选择（必须具体）
+   C. 自利逻辑 — 该实体行为的底层利益动机
+2. 不赋予任何实体道德高下标签 — 所有参与者都在追逐自身利益
+3. 不使用意识形态化形容词 — 用行为描述代替价值判断
 
-## 来自用户的特殊期望（必须严肃考虑）
+## 来自用户的特殊期望
 $user_expectations
 
 ## 实体信息
@@ -40,30 +42,34 @@ $user_expectations
 - 下属机构: $sub_info
 - 实体统计: $entity_stats
 
-## 原文关键片段（LanceDB 语义检索）
+## 原文关键片段
 $context
 
-## 高频共现关键词标签
+## 高频共现关键词
 $keywords
 
-## 输出 JSON — 必须是纯 JSON 对象
+## 输出 JSON
 {
-  "persona": "详细的人格描述 (80-150字), 包括性格特征、价值观、行为模式、行为演化趋势",
-  "background": "背景故事 (80-150字), 包括关键经历、社会关系、动机、性格变迁",
+  "persona": "人格描述 (80-150字)。必须铁律ABC三项齐全",
+  "background": "背景故事 (80-150字)",
   "goals": ["目标1", "目标2", "目标3"]
 }
 
-## persona 质量标准（参考）
-好的 persona（具体、有矛盾、可推演行为）：
-  "偏执而精明的技术官僚，坚信数据高于直觉。在公开场合沉默寡言，但内部会议中会逐一推翻他人的假设。对失败的容忍度极低，曾因一次供应链延误解雇整个团队。表面追求效率至上，骨子里是对失控的恐惧。"
-不好的 persona（抽象、无辨识度，不推荐）：
-  "他是一位优秀的领导者，善于团队合作，重视技术创新，致力于推动组织发展。"
+## 参考
+优秀示例（ABC齐全）：
+  "偏执而精明的技术官僚，坚信数据高于直觉。在公开场合沉默寡言，但内部会议中逐一推翻他人假设。对失败的容忍度极低，曾因一次供应链延误解雇整个团队。表面追求效率至上，骨子里是对失控的恐惧。"
+不合格示例（缺失B或C）：
+  "极富远见的战略领袖，深谙国际格局，善于在复杂局势中寻找平衡。" — 抽象赞美，无具体矛盾/制约
 
-【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
+只返回 JSON 对象。"""
 
-_PERSONA_PROMPT_FALLBACK = """基于以下实体信息和原文背景，为该$domain_role生成一个独立人格档案。返回 JSON。
+_PERSONA_PROMPT_FALLBACK = """你是客观中立的角色档案生成专家。基于以下实体信息和原文背景，为该$domain_role生成一个独立人格档案。返回 JSON。
 
-## 来自用户的特殊期望（必须严肃考虑）
+## 铁律
+1. 每个 persona 必须同时包含：A.优势/能力 B.矛盾/制约 C.自利逻辑
+2. 不赋予道德高下标签，用行为描述代替价值判断
+
+## 来自用户的特殊期望
 $user_expectations
 
 ## 实体信息
@@ -78,20 +84,14 @@ $user_expectations
 ## 原文背景
 $context
 
-## 输出 JSON — 必须是纯 JSON 对象
+## 输出 JSON
 {
-  "persona": "详细的人格描述 (50-100字), 包括性格特征、价值观、行为模式",
-  "background": "背景故事 (50-100字), 包括关键经历、社会关系、动机",
+  "persona": "人格描述 (50-100字)。ABC三项齐全",
+  "background": "背景故事 (50-100字)",
   "goals": ["目标1", "目标2"]
 }
 
-## persona 质量标准
-好的 persona（具体、有辨识度、可推演行为）：
-  "极端务实的成本控制者，将供应链安全视为信仰。因一次芯片断供导致生产线停滞72小时，此后对供应商采取'三择一'策略——任何关键部件必须同时维护至少三个来源。公开场合低调寡言，私下谈判时极具攻击性。"
-不好的 persona（模板化、无辨识度，不推荐）：
-  "他是一位优秀的领导者，善于团队合作，重视技术创新，致力于推动组织发展。"
-
-【重要】只返回纯JSON对象。不要```json代码块。不要任何解释文字。"""
+只返回 JSON 对象。"""
 
 
 async def create_agents_from_graph(
@@ -212,13 +212,13 @@ async def create_agents_from_graph(
             except Exception as e:
                 logger.debug("[Deduction] persona retrieve failed for %s: %s", person_name, e)
         prompt = _build_prompt(person, person_name, fragments)
-        system = "你是角色档案生成专家，只输出 JSON 对象。不要 markdown，不要解释。"
+        system = "你是客观中立的角色档案生成专家。每条 persona 须覆盖 ABC 三项：优势、矛盾、自利逻辑。用行为描述代替价值判断。只输出 JSON。"
         messages = [Message(role="user", content=prompt)]
         try:
             if chat_fn is not None:
                 content = await asyncio.to_thread(chat_fn, messages, system, 0.7)
             else:
-                response = await client.chat_json(messages, system=system, schema_name="persona", temperature=0.3)
+                response = await client.chat_json(messages, system=system, schema_name="persona", temperature=0)
                 content = extract_text(response)
             profile_data = _parse_persona_json(content)
             if not isinstance(profile_data, dict) or not expected_keys.intersection(profile_data):
