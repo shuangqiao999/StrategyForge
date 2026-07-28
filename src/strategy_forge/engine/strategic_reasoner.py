@@ -331,9 +331,9 @@ class StrategicReasoner:
                     score += 0.4
                 elif hits == 1:
                     score += 0.2
-            # Penalize passive observation — severe penalty
-            if c.get("action") == "observe":
-                score -= 0.8
+            # Penalize passive observation when a core question awaits resolution
+            if self._immutable_goals and c.get("action") == "observe":
+                score -= 0.2
             # Trust awareness: prefer interacting with trusted agents
             target = c.get("target", "")
             if target and self.get_trust(agent.entity_id, target) > 1.0:
@@ -352,16 +352,6 @@ class StrategicReasoner:
 
         candidates.sort(key=lambda c: c.get("_score", 0), reverse=True)
         selected = candidates[0]
-
-        # 全部候选都是 observe → 强制替换为首个非 observe 或 manufacture_observe 替代
-        if all(c.get("action") == "observe" for c in candidates):
-            selected = dict(candidates[0])
-            selected["action"] = "diplomacy"
-            selected["content"] = f"{agent.name}发表战略声明，重申核心目标并试探各方立场"
-            selected["rationale"] = "全局沉寂，主动打破僵局以获取信息"
-            selected["_score"] = -1.0  # 标记为强制度生成的行动
-            logger.warning("[Reasoner] %s 全部候选为observe，强制替换为diplomacy", agent.name)
-
         selected["action"] = self._normalize_action(selected.get("action", "observe"))
 
         # 记录本轮选中行动，供后续轮次去重（每 agent 保留最近 5 条）
@@ -481,17 +471,6 @@ class StrategicReasoner:
             f"## 你的当前状态\n{state.to_prompt_context()}\n",
             f"## 其他参与方状态\n{other_context or '（暂无）'}\n",
         ])
-        # 抗 observe 规则（强制注入）
-        agent_parts.append(
-            "## observe 禁止规则（硬性约束）\n"
-            "observe 仅在没有明确威胁且局势不明时才可用。以下情况必须选择主动行动：\n"
-            "1. 你的核心目标未达成 → 必须 initiate/attack/compete/diplomacy/collaborate\n"
-            "2. 近期局势中有涉及你的行动 → 必须 respond\n"
-            "3. 你有明确的盟友或对手 → 必须对其采取行动\n"
-            "4. 即使无明确对手 → 通过 diplomacy/compete 主动塑造局势、测试意图\n"
-            "- 所有理性博弈者在目标未达成时都在持续行动——观察不是策略，是放弃\n"
-            "- 如果你在前几轮已 observe 过，本轮必须换为主动行动\n"
-        )
         if relationship_context:
             agent_parts.append(f"## 关系网络（盟友/对手）\n{relationship_context}\n")
         if static_knowledge:
