@@ -568,42 +568,43 @@ async def generate_report(
 
     default_report = DeductionReport(
         session_id=session.id,
-        summary="推演完成，请查看详细事件记录。",
+        summary="推演完成，但报告生成失败——请查看事件时间线获取详细信息。",
         key_events=[{"description": e} for e in arc_events],
         agent_trajectories=agent_trajectories,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
 
-    try:
-        # 量化模式用 json_schema 约束，叙事模式保持原有调用（温度高+Scchema 冲突创意）
-        if report_temp <= 0.5:
-            response = await client.chat_json(messages, system=system, schema_name="report_quantified",
-                                              temperature=report_temp, max_tokens=report_max_tokens)
-        else:
-            response = await client.chat(messages, system=system, temperature=report_temp,
-                                         max_tokens=report_max_tokens)
-        content = extract_text(response)
-        report_data = _parse_report_json(content)
-    except Exception as e:
-        # 上下文超限 → 用减半的 max_tokens 重试一次
-        if "400" in str(e) and report_max_tokens > 1500:
-            _retry = max(1500, report_max_tokens // 2)
-            log_fn("report", f"LLM 调用失败(可能上下文超限)，减半重试(max_tokens={_retry})")
-            try:
-                if report_temp <= 0.5:
-                    response = await client.chat_json(messages, system=system, schema_name="report_quantified",
-                                                      temperature=report_temp, max_tokens=_retry)
-                else:
-                    response = await client.chat(messages, system=system, temperature=report_temp,
-                                                 max_tokens=_retry)
-                content = extract_text(response)
-                report_data = _parse_report_json(content)
-            except Exception as e2:
-                logger.warning("[Deduction] 报告 LLM 重试失败，使用默认摘要: %s", e2)
-                return default_report
-        else:
-            logger.warning("[Deduction] 报告 LLM 调用失败，使用默认摘要: %s", e)
-            return default_report
+    # ── 报告生成：统一用 json_schema + 指数退避重试 ──
+    report_data: dict[str, Any] = {}
+    max_retries = 3
+    last_error: str = ""
+    for attempt in range(1, max_retries + 1):
+        _current_max = report_max_tokens // (2 ** (attempt - 1))
+        _current_max = max(1500, _current_max)
+        try:
+            response = await client.chat_json(
+                messages, system=system,
+                schema_name="report_quantified",
+                temperature=report_temp, max_tokens=_current_max)
+            content = extract_text(response)
+            report_data = _parse_report_json(content)
+            if isinstance(report_data, dict) and report_data:
+                break  # 解析成功
+            # 解析失败——记录原因后重试
+            raw_preview = (content or "")[:200].replace("\n", "\\n")
+            last_error = f"parse_fail(attempt={attempt}, preview='{raw_preview}')"
+            log_fn("report", f"报告 JSON 解析失败(第{attempt}次)，降 max_tokens 重试")
+        except Exception as e:
+            last_error = f"llm_fail(attempt={attempt}, err={e})"
+            log_fn("report", f"报告 LLM 调用失败(第{attempt}次)：{type(e).__name__}")
+            if attempt < max_retries:
+                import asyncio
+                await asyncio.sleep(1.0 * attempt)
+
+    if not report_data:
+        logger.warning("[Deduction] 报告生成全部重试失败: %s", last_error)
+        log_fn("report", f"报告生成失败(已重试{max_retries}次)，使用默认摘要")
+        return default_report
 
     log_fn("report", "报告 LLM 生成完成")
 
@@ -657,5 +658,15 @@ async def generate_report(
 
 def _parse_report_json(raw: str) -> dict[str, Any]:
     from ._utils import extract_json
+    import logging
     data = extract_json(raw)
-    return data if isinstance(data, dict) else {}
+    if data is None:
+        logger = logging.getLogger(__name__)
+        logger.warning("[Reporter] extract_json 返回 None, raw[:200]=%s", (raw or "")[:200])
+        return {}
+    if not isinstance(data, dict):
+        logger = logging.getLogger(__name__)
+        logger.warning("[Reporter] extract_json 返回非 dict: %s, raw[:200]=%s",
+                       type(data).__name__, (raw or "")[:200])
+        return {}
+    return data
