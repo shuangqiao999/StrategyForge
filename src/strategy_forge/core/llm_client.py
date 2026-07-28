@@ -322,12 +322,13 @@ _JSON_SCHEMAS: dict[str, dict] = {
     "report_quantified": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string"},
-            "key_events": {"type": "array", "items": {"type": "string"}},
+            "narrative": {"type": "string"},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
             "risk_alerts": {"type": "array", "items": {"type": "string"}},
+            "character_arcs": {"type": "array", "items": {"type": "string"}},
             "conclusion": {"type": "string"},
         },
-        "required": ["summary"]
+        "required": ["narrative"]
     },
     "env_impact": {
         "type": "object",
