@@ -681,6 +681,9 @@ class SimulationEngine:
 ## 触发事件内容
 {action_content}
 
+## 近期经历
+{recent_events}
+
 ## 输出
 一行代表人遭遇此类事件时本能情绪反应的准则（≤15字）。
 示例："被背叛后复仇心压倒一切" "遭受攻击后全面戒备"
@@ -697,6 +700,9 @@ class SimulationEngine:
 ## 近期变化趋势
 {delta_summary}
 
+## 多轮环境趋势
+{trend_data}
+
 ## 现有准则
 {current_rules}
 
@@ -712,6 +718,9 @@ class SimulationEngine:
 
 ## 触发事件
 {trigger_summary}
+
+## 近期全部经历
+{recent_events}
 
 ## 现有准则（将被替换）
 {current_rules}
@@ -732,6 +741,9 @@ class SimulationEngine:
 
 ## 毁灭级事件
 {trigger_summary}
+
+## 近期全部经历
+{recent_events}
 
 ## 历史伤痛
 {history_patterns}
@@ -765,10 +777,13 @@ class SimulationEngine:
 示例："警惕信任被反复利用" "在对方示弱时核查动机"
 只输出准则或"无需调整"。"""
 
-    _PROMPT_RETROSPECT = """你是 {name} 的纠错层。定期回溯你的全部行为准则，结合历史遭遇清理过时项。
+    _PROMPT_RETROSPECT = """你是 {name} 的纠错层。定期回溯你的全部行为准则，结合历史遭遇和近期事件清理过时项。
 
 ## 历史遭遇模式
 {history_patterns}
+
+## 近期自身事件
+{recent_events}
 
 ## 现有准则
 {current_rules}
@@ -778,6 +793,7 @@ class SimulationEngine:
 - 过于极端→需要缓和→标记修正
 - 曾因冲动产生→冷静后不适用→删除
 - 历史模式显示同类问题未再出现→该应对准则可删除
+- 近期事件表明某准则还在发挥作用→保留
 
 ## 输出
 每行一个操作：
@@ -1068,6 +1084,10 @@ class SimulationEngine:
         reflect_tasks = [_reflect_one(a) for a in self.agents]
         await asyncio.gather(*reflect_tasks)
 
+        # D2 趋势：记录本轮环境快照
+        for a in self.agents:
+            self._record_env_snapshot(a.entity_id)
+
         # ── D6.2: 并行回溯悔悟 ──
         if round_number > 0 and round_number % 5 == 0:
             async def _retrospect_one(agent) -> None:
@@ -1142,6 +1162,7 @@ class SimulationEngine:
                 name=agent.name, persona=persona,
                 trigger_summary=f"{trigger_category}({trigger_keyword})",
                 action_content=action_content[:200],
+                recent_events=events_text,
             )
             _mt = 80
         elif mode == "strategic":
@@ -1150,10 +1171,13 @@ class SimulationEngine:
             for k in self._narrative_env:
                 d = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
                 deltas.append(f"- {k}: {d:+.0f}")
+            # D2 增强：最近3轮环境趋势
+            trend_text = self._build_env_trend(agent.entity_id)
             prompt = self._PROMPT_STRATEGIC.format(
                 name=agent.name, persona=persona,
                 env_stats=env_stats, delta_summary="\n".join(deltas),
                 current_rules=current_rules,
+                trend_data=trend_text,
             )
             _mt = 120
         elif mode in ("deep", "reconstruct"):
@@ -1165,6 +1189,7 @@ class SimulationEngine:
                 trigger_summary=f"{trigger_category}({trigger_keyword})",
                 current_rules=current_rules,
                 history_patterns=history_patterns or "首次遭遇此类事件",
+                recent_events=events_text,
             )
             _mt = 250 if severity == 3 else 400
         elif mode == "internal":
@@ -1249,6 +1274,36 @@ class SimulationEngine:
         except Exception as e:
             logger.debug("[Simulator] 叙事反思失败: %s", e)
             return False
+
+    def _build_env_trend(self, agent_id: str) -> str:
+        """D2 趋势：最近3轮环境快照 → 分段变化方向。"""
+        snaps = getattr(self, "_env_snapshots", {}).get(agent_id, [])
+        if len(snaps) < 2:
+            return "（数据不足，无法生成趋势）"
+        lines = []
+        for i in range(1, len(snaps)):
+            prev = snaps[i - 1]
+            curr = snaps[i]
+            round_tag = f"R{i}→R{i+1}"
+            changes = []
+            for k in curr:
+                d = curr[k] - prev.get(k, curr[k])
+                if abs(d) >= 2:
+                    direction = "+" if d > 0 else ""
+                    changes.append(f"{k}{direction}{d:.0f}")
+            if changes:
+                lines.append(f"{round_tag}: {', '.join(changes)}")
+        return " ｜ ".join(lines) if lines else "（无显著变化）"
+
+    def _record_env_snapshot(self, agent_id: str) -> None:
+        """记录当前环境快照至趋势历史（保留最近5轮）。"""
+        if not hasattr(self, "_env_snapshots"):
+            self._env_snapshots = {}
+        snap = dict(self._narrative_env)
+        hist = self._env_snapshots.setdefault(agent_id, [])
+        hist.append(snap)
+        if len(hist) > 5:
+            self._env_snapshots[agent_id] = hist[-5:]
 
     def _get_history_patterns(self, agent_id: str) -> str:
         """D5: 聚合历史同类事件的内容摘要，供反思层识别策略模式。
@@ -1340,9 +1395,19 @@ class SimulationEngine:
         from strategy_forge.core.llm_client import Message
         from ._utils import extract_text
         history_patterns = self._get_history_patterns(agent.entity_id)
+        # 最近自身事件上下文
+        my_events = [
+            e for e in self._event_history[-15:]
+            if e.get("agent") == agent.entity_id or e.get("agent_name") == agent.name
+        ]
+        recent_context = "\n".join(
+            f"- [R{e.get('round','?')}] {e.get('content','')[:60]}"
+            for e in my_events[-5:]
+        ) or "无近期事件"
         prompt = self._PROMPT_RETROSPECT.format(
             name=agent.name, current_rules=current,
             history_patterns=history_patterns or "无历史模式记录",
+            recent_events=recent_context,
         )
         try:
             resp = await client.chat(
@@ -2306,6 +2371,9 @@ class SimulationEngine:
                 timestamp=datetime.now().isoformat(),
                 metadata=meta,
             ))
+            # D5: 量化模式写事件类别日志
+            self._log_category_event(actor, dec["action_type"], round_number,
+                                     dec.get("rationale", ""))
             # W4: 量化轮事件写入 LanceDB 动态表(仅主推演 persist_events=True；优化器隔离不写)
             if self._persist_events and self._preprocessor is not None:
                 try:
