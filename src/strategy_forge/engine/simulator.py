@@ -976,7 +976,7 @@ class SimulationEngine:
                         self._last_reflection_round_n[eid] = round_number
                     # D5: 记录到历史分类日志
                     self._log_category_event(eid, category, round_number,
-                                              action.content[:80])
+                                              action.content)
                     self._log("simulation",
                         f"[事件反思-D1] {agent.name}: {category}({keyword}) severity={severity} → "
                         f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
@@ -1251,7 +1251,9 @@ class SimulationEngine:
             return False
 
     def _get_history_patterns(self, agent_id: str) -> str:
-        """D5: 聚合历史同类事件的内容摘要，供反思层识别策略模式。"""
+        """D5: 聚合历史同类事件的内容摘要，供反思层识别策略模式。
+        兼容旧 int(round_number) 格式和新 {round,content} dict 格式。
+        """
         log = self._event_category_log.get(agent_id, {})
         if not log:
             return ""
@@ -1259,20 +1261,37 @@ class SimulationEngine:
         for cat, entries in log.items():
             if len(entries) < 2:
                 continue
-            # 取最近 5 条的内容和轮号
             recent = entries[-5:]
-            samples = [f"R{e.get('round','?')}:{e.get('content','')[:50]}" for e in recent]
+            samples = []
+            for e in recent:
+                if isinstance(e, dict):
+                    c = (e.get("content") or "").strip()
+                    samples.append(f"R{e.get('round','?')}:{c[:50]}" if c else f"R{e.get('round','?')}")
+                else:
+                    # 旧格式兼容：int(round_number)
+                    samples.append(f"R{e}")
             patterns.append(f"- {cat}（共{len(entries)}次）：{' | '.join(samples)}")
         return "\n".join(patterns) if patterns else ""
 
     def _log_category_event(self, agent_id: str, category: str, round_number: int,
                             event_content: str = "") -> None:
         """D5: 记录触发事件类别、轮号及内容摘要，供历史模式识别。"""
-        entry = {"round": round_number, "content": (event_content or "")[:80]}
-        log = self._event_category_log.setdefault(agent_id, {}).setdefault(category, [])
-        log.append(entry)
-        if len(log) > 20:
-            self._event_category_log[agent_id][category] = log[-20:]
+        raw = (event_content or "").strip()
+        if not raw:
+            raw = "无详细记录"
+        # 智能截断：在句号/问号/感叹号处自然断句
+        if len(raw) > 100:
+            raw = raw[:100]
+        for sep in ("。", "！", "？"):
+            idx = raw.rfind(sep, 0, 80)
+            if idx > 40:
+                raw = raw[:idx + 1]
+                break
+        entry = {"round": round_number, "content": raw[:80]}
+        agent_log = self._event_category_log.setdefault(agent_id, {})
+        agent_log.setdefault(category, []).append(entry)
+        if len(agent_log[category]) > 20:
+            agent_log[category] = agent_log[category][-20:]
 
     async def _reflect_correct(
         self, agent: DeductionAgentProfile, snapshot: dict,
