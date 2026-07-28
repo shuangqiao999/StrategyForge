@@ -468,6 +468,8 @@ class SimulationEngine:
                                   getattr(self, "_character_journal", {}).items()},
             "_reflection_baselines": {k: dict(v) for k, v in
                                       getattr(self, "_reflection_baselines", {}).items()},
+            "_env_snapshots": {k: [dict(s) for s in v]
+                               for k, v in getattr(self, "_env_snapshots", {}).items()},
             "_last_reflection_round_n": dict(getattr(self, "_last_reflection_round_n", {})),
             "_last_round_outcomes": dict(getattr(self, "_last_round_outcomes", {})),
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
@@ -485,6 +487,7 @@ class SimulationEngine:
         self._personality_log = saved.get("_personality_log", [])
         self._character_journal = saved.get("_character_journal", {})
         self._reflection_baselines = saved.get("_reflection_baselines", {})
+        self._env_snapshots = saved.get("_env_snapshots", {})
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
@@ -839,6 +842,11 @@ class SimulationEngine:
         # 条件5: 内源主动自省（每5轮强制触发一次）
         if round_number > 0 and round_number % 5 == 0:
             return "内源主动自省"
+        # 条件6: D5 模式累积升级——同类事件 ≥5 次触发战略反思
+        cat_log = self._event_category_log.get(agent_id, {})
+        for cat, entries in cat_log.items():
+            if len(entries) >= 5:
+                return f"模式预警({cat}×{len(entries)})"
         return None
 
     def _append_event(self, event: dict) -> None:
@@ -1068,9 +1076,9 @@ class SimulationEngine:
                     if "内源" in reason:
                         rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
                         tag = "[内源自省]"
-                    elif "环境" in reason or "累计" in reason:
+                    elif "环境" in reason or "累计" in reason or "模式" in reason:
                         rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
-                        tag = "[D2数值复盘]"
+                        tag = "[D2数值复盘]" if "模式" not in reason else "[模式预警]"
                     else:
                         rule_added = await self._reflect_narrative(agent, round_number, _rc)
                         tag = "[反思]"
@@ -1773,6 +1781,27 @@ class SimulationEngine:
         history_patterns = self._get_history_patterns(agent.entity_id)
         patterns_text = history_patterns or "无重复模式记录"
 
+        # D2 趋势增强：最近指标变化的方向是加速还是减缓
+        trend_parts = []
+        if len(recent_history) >= 6:
+            early = sum(float(h.get("delta", 0)) for h in recent_history[-10:-5])
+            late = sum(float(h.get("delta", 0)) for h in recent_history[-5:])
+            for m in set(h.get("metric","") for h in recent_history if h.get("metric")):
+                e = sum(float(h.get("delta", 0)) for h in recent_history[-10:-5] if h.get("metric") == m)
+                l = sum(float(h.get("delta", 0)) for h in recent_history[-5:] if h.get("metric") == m)
+                if abs(e) < 0.5 and abs(l) < 0.5:
+                    continue
+                label = _METRIC_NAME.get(m, m)
+                if e < -1 and l < -1:
+                    trend_parts.append(f"{label}持续恶化")
+                elif e > 1 and l > 1:
+                    trend_parts.append(f"{label}持续改善")
+                elif e < -1 and l > 0:
+                    trend_parts.append(f"{label}触底反弹")
+                elif e > 1 and l < 0:
+                    trend_parts.append(f"{label}由升转跌")
+        trend_line = "；".join(trend_parts) if trend_parts else "无显著趋势"
+
         # 当前状态快照
         metrics = getattr(state, "metrics", {})
         status_summary: list[str] = []
@@ -1785,6 +1814,7 @@ class SimulationEngine:
             f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
             f"## 你现有的行为准则\n{agent.system_prompt_extra or '（无，完全依据核心人格）'}\n\n"
             f"## 近期指标变化\n{', '.join(delta_summary) if delta_summary else '无显著变化'}\n\n"
+            f"## 趋势判断\n{trend_line}\n\n"
             f"## 历史遭遇模式\n{patterns_text}\n\n"
             f"## 风险信号\n{'; '.join(status_summary) if status_summary else '无告急指标'}\n\n"
             f"## 近期行动复盘\n{causal_short if causal_short else '无'}\n\n"
@@ -1809,10 +1839,13 @@ class SimulationEngine:
             text = extract_text(resp).strip()
             if not text or "无需调整" in text or len(text) < 2:
                 return None
-            # 更新 agent 的行为准则
+            # 更新 agent 的行为准则（最多 3 条，满时替换最旧）
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
-                agent.system_prompt_extra = f"{old_extra}；{text}"
+                parts = old_extra.split("；")
+                if len(parts) >= 3:
+                    parts = parts[1:]
+                agent.system_prompt_extra = "；".join(parts + [text])
             elif not old_extra:
                 agent.system_prompt_extra = text
             else:
@@ -2462,10 +2495,11 @@ class SimulationEngine:
                 reason = self._should_reflect(eid, round_number, state, re_engine)
                 if reason is not None:
                     result = await self._reflect_and_adapt(agent, round_number, _rc,
-                                                           mode="strategic" if ("环境" in reason or "累计" in reason)
-                                                           else "internal" if "内源" in reason else None)
+                                                            mode="strategic" if ("环境" in reason or "累计" in reason or "模式" in reason)
+                                                            else "internal" if "内源" in reason else None)
                     tag = (
                         "[D2数值复盘]" if "环境" in reason or "累计" in reason
+                        else "[模式预警]" if "模式" in reason
                         else "[内源自省]" if "内源" in reason
                         else "[反思]")
                     if result and "无需调整" not in result:
