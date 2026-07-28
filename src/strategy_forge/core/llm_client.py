@@ -310,18 +310,13 @@ _JSON_SCHEMAS: dict[str, dict] = {
         "items": {
             "type": "object",
             "properties": {
-                "selected": {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string"},
-                        "target": {"type": "string"},
-                        "content": {"type": "string"},
-                        "rationale": {"type": "string"},
-                        "risk_level": {"type": "string"},
-                    },
-                    "required": ["action"]
-                }
-            }
+                "action": {"type": "string"},
+                "target": {"type": "string"},
+                "content": {"type": "string"},
+                "rationale": {"type": "string"},
+                "risk_level": {"type": "string"},
+            },
+            "required": ["action"]
         },
     },
     "report_quantified": {
