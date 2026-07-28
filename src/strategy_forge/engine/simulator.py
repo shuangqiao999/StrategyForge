@@ -756,14 +756,19 @@ class SimulationEngine:
 ## 近期行动
 {recent_events}
 
-## 自查清单
-- 你的策略有无隐性漏洞？
-- 是否过于保守或激进？
-- 是否有未利用的机会窗口？
+## 历史遭遇模式
+{history_patterns}
 
-如果发现需修正，输出新准则（≤20字）。如果一切妥当，输出"无需调整"。"""
+## 任务
+查看过去的重复遭遇，判断是否有战略盲点需要一条新准则来覆盖。
+如果现有准则已覆盖所有模式 → "无需调整"。如果发现脆弱点 → 输出新准则（≤20字）。
+示例："警惕信任被反复利用" "在对方示弱时核查动机"
+只输出准则或"无需调整"。"""
 
-    _PROMPT_RETROSPECT = """你是 {name} 的纠错层。定期回溯你的全部行为准则，清理过时项。
+    _PROMPT_RETROSPECT = """你是 {name} 的纠错层。定期回溯你的全部行为准则，结合历史遭遇清理过时项。
+
+## 历史遭遇模式
+{history_patterns}
 
 ## 现有准则
 {current_rules}
@@ -772,6 +777,7 @@ class SimulationEngine:
 - 局势已变→准则过时→删除
 - 过于极端→需要缓和→标记修正
 - 曾因冲动产生→冷静后不适用→删除
+- 历史模式显示同类问题未再出现→该应对准则可删除
 
 ## 输出
 每行一个操作：
@@ -969,7 +975,8 @@ class SimulationEngine:
                         self._reflection_baselines[eid] = dict(self._narrative_env)
                         self._last_reflection_round_n[eid] = round_number
                     # D5: 记录到历史分类日志
-                    self._log_category_event(eid, category, round_number)
+                    self._log_category_event(eid, category, round_number,
+                                              action.content[:80])
                     self._log("simulation",
                         f"[事件反思-D1] {agent.name}: {category}({keyword}) severity={severity} → "
                         f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
@@ -1165,6 +1172,7 @@ class SimulationEngine:
                 name=agent.name, persona=persona,
                 current_rules=current_rules,
                 recent_events=events_text,
+                history_patterns=history_patterns or "首次自省",
             )
             _mt = 120
         else:
@@ -1243,24 +1251,28 @@ class SimulationEngine:
             return False
 
     def _get_history_patterns(self, agent_id: str) -> str:
-        """D5: 聚合同类历史事件模式。"""
+        """D5: 聚合历史同类事件的内容摘要，供反思层识别策略模式。"""
         log = self._event_category_log.get(agent_id, {})
         if not log:
             return ""
         patterns = []
-        for cat, rounds in log.items():
-            if len(rounds) >= 2:
-                r_str = ", ".join(f"R{r}" for r in rounds[-5:])
-                patterns.append(f"- {cat}: {len(rounds)}次 ({r_str})")
+        for cat, entries in log.items():
+            if len(entries) < 2:
+                continue
+            # 取最近 5 条的内容和轮号
+            recent = entries[-5:]
+            samples = [f"R{e.get('round','?')}:{e.get('content','')[:50]}" for e in recent]
+            patterns.append(f"- {cat}（共{len(entries)}次）：{' | '.join(samples)}")
         return "\n".join(patterns) if patterns else ""
 
-    def _log_category_event(self, agent_id: str, category: str, round_number: int) -> None:
-        """D5: 将触发事件分类记录到历史日志。"""
-        self._event_category_log.setdefault(agent_id, {}).setdefault(category, []).append(round_number)
-        # 只保留最近 20 次
-        if len(self._event_category_log[agent_id][category]) > 20:
-            self._event_category_log[agent_id][category] = \
-                self._event_category_log[agent_id][category][-20:]
+    def _log_category_event(self, agent_id: str, category: str, round_number: int,
+                            event_content: str = "") -> None:
+        """D5: 记录触发事件类别、轮号及内容摘要，供历史模式识别。"""
+        entry = {"round": round_number, "content": (event_content or "")[:80]}
+        log = self._event_category_log.setdefault(agent_id, {}).setdefault(category, [])
+        log.append(entry)
+        if len(log) > 20:
+            self._event_category_log[agent_id][category] = log[-20:]
 
     async def _reflect_correct(
         self, agent: DeductionAgentProfile, snapshot: dict,
@@ -1308,8 +1320,10 @@ class SimulationEngine:
             return 0
         from strategy_forge.core.llm_client import Message
         from ._utils import extract_text
+        history_patterns = self._get_history_patterns(agent.entity_id)
         prompt = self._PROMPT_RETROSPECT.format(
             name=agent.name, current_rules=current,
+            history_patterns=history_patterns or "无历史模式记录",
         )
         try:
             resp = await client.chat(
@@ -1671,6 +1685,10 @@ class SimulationEngine:
         causal = getattr(self, "_last_round_outcomes", {}).get(agent.entity_id, "")
         causal_short = (causal[:200] + "...") if len(causal) > 200 else causal
 
+        # D5 历史模式
+        history_patterns = self._get_history_patterns(agent.entity_id)
+        patterns_text = history_patterns or "无重复模式记录"
+
         # 当前状态快照
         metrics = getattr(state, "metrics", {})
         status_summary: list[str] = []
@@ -1683,6 +1701,7 @@ class SimulationEngine:
             f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
             f"## 你现有的行为准则\n{agent.system_prompt_extra or '（无，完全依据核心人格）'}\n\n"
             f"## 近期指标变化\n{', '.join(delta_summary) if delta_summary else '无显著变化'}\n\n"
+            f"## 历史遭遇模式\n{patterns_text}\n\n"
             f"## 风险信号\n{'; '.join(status_summary) if status_summary else '无告急指标'}\n\n"
             f"## 近期行动复盘\n{causal_short if causal_short else '无'}\n\n"
             f"## 任务\n"
