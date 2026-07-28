@@ -363,7 +363,10 @@ def reload_domain_prompts() -> None:
 
 
 def get_domain_prompt(domain: str, key: str) -> str:
-    return _DOMAIN_PROMPTS.get(domain, {}).get(key, "")
+    val = _DOMAIN_PROMPTS.get(domain, {}).get(key, "")
+    if not val:
+        val = _DOMAIN_PROMPTS.get("_default", {}).get(key, "")
+    return val
 
 
 # ── 模块加载即初始化 ──
