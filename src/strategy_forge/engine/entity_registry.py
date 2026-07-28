@@ -131,6 +131,17 @@ _JACCARD_THRESHOLDS = {
     "_default": 0.45,
 }
 
+# ── 兜底域规则（域无匹配时使用——通用中立，适配任何种子材料）──
+_DEFAULT_DOMAIN_RULES = """## 归属分组
+- 实体若有独立行为+独立决策权 → 自身即组（根节点）
+- 实体若是某个已存在组的上级/下级成员 → 归入对应组
+
+## 决策主权判定（每组最多 1 个 tier1）
+| 独立决策实体（无论类型） | tier1 | 始终——该域的最高博弈单位 |
+| 该实体的领导/负责人 | tier2 | 决策⊆上级决策 |
+| 该实体的下属/部门/子品牌 | tier3 | 决策空间已被覆盖 |
+| 工具/资源/概念/数据/地点 | tier3 | 永远——非决策实体 |"""
+
 
 # ── Data Classes ──
 
@@ -858,30 +869,16 @@ async def _layer1_global_refine(
 
 _LAYER2_SYSTEM = """你是战略分析专家。先归属分组，再按决策主权分配 tier。
 
-## 归属分组
-- 政治人物（总统/总理/部长/将领）→ 归入所属主权国家
-- 军事/武装 → 归入所属国家
-- 政府机构 → 归入上级主体
-- 主权国家/最高政权 → 根节点，自身即组
-- 跨国企业/国际组织 → 若跨越多国独立行动→独立建组；否则归入主要关联国
-- 独立军阀/叛军 → 独立建组，不影响原国家组
+## 域规则（本域博弈单位定义 + tier 分配表）
+${domain_rules}
 
-## 决策主权判定（每组最多 1 个 tier1）
-
-| 实体 | tier | 条件 |
-|------|------|------|
-| 主权国家/最高政权 | 1 | 始终 |
-| 该国元首/政府首脑 | 2 | 决策⊆国家决策 |
-| 该国官员/部长/将领 | 3 | 决策空间已被覆盖 |
-| 地方势力/中层将领 | 3 | 除非原文 ≥3 项独立于中央的决策证据 |
-| 独立军阀/叛军 | 1 | 原文 ≥3 项独立决策证据 |
-| 跨国企业/独立机构 | 1 | 决策跨越多国管辖边界 |
-| 国际组织 | 2 | 核心成员已列席 ≥3 国→降为 3 |
-| 战略地缘区域 | 2 | 关键海峡/走廊/盆地 |
-| 工具/资源/概念 | 3 | 永远 |
+## 通用判定原则
+- 不确定归属时 → 保守保留为 tier2 并注明原因
+- 频次陷阱：高频≠重要，1 次关键决策 > 10 次背景提及
+- 白名单中的实体 → 无条件 tier1（但其属下的官员/子品牌仍按域规则降级）
 
 ## 输出 JSON
-{"results": [{"name":"实体名","tier":1|2|3,"reason":"≤30字及证据","group":"所属国家/组织名或独立"}]}
+{"results": [{"name":"实体名","tier":1|2|3,"reason":"≤30字及证据","group":"所属上级名或独立"}]}
 
 只输出 JSON。"""
 
@@ -900,8 +897,10 @@ async def _layer2_classify_batch(
     batch_idx: int,
     total_batches: int,
     log_fn: Any = None,
+    domain_rules: str = "",
 ) -> list[dict]:
-    """Layer 2: 判定一批实体。"""
+    """Layer 2: 判定一批实体。domain_rules 从 domain_prompts.json 注入。"""
+    from string import Template as _Template
 
     lines = []
     for e in batch:
@@ -919,11 +918,13 @@ async def _layer2_classify_batch(
 
     prompt = _LAYER2_USER.format(source=source_trim, batch=batch_text)
 
+    system = _Template(_LAYER2_SYSTEM).substitute(domain_rules=domain_rules or _DEFAULT_DOMAIN_RULES)
+
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
     resp = await client.chat_json(
         [Message(role="user", content=prompt)],
-        system=_LAYER2_SYSTEM,
+        system=system,
         schema_name="l2_results",
         temperature=0,
         max_tokens=_token_cfg("l2_classify", len(batch)),
@@ -973,6 +974,7 @@ async def _layer2_classify_all(
     source: str,
     batch_size: int = 10,
     log_fn: Any = None,
+    domain_rules: str = "",
 ) -> dict[str, dict]:
     """Layer 2: 分批并行判定。"""
 
@@ -982,7 +984,7 @@ async def _layer2_classify_all(
 
     total = len(batches)
     tasks = [
-        _layer2_classify_batch(batch, source, idx + 1, total, log_fn)
+        _layer2_classify_batch(batch, source, idx + 1, total, log_fn, domain_rules)
         for idx, batch in enumerate(batches)
     ]
     all_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -995,7 +997,7 @@ async def _layer2_classify_all(
                 log_fn("agents", f"  Layer2 批次{i+1} 失败，拆为单实体重试...")
             # 拆分失败批次为单实体重试
             retry_tasks = [
-                _layer2_classify_batch([e], source, 0, 1, log_fn)
+                _layer2_classify_batch([e], source, 0, 1, log_fn, domain_rules)
                 for e in batches[i]
             ]
             retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
@@ -1995,8 +1997,18 @@ async def build_registry(
         return registry
 
     # ── 7. Layer 2 ──
+    # 从 domain_prompts.json 读取域专属规则
+    domain_rules = _DEFAULT_DOMAIN_RULES
+    if domain:
+        from strategy_forge.core.rule_templates import get_domain_prompt
+        _l2_rules = get_domain_prompt(domain, "l2_entity_rules") or ""
+        _l2_table = get_domain_prompt(domain, "l2_tier_table") or ""
+        if _l2_rules or _l2_table:
+            domain_rules = _l2_rules + "\n\n" + _l2_table
+            if log_fn:
+                log_fn("agents", f"域 {domain} L2 规则已加载")
     try:
-        decisions = await _layer2_classify_all(entity_list, source_material, batch_size=10, log_fn=log_fn)
+        decisions = await _layer2_classify_all(entity_list, source_material, batch_size=10, log_fn=log_fn, domain_rules=domain_rules)
     except Exception as e:
         logger.warning("[Layer2] 判定失败: %s, 回退兜底", e)
         if log_fn:
