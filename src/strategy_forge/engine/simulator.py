@@ -2289,14 +2289,9 @@ class SimulationEngine:
                                          round_number=round_number, target_id=_primary_tid,
                                          effect=delta_txt, driver=dec.get("driver", "llm"))
                     self.graph.add_acted(actor, _eid, dec["action_type"], _ts)
-                    _seen_targets: set[str] = set()
                     for _it in _inters:
-                        _tid = _it["target"]
-                        if _tid not in _seen_targets:
-                            self.graph.add_targets(_eid, _tid)
-                            _seen_targets.add(_tid)
                         for _metric, _amount in _it["deltas"].items():
-                            self.graph.add_caused(_eid, _tid, _metric, float(_amount))
+                            self.graph.add_caused(_eid, _it["target"], _metric, float(_amount))
                 except Exception as e:
                     logger.debug("[Simulator] 量化因果写入 Kuzu 失败: %s", e)
             evt_suffix = (f"［{alloc_txt}］" if alloc_txt else "") + (f"（{delta_txt}）" if delta_txt else "")

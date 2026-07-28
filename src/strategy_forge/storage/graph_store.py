@@ -65,10 +65,7 @@ class DeductionGraphStore:
                 "CREATE REL TABLE IF NOT EXISTS ACTED("
                 "FROM Agent TO Event, action STRING, timestamp STRING)"
             )
-            # 因果链(硬档)：行动指向的目标 + 对目标各指标的精确数值影响
-            self._conn.execute(
-                "CREATE REL TABLE IF NOT EXISTS TARGETS(FROM Event TO Entity)"
-            )
+            # 因果链(硬档)：对目标各指标的精确数值影响
             self._conn.execute(
                 "CREATE REL TABLE IF NOT EXISTS CAUSED("
                 "FROM Event TO Entity, metric STRING, amount DOUBLE)"
@@ -105,43 +102,6 @@ class DeductionGraphStore:
                 {"sid": source_id, "tid": target_id, "rel": relation,
                  "w": weight, "ev": evidence},
             )
-
-    # ── Batch write helpers ──
-
-    def upsert_entities_batch(self, items: list[tuple[str, str, str, str]]) -> int:
-        """批量写实体 (id, name, type, desc)，单次锁，返回写入数。每500条分一组防内存堆积。"""
-        if not items:
-            return 0
-        n = 0
-        self._check_conn()
-        with self._lock:
-            for eid, name, etype, desc in items:
-                self._conn.execute(
-                    f"MERGE (e:{self.NODE_TABLE} {{id: $id}}) "
-                    "SET e.name = $name, e.type = $type, e.description = $description",
-                    {"id": eid, "name": name, "type": etype, "description": desc},
-                )
-                n += 1
-        return n
-
-    def upsert_relations_batch(self, items: list[tuple[str, str, str, str]]) -> int:
-        """批量写关系 (sid, tid, relation, evidence)，单次锁，返回写入数。"""
-        if not items:
-            return 0
-        n = 0
-        self._check_conn()
-        with self._lock:
-            for sid, tid, rel, ev in items:
-                if not sid or not tid:
-                    continue
-                self._conn.execute(
-                    f"MATCH (a:{self.NODE_TABLE} {{id: $sid}}), (b:{self.NODE_TABLE} {{id: $tid}}) "
-                    "MERGE (a)-[r:RELATES {relation: $rel}]->(b) "
-                    "SET r.weight = 1.0, r.evidence = $ev",
-                    {"sid": sid, "tid": tid, "rel": rel, "ev": ev},
-                )
-                n += 1
-        return n
 
     def upsert_agent_node(self, agent_id: str, name: str, persona: str,
                           background: str = "", goals: str = "[]") -> None:
@@ -196,16 +156,6 @@ class DeductionGraphStore:
                 f"MATCH (a:{self.AGENT_TABLE} {{id: $aid}}), (ev:{self.EVENT_TABLE} {{id: $eid}}) "
                 "CREATE (a)-[:ACTED {action: $act, timestamp: $ts}]->(ev)",
                 {"aid": agent_id, "eid": event_id, "act": action, "ts": timestamp},
-            )
-
-    def add_targets(self, event_id: str, target_id: str) -> None:
-        """事件指向的目标实体（因果链：行动作用于谁）。"""
-        self._check_conn()
-        with self._lock:
-            self._conn.execute(
-                f"MATCH (ev:{self.EVENT_TABLE} {{id: $eid}}), (e:{self.NODE_TABLE} {{id: $tid}}) "
-                "CREATE (ev)-[:TARGETS]->(e)",
-                {"eid": event_id, "tid": target_id},
             )
 
     def add_caused(self, event_id: str, target_id: str, metric: str, amount: float) -> None:
