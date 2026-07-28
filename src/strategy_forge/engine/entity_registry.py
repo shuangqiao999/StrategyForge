@@ -1556,46 +1556,6 @@ async def _layer3_cross_validate(
             downgrade_applied += 1
             logger.info("[Layer3 Downgrade] %s → %s", name, reason)
 
-    # ── 3c. 组内去重：每一博弈单元最多 1 个 tier1 ──
-    tier1_entities = [e for e in registry.entities.values() if e.tier == 1]
-    # 收集 group 信息（L2 输出的 group 字段 + 从 tier1 实体名推断）
-    group_map: dict[str, list[str]] = {}  # group_name → [entity_names]
-    for e in tier1_entities:
-        g = e.group.strip() if e.group else ""
-        if not g:
-            # 从类型推断归属：Person 类型 → 其描述/别名中可能含国家名
-            # 无 group 则自成一族
-            g = f"__{e.name}"
-        group_map.setdefault(g, []).append(e.name)
-
-    group_overrides = 0
-    for group_name, members in group_map.items():
-        if group_name.startswith("__"):
-            continue  # 独立组，无需处理
-        if len(members) <= 1:
-            continue
-        # 优先保留类型为 Country/Organization 的实体，降级其他
-        prioritized: list[str] = []
-        rest: list[str] = []
-        for mname in members:
-            ent = registry.entities.get(mname)
-            if ent and ent.type in ("Country", "国家", "Organization", "组织", "政权"):
-                prioritized.append(mname)
-            else:
-                rest.append(mname)
-        keep_list = prioritized[:1] or [members[0]]
-        for mname in members:
-            if mname in keep_list:
-                continue
-            ent = registry.entities.get(mname)
-            if ent and ent.tier == 1:
-                ent.tier = 2
-                ent.tier_evidence = f"L3组内去重({group_name})"
-                group_overrides += 1
-
-    if group_overrides:
-        logger.info("[Layer3 Group] 组内去重: %d 个实体 tier1→2", group_overrides)
-
     # ── 4. 写缓存 (Defect #4) ──
     if cache_enabled:
         ck = _layer3_cache_key(registry)
