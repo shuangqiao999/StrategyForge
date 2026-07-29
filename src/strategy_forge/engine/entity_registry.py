@@ -31,52 +31,73 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── LRU 缓存 (P0-1: 防止内存溢出 + TTL过期) ──
+# ── LRU 缓存 (协程安全 + TTL过期 + 主动清理) ──
 class _LRUCache:
-    """简易 LRU 缓存，带 TTL 过期（默认30分钟）。"""
+    """LRU 缓存，asyncio 锁保护，TTL 过期，主动后台清理。"""
     def __init__(self, maxsize: int = 64, ttl_sec: int = 1800):
         self._maxsize = maxsize
         self._ttl = ttl_sec
         self._data: dict[str, object] = {}
         self._timestamps: dict[str, float] = {}
         self._order: list[str] = []
+        self._lock = asyncio.Lock()
+        self._total_memory_bytes = 0
+        self._max_memory_bytes = 256 * 1024 * 1024  # 256MB hard cap
 
-    def get(self, key: str) -> object | None:
+    def _expire_stale(self, now: float) -> None:
+        """清理所有过期键（调用方需持有锁）。"""
+        if self._ttl <= 0:
+            return
+        stale = [k for k in self._order if now - self._timestamps.get(k, 0) > self._ttl]
+        for k in stale:
+            self._order.remove(k)
+            del self._data[k]
+            del self._timestamps[k]
+
+    async def get(self, key: str) -> object | None:
         import time
-        if key in self._data:
-            if self._ttl > 0 and time.time() - self._timestamps.get(key, 0) > self._ttl:
+        async with self._lock:
+            now = time.time()
+            self._expire_stale(now)
+            if key in self._data:
                 self._order.remove(key)
-                del self._data[key]
-                del self._timestamps[key]
-                return None
-            self._order.remove(key)
+                self._order.append(key)
+                return self._data[key]
+            return None
+
+    async def set(self, key: str, value: object) -> None:
+        import time, sys
+        async with self._lock:
+            now = time.time()
+            self._expire_stale(now)
+            if key in self._data:
+                self._order.remove(key)
+            else:
+                while len(self._data) >= self._maxsize or self._total_memory_bytes > self._max_memory_bytes:
+                    if not self._order:
+                        break
+                    oldest = self._order.pop(0)
+                    val_size = sys.getsizeof(self._data.get(oldest, b""))
+                    self._total_memory_bytes = max(0, self._total_memory_bytes - val_size)
+                    del self._data[oldest]
+                    self._timestamps.pop(oldest, None)
+                    logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
+            self._data[key] = value
+            self._timestamps[key] = now
             self._order.append(key)
-            return self._data[key]
-        return None
+            self._total_memory_bytes += sys.getsizeof(value)
 
-    def set(self, key: str, value: object) -> None:
-        import time
-        if key in self._data:
-            self._order.remove(key)
-        elif len(self._data) >= self._maxsize:
-            oldest = self._order.pop(0)
-            del self._data[oldest]
-            self._timestamps.pop(oldest, None)
-            logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
-        self._data[key] = value
-        self._timestamps[key] = time.time()
-        self._order.append(key)
+    async def contains(self, key: str) -> bool:
+        async with self._lock:
+            return key in self._data
 
-    def __contains__(self, key: str) -> bool:
-        return key in self._data
-
-    def __len__(self) -> int:
-        return len(self._data)
+    async def size(self) -> int:
+        async with self._lock:
+            return len(self._data)
 
 
-# ── 模块级缓存 ──
-_layer3_decision_cache = _LRUCache(64)
-_layer1_normalize_cache = _LRUCache(16)
+# ── 方差日志限制 ──
+_MAX_VARIANCE_LOG = 200
 _layer3_variance_log: list[dict] = []
 
 # ── 旧 entity_alias.json 模块级加载（向后兼容，用于方法论块）──
@@ -327,9 +348,13 @@ def _get_token_limit(cfg: dict, key: str, n: int) -> int:
     return min(cap, base + n * per)
 
 
-def _adapter_token(adapter: "DomainAdapter", key: str, n: int) -> int:
-    """从 DomainAdapter 读取 token 限制。"""
-    return adapter.params.token.get_limit(key, n)
+def _adapter_token(adapter: "DomainAdapter", key: str, n: int, extra_chars: int = 0) -> int:
+    """从 DomainAdapter 读取 token 限制，叠加 20% 安全冗余 + 额外字符 token 估算。"""
+    if adapter is None:
+        return 4000
+    limit = adapter.params.token.get_limit(key, n)
+    extra_tokens = extra_chars // 4 if extra_chars > 0 else 0
+    return int(max(limit, (limit + extra_tokens) * 1.2))
 
 
 def _char_jaccard(a: str, b: str) -> float:
@@ -1109,11 +1134,12 @@ def _fallback_classify(
 # ────────────────────────────────────────────────────────────
 
 def _layer3_cache_key(registry: EntityRegistry) -> str:
-    """Defect #4: 基于所有 KEEP 实体生成 MD5 哈希。"""
+    """基于所有 KEEP 实体的 name|type|freq|base_type 生成 MD5 哈希。"""
     kept = sorted(registry.get_kept(), key=lambda e: e.name)
     parts = []
     for e in kept:
-        parts.append(f"{e.name}|{e.type}|{e.freq}")
+        bt = getattr(e, "base_type", "")
+        parts.append(f"{e.name}|{e.type}|{e.freq}|{bt}")
     raw = ";".join(parts)
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
@@ -1175,6 +1201,8 @@ def _pre_merge_aliases(
         if not src_entity or not tgt_entity:
             continue
         if src_entity.decision != "KEEP":
+            continue
+        if tgt_entity.decision != "KEEP":
             continue
         # 合并: 频次累加, 别名归入, 描述拼接
         tgt_entity.freq += src_entity.freq
@@ -1252,6 +1280,8 @@ def _log_variance(
         "domain": domain,
     }
     _layer3_variance_log.append(entry)
+    while len(_layer3_variance_log) > _MAX_VARIANCE_LOG:
+        _layer3_variance_log.pop(0)
 
     # 简易跨轮统计
     if len(_layer3_variance_log) >= 2:
@@ -1322,7 +1352,7 @@ async def _layer3_cross_validate(
     if cache_enabled:
         ck = _layer3_cache_key(registry) + f"|{adapter.meta.domain_id}"
         ck = hashlib.md5(ck.encode("utf-8")).hexdigest()
-        cached = _layer3_decision_cache.get(ck)
+        cached = await _layer3_decision_cache.get(ck)
         if cached:
             logger.info("[Layer3 Cache] 命中, 跳过LLM")
             _apply_layer3_result(registry, cached)
@@ -1502,7 +1532,7 @@ async def _layer3_cross_validate(
     if cache_enabled:
         ck = _layer3_cache_key(registry) + f"|{adapter.meta.domain_id}"
         ck = hashlib.md5(ck.encode("utf-8")).hexdigest()
-        _layer3_decision_cache.set(ck, {
+        await _layer3_decision_cache.set(ck, {
             "downgrades": downgrades,
             "merges": merges,
             "notes": notes,
@@ -1725,7 +1755,7 @@ async def build_registry(
 
     # ── 1. 从 Kuzu 读取所有实体 ──
     result = graph._conn.execute(
-        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
+        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description LIMIT 5000"
     )
     raw_fragments: list[dict] = []
     while result.has_next():
@@ -1774,7 +1804,7 @@ async def build_registry(
     if l1_cache_enabled and source_material:
         text_fp = f"len={source_len}"
         l1_key = hashlib.md5(f"{source_material}|{adapter.meta.domain_id}|{text_fp}".encode("utf-8")).hexdigest()
-        cached_l1 = _layer1_normalize_cache.get(l1_key)
+        cached_l1 = await _layer1_normalize_cache.get(l1_key)
         if cached_l1:
             normalized = list(cached_l1)
             if log_fn:
@@ -1793,7 +1823,7 @@ async def build_registry(
             if l1_cache_enabled and source_material and normalized:
                 text_fp = f"len={source_len}"
                 l1_key = hashlib.md5(f"{source_material}|{adapter.meta.domain_id}|{text_fp}".encode("utf-8")).hexdigest()
-                _layer1_normalize_cache.set(l1_key, normalized)
+                await _layer1_normalize_cache.set(l1_key, normalized)
         except Exception as e:
             logger.warning("[Layer1] 归一化失败: %s, 回退到去重", e)
             if log_fn:
@@ -1943,15 +1973,33 @@ async def build_registry(
         _resolve_hierarchy(registry, None, log_fn, adapter)
         return registry
 
-    # ── 8. 应用判定 + 白名单覆盖 ──
+    # ── 8. 应用判定：优先级 基础类型硬约束 > 白名单 > LLM L2 ──
+    from strategy_forge.engine.semantic_mediator import ensure_min_tier
+
+    # 8a. 基础类型硬约束（最高优先级，不可被白名单或 LLM 覆盖）
+    force_t3 = set(adapter.tier_rule.force_tier3_base_types) if adapter.tier_rule.force_tier3_base_types else {"Resource", "Geography", "Contract", "Event", "Concept"}
+    hard_constrained = 0
+    for e in entity_list:
+        nm = e["name"]
+        bt = e.get("base_type", "Unknown")
+        if nm in decisions and bt in force_t3:
+            if decisions[nm].get("tier", 3) != 3:
+                decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": f"基础类型硬约束({bt}→tier3)"}
+                hard_constrained += 1
+    if hard_constrained and log_fn:
+        log_fn("agents", f"基础类型硬约束: {hard_constrained} 个实体强制 tier=3")
+
+    # 8b. 白名单强制一级（仅对 Agent/Subordinate 生效，不覆盖基础类型硬约束）
     force_keep_set = adapter.aliases.force_keep
     ent_alias_map: dict[str, set[str]] = {}
     for e in entity_list:
         ent_alias_map[e["name"]] = set(e.get("aliases", []))
+    force_t12 = set(adapter.tier_rule.force_tier1_base_types + adapter.tier_rule.force_tier2_base_types) if adapter else {"Agent", "Subordinate"}
 
     if force_keep_set:
         overridden = 0
         for name in list(decisions.keys()):
+            bt = next((e.get("base_type", "") for e in entity_list if e["name"] == name), "")
             matched = name in force_keep_set
             if not matched:
                 for fa in ent_alias_map.get(name, set()):
@@ -1964,13 +2012,14 @@ async def build_registry(
                         matched = True
                         break
             if matched and decisions[name].get("tier", 3) != 1:
+                if bt in force_t3:
+                    continue
                 decisions[name] = {"decision": "KEEP", "tier": 1, "reason": "白名单强制一级"}
                 overridden += 1
         if overridden and log_fn:
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
 
-    # 基础类型兜底修正：LLM 的 tier 不低于基础类型最低保证
-    from strategy_forge.engine.semantic_mediator import ensure_min_tier
+    # 8c. 基础类型最低保证（仅升级：Agent≥tier1, Subordinate≥tier2）
     for e in entity_list:
         nm = e["name"]
         bt = e.get("base_type", "Unknown")
@@ -1980,7 +2029,7 @@ async def build_registry(
             if min_t != llm_tier:
                 decisions[nm]["tier"] = min_t
                 decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"
-                if not decisions[nm].get("reason"):
+                if not decisions[nm].get("reason") or "白名单" not in str(decisions[nm].get("reason", "")):
                     decisions[nm]["reason"] = f"基础类型兜底({bt}->tier{min_t})"
 
     missing_ids: list[str] = []
