@@ -1,0 +1,284 @@
+# StrategyForge DomainAdapter — 政治博弈 (politics)
+# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+
+domain_meta:
+  domain_id: politics
+  display_name: 政治博弈
+  detect_keywords:
+  - keyword: 政党
+    weight: 4
+  - keyword: 选举
+    weight: 3
+  - keyword: 议会
+    weight: 3
+  - keyword: 选民
+    weight: 2
+  - keyword: 法案
+    weight: 2
+  methodology_mode: geo
+param_config:
+  shard_threshold: 12000
+  shard_size: 7500
+  shard_overlap: 800
+  jaccard_threshold: 0.4
+  max_sample_chars: 5000
+  sampling:
+    head_size: 2000
+    tail_size: 2000
+    lit_mode: false
+  token:
+    l1_normalize:
+      base: 200
+      per: 150
+      cap: 12000
+    l1_shard:
+      base: 200
+      per: 200
+      cap: 6000
+    l1_refine:
+      base: 200
+      per: 120
+      cap: 8000
+    l2_classify:
+      base: 200
+      per: 120
+      cap: 6000
+    l3_cross:
+      base: 300
+      per: 60
+      cap: 3000
+  cache:
+    l1_enabled: true
+    l1_max_entries: 16
+    l3_enabled: true
+    l3_max_entries: 64
+    ttl_sec: 1800
+base_type_mapping:
+  Agent:
+  - Organization
+  - 组织
+  - Country
+  - 国家
+  - 政权
+  - Company
+  - Enterprise
+  - 企业
+  - 公司
+  - InternationalOrganization
+  - 国际组织
+  - PoliticalParty
+  - 政党
+  - 政治组织
+  - 割据势力
+  - 叛军
+  - 军阀
+  - 武装组织
+  - NGO
+  - 非政府组织
+  - 军事组织
+  - MilitaryUnit
+  Subordinate:
+  - Person
+  - 人物
+  - 角色
+  - 官员
+  - 将领
+  - 发言人
+  - 员工
+  - 子公司
+  - 部门
+  - Division
+  - Department
+  Resource:
+  - 武器
+  - 资源
+  - 物资
+  - 兵器
+  - 原材料
+  - 产品
+  - 弹药
+  - 技术标准
+  - TechnologyStandard
+  Geography:
+  - Location
+  - 地点
+  - 地理区域
+  - 地理空间
+  - 城市
+  - 海峡
+  - 走廊
+  - 国家
+  - Country
+  Contract:
+  - 条约
+  - 协议
+  - 法案
+  - 合同
+  - 贸易协定
+  Event:
+  - 事件
+  - 冲突
+  - 战争
+  - 项目
+  - 活动
+  - 会议
+  - 选举
+  Concept:
+  - 概念
+  - 政策
+  - 主义
+  - 数据指标
+  - 经济指标
+  - 意识形态
+  - 规则
+tier_rule:
+  force_tier1_base_types:
+  - Agent
+  force_tier2_base_types:
+  - Subordinate
+  force_tier3_base_types:
+  - Resource
+  - Geography
+  - Contract
+  - Event
+  - Concept
+  extra_rules: |-
+    你是政治博弈分析专家。
+    ## 本域基本博弈单位
+    - 有独立选民授权的政党/政治运动 = 最高决策单位（等同于主权国家）
+    - 党魁/总统/总理 = 政党意志的执行者，不独立于政党
+    - 部长/发言人 = 被党魁覆盖，不独立
+    - 派系/议员团 = 若原文明确其独立投票/独立人事权→tier2；否则归入政党→tier3
+    - 意识形态流派/政策口号/民调数据 = 非决策实体
+layer_config:
+  skip_layer3: false
+  min_kept_for_check: 3
+  warn_threshold: 8
+  desc_truncate: 80
+  sample_chars_l3: 5000
+  monarchs_force_tier1: true
+  warlord_force_tier1: true
+  strategic_geo_tier2: true
+  log_file: ''
+  fallback_rules:
+    org_overlap_threshold: 3
+    org_members_map:
+      欧盟: &id001
+      - 法国
+      - 德国
+      - 意大利
+      - 荷兰
+      - 比利时
+      - 西班牙
+      北约: &id002
+      - 美国
+      - 英国
+      - 法国
+      - 德国
+      - 意大利
+      - 加拿大
+      G7: &id003
+      - 美国
+      - 日本
+      - 德国
+      - 英国
+      - 法国
+      - 意大利
+      - 加拿大
+      东盟: &id004
+      - 印度尼西亚
+      - 马来西亚
+      - 菲律宾
+      - 新加坡
+      - 泰国
+      - 越南
+      金砖: &id005
+      - 中国
+      - 俄罗斯
+      - 印度
+      - 巴西
+      - 南非
+    person_country_map:
+      特朗普: 美国
+      拜登: 美国
+      习近平: 中国
+      普京: 俄罗斯
+      泽连斯基: 乌克兰
+      内塔尼亚胡: 以色列
+      马克龙: 法国
+prompts:
+  l2_entity_rules: |-
+    你是政治博弈分析专家。
+    ## 本域基本博弈单位
+    - 有独立选民授权的政党/政治运动 = 最高决策单位（等同于主权国家）
+    - 党魁/总统/总理 = 政党意志的执行者，不独立于政党
+    - 部长/发言人 = 被党魁覆盖，不独立
+    - 派系/议员团 = 若原文明确其独立投票/独立人事权→tier2；否则归入政党→tier3
+    - 意识形态流派/政策口号/民调数据 = 非决策实体
+  l2_tier_table: |-
+    | 独立政党/有选民授权的政治运动 | tier1 | 始终——政治域的最高博弈单位 |
+    | 党魁/总统/总理 | tier2 | 决策=政党决策 |
+    | 部长/发言人/议员 | tier3 | 决策被党魁覆盖 |
+    | 独立派系/分裂势力 | tier1 | 原文≥3项独立投票/结盟/政策提案证据 |
+    | 政策/法案/民调 | tier3 | 非决策实体 |
+  l3_system_prompt: |
+    你是地缘战略冗余检测专家。在已保留的博弈实体中，发现并消除语义重叠的冗余。
+
+    ## 冗余类型
+    1. 组织-成员国重叠：军事联盟/国际组织与 3+ 核心成员国同时 KEEP → 组织降级
+    2. 人物-归属国重叠：政治人物与国家同时 KEEP，人物仅执行国家意志 → 降级人物
+    3. 概念-实例重叠：两个实体共享 60%+ 战略空间 → 保留更活跃者
+    4. 上下级重叠：上级组织与下级部门同时 KEEP → 降级下级
+    5. 军队-国家重叠：军队（如"美军""俄军""乌军""以军"等）默认视为所属国家的军事力量延伸，无独立战略决策权 → **必须降级为 tier2**。仅当种子材料中明确将该军队作为独立政治实体描述（有独立外交/独立战略/独立的国际法主体地位）时才例外保留
+    6. 多同名变体：如"特朗普"与"特朗普政府"同时出现 → 保留更直接代表决策主体的版本
+
+    ## 判断原则
+    - **军队默认降级**：凡名称以"军""军队""部队""武装"结尾的实体，在原文中没有独立政治决策行为的前提下，一律降级。不要因名称中包含了国名就认为它等同于国家——「美军」≠「美国」，「乌军」≠「乌克兰」
+    - **军队保留的例外条件（三个都满足才保留）**：①原文明确描述其独立战略决策；②拥有独立于国家的外交/政治行为；③不是仅作为军事行动执行者出现。否则降级
+    - 宁可保留 3 个独立实体，不可误删 1 个关键角色
+    - 人物有超出国家的独立影响（跨国领导人/军阀）→ 保留
+    - 地缘实体"大洲""方向"（亚太/印太/全球南方）非决策者 → 降级
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "实体名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  l3_redundancy_rules: |-
+    ## 政治域冗余检测
+    - 党魁-政党重叠 → 保留政党，降级党魁
+    - 部长/发言人-政党重叠 → 降级
+    - 派系-政党重叠 → 若派系有独立投票记录→保留；否则降级
+    - 国际联盟-成员国重叠 → 核心成员≥3已列席→降级联盟
+  l3_downgrade_rules: |-
+    - 党内人员默认归入政党
+    tier2
+aliases:
+  _org_members:
+    欧盟: *id001
+    北约: *id002
+    G7: *id003
+    东盟: *id004
+    金砖: *id005
+  _person_country:
+    特朗普: 美国
+    拜登: 美国
+    习近平: 中国
+    普京: 俄罗斯
+    泽连斯基: 乌克兰
+    内塔尼亚胡: 以色列
+    马克龙: 法国
+  _force_keep: []
+  entity_aliases: {}
+  _strategic_regions:
+  - 辽东
+  - 中原
+  - 江南
+  - 关中
+  - 巴蜀
+  - 湖广
+  - 山东
+  - 河南
+  - 陕西

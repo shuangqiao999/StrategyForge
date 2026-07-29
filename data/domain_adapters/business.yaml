@@ -1,0 +1,344 @@
+# StrategyForge DomainAdapter — 商业经济 (business)
+# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+
+domain_meta:
+  domain_id: business
+  display_name: 商业经济
+  detect_keywords:
+  - keyword: 企业
+    weight: 3
+  - keyword: 公司
+    weight: 3
+  - keyword: 供应链
+    weight: 3
+  - keyword: 市场份额
+    weight: 3
+  - keyword: 融资
+    weight: 3
+  - keyword: 上市
+    weight: 3
+  - keyword: 制裁清单
+    weight: 2
+  methodology_mode: geo
+param_config:
+  shard_threshold: 12000
+  shard_size: 7500
+  shard_overlap: 800
+  jaccard_threshold: 0.45
+  max_sample_chars: 5000
+  sampling:
+    head_size: 2000
+    tail_size: 2000
+    lit_mode: false
+  token:
+    l1_normalize:
+      base: 200
+      per: 150
+      cap: 12000
+    l1_shard:
+      base: 200
+      per: 200
+      cap: 6000
+    l1_refine:
+      base: 200
+      per: 120
+      cap: 8000
+    l2_classify:
+      base: 200
+      per: 120
+      cap: 6000
+    l3_cross:
+      base: 300
+      per: 60
+      cap: 3000
+  cache:
+    l1_enabled: true
+    l1_max_entries: 16
+    l3_enabled: true
+    l3_max_entries: 64
+    ttl_sec: 1800
+base_type_mapping:
+  Agent:
+  - Organization
+  - 组织
+  - Country
+  - 国家
+  - 政权
+  - Company
+  - Enterprise
+  - 企业
+  - 公司
+  - InternationalOrganization
+  - 国际组织
+  - PoliticalParty
+  - 政党
+  - 政治组织
+  - 割据势力
+  - 叛军
+  - 军阀
+  - 武装组织
+  - NGO
+  - 非政府组织
+  - 军事组织
+  - MilitaryUnit
+  Subordinate:
+  - Person
+  - 人物
+  - 角色
+  - 官员
+  - 将领
+  - 发言人
+  - 员工
+  - 子公司
+  - 部门
+  - Division
+  - Department
+  Resource:
+  - 武器
+  - 资源
+  - 物资
+  - 兵器
+  - 原材料
+  - 产品
+  - 弹药
+  - 技术标准
+  - TechnologyStandard
+  Geography:
+  - Location
+  - 地点
+  - 地理区域
+  - 地理空间
+  - 城市
+  - 海峡
+  - 走廊
+  - 国家
+  - Country
+  Contract:
+  - 条约
+  - 协议
+  - 法案
+  - 合同
+  - 贸易协定
+  Event:
+  - 事件
+  - 冲突
+  - 战争
+  - 项目
+  - 活动
+  - 会议
+  - 选举
+  Concept:
+  - 概念
+  - 政策
+  - 主义
+  - 数据指标
+  - 经济指标
+  - 意识形态
+  - 规则
+tier_rule:
+  force_tier1_base_types:
+  - Agent
+  force_tier2_base_types:
+  - Subordinate
+  force_tier3_base_types:
+  - Resource
+  - Geography
+  - Contract
+  - Event
+  - Concept
+  extra_rules: |-
+    你是商业战略分析专家。
+    ## 本域基本博弈单位
+    - 独立上市公司/独角兽/大型私有企业 = 最高决策单位——即使受市场约束，独立财报+独立战略=独立博弈者
+    - CEO/创始人 = 公司意志的执行者，不独立于公司
+    - 品牌/产品线/部门/子公司 = 被母公司覆盖，不独立
+    - 核心供应商/战略合作伙伴 = 若原文明确其独立定价/投资/技术路线决策→tier2；否则tier3
+    - 行业协会/监管机构 = 若原文明确其制定强制合规规则→tier2
+    - 产品型号/技术标准/市场份额数据/行业报告 = 非决策实体，永远tier3
+layer_config:
+  skip_layer3: false
+  min_kept_for_check: 3
+  warn_threshold: 8
+  desc_truncate: 80
+  sample_chars_l3: 5000
+  monarchs_force_tier1: true
+  warlord_force_tier1: true
+  strategic_geo_tier2: true
+  log_file: ''
+  fallback_rules:
+    org_overlap_threshold: 3
+    org_members_map:
+      欧盟: &id001
+      - 法国
+      - 德国
+      - 意大利
+      - 荷兰
+      - 比利时
+      - 西班牙
+      北约: &id002
+      - 美国
+      - 英国
+      - 法国
+      - 德国
+      - 意大利
+      - 加拿大
+      G7: &id003
+      - 美国
+      - 日本
+      - 德国
+      - 英国
+      - 法国
+      - 意大利
+      - 加拿大
+      东盟: &id004
+      - 印度尼西亚
+      - 马来西亚
+      - 菲律宾
+      - 新加坡
+      - 泰国
+      - 越南
+      金砖: &id005
+      - 中国
+      - 俄罗斯
+      - 印度
+      - 巴西
+      - 南非
+    person_country_map:
+      特朗普: 美国
+      拜登: 美国
+      习近平: 中国
+      普京: 俄罗斯
+      泽连斯基: 乌克兰
+      内塔尼亚胡: 以色列
+      马克龙: 法国
+prompts:
+  l2_entity_rules: |-
+    你是商业战略分析专家。
+    ## 本域基本博弈单位
+    - 独立上市公司/独角兽/大型私有企业 = 最高决策单位——即使受市场约束，独立财报+独立战略=独立博弈者
+    - CEO/创始人 = 公司意志的执行者，不独立于公司
+    - 品牌/产品线/部门/子公司 = 被母公司覆盖，不独立
+    - 核心供应商/战略合作伙伴 = 若原文明确其独立定价/投资/技术路线决策→tier2；否则tier3
+    - 行业协会/监管机构 = 若原文明确其制定强制合规规则→tier2
+    - 产品型号/技术标准/市场份额数据/行业报告 = 非决策实体，永远tier3
+  l2_tier_table: |-
+    | 独立上市公司/大型私有企业/独角兽 | tier1 | 始终——商业域的最高博弈单位 |
+    | CEO/创始人 | tier2 | 决策=公司决策，不另建agent |
+    | 品牌/产品线/部门/子公司 | tier3 | 决策空间被上级覆盖 |
+    | 核心供应商/战略合作伙伴 | tier2 | 原文明确其独立定价/投资/技术路线→tier2 |
+    | 行业协会/监管机构 | tier2 | 原文明确其制定强制规则→tier2 |
+    | 产品型号/技术标准/数据指标 | tier3 | 永远 |
+  l3_system_prompt: |
+    你是商业竞争冗余检测专家。在已保留的企业/行业实体中，发现并消除重复或从属的冗余主体。
+
+    ## 冗余类型
+    1. 集团-子公司重叠：母公司与子公司同时 KEEP → 降级子公司
+    2. 品牌-企业重叠：品牌与所属企业同时 KEEP → 降级品牌，保留企业
+    3. 人物-企业重叠：CEO/创始人与企业同时 KEEP → 若人物行为纯属企业意志 → 降级人物
+    4. 行业联盟-成员重叠：行业协会与核心成员企业同时 KEEP → 降级联盟
+
+    ## 判断原则
+    - 子公司若独立上市或有独立战略 → 保留
+    - 创始人有超出企业范畴的行业/政策影响力 → 保留人物
+    - 制裁清单/投资机构/评级机构 → 仅作为分析工具，无独立决策 → DISCARD
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "实体名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  l3_redundancy_rules: |-
+    ## 商业域冗余检测
+    - CEO-公司重叠 → 保留公司，降级CEO
+    - 品牌-集团重叠 → 合并，保留集团
+    - 产品线-公司重叠 → 降级产品线
+    - 合资企业-投资方重叠 → 若所有投资方已独立列席→降级
+    - 子公司-母公司重叠 → 降级子公司
+    - 供应商-客户重叠 → 若供应商独立服务多客户→保留；若独家依附→降级
+  l3_downgrade_rules: tier2
+aliases:
+  _org_members:
+    欧盟: *id001
+    北约: *id002
+    G7: *id003
+    东盟: *id004
+    金砖: *id005
+  _person_country:
+    特朗普: 美国
+    拜登: 美国
+    习近平: 中国
+    普京: 俄罗斯
+    泽连斯基: 乌克兰
+    内塔尼亚胡: 以色列
+    马克龙: 法国
+  _force_keep: []
+  entity_aliases:
+    华为:
+    - 华为技术有限公司
+    - Huawei
+    中兴:
+    - 中兴通讯
+    - ZTE
+    字节跳动:
+    - 抖音
+    - TikTok
+    - ByteDance
+    腾讯:
+    - Tencent
+    - 腾讯控股
+    阿里:
+    - 阿里巴巴
+    - Alibaba
+    - 淘宝
+    苹果:
+    - Apple
+    谷歌:
+    - Google
+    - Alphabet
+    微软:
+    - Microsoft
+    特斯拉:
+    - Tesla
+    - TSLA
+    台积电:
+    - TSMC
+    - 台湾积体电路
+    三星:
+    - Samsung
+    英伟达:
+    - Nvidia
+    - NVIDIA
+    英特尔:
+    - Intel
+    AMD:
+    - 超微半导体
+    高通:
+    - Qualcomm
+    DeepSeek:
+    - 深度求索
+    OpenAI:
+    - Open AI
+    SpaceX:
+    - 太空探索技术公司
+    亚马逊:
+    - Amazon
+    - AWS
+    Meta:
+    - Facebook
+    - 脸书
+    宁德时代:
+    - CATL
+    比亚迪:
+    - BYD
+  _strategic_regions:
+  - 辽东
+  - 中原
+  - 江南
+  - 关中
+  - 巴蜀
+  - 湖广
+  - 山东
+  - 河南
+  - 陕西

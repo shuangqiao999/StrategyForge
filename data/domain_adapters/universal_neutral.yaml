@@ -1,0 +1,151 @@
+# StrategyForge DomainAdapter — 通用中立领域 (universal_neutral)
+# 未知领域默认加载，无任何领域偏见，全领域通用中立规则
+
+domain_meta:
+  domain_id: universal_neutral
+  display_name: 通用中立领域
+  detect_keywords: []
+  methodology_mode: neutral
+param_config:
+  shard_threshold: 12000
+  shard_size: 7500
+  shard_overlap: 800
+  jaccard_threshold: 0.45
+  max_sample_chars: 8000
+  sampling:
+    head_size: 2000
+    tail_size: 2000
+    lit_mode: false
+  token:
+    l1_normalize:
+      base: 200
+      per: 150
+      cap: 12000
+    l1_shard:
+      base: 200
+      per: 200
+      cap: 6000
+    l1_refine:
+      base: 200
+      per: 120
+      cap: 8000
+    l2_classify:
+      base: 150
+      per: 100
+      cap: 4000
+    l3_cross:
+      base: 300
+      per: 60
+      cap: 3000
+  cache:
+    l1_enabled: true
+    l1_max_entries: 16
+    l3_enabled: true
+    l3_max_entries: 64
+    ttl_sec: 1800
+base_type_mapping:
+  Agent:
+  - Organization
+  - 组织
+  - Country
+  - 国家
+  - 政权
+  - Company
+  - Enterprise
+  - 企业
+  - 公司
+  - InternationalOrganization
+  - 国际组织
+  Subordinate:
+  - Person
+  - 人物
+  - 角色
+  - 官员
+  - 员工
+  - 子公司
+  - 部门
+  Resource:
+  - 武器
+  - 资源
+  - 物资
+  - 原材料
+  - 产品
+  Geography:
+  - Location
+  - 地点
+  - 地理区域
+  - 城市
+  Contract:
+  - 条约
+  - 协议
+  - 法案
+  - 合同
+  Event:
+  - 事件
+  - 冲突
+  - 战争
+  - 项目
+  - 活动
+  Concept:
+  - 概念
+  - 政策
+  - 主义
+  - 数据指标
+tier_rule:
+  force_tier1_base_types:
+  - Agent
+  force_tier2_base_types:
+  - Subordinate
+  force_tier3_base_types:
+  - Resource
+  - Geography
+  - Contract
+  - Event
+  - Concept
+  extra_rules: 仅依据实体独立决策能力分级：拥有完整独立行动与利益诉求为tier1；依附其他主体决策为tier2；纯资源/工具/概念为tier3。不默认降级任何人物、组织。
+layer_config:
+  skip_layer3: false
+  min_kept_for_check: 3
+  warn_threshold: 8
+  desc_truncate: 80
+  sample_chars_l3: 5000
+  monarchs_force_tier1: false
+  warlord_force_tier1: false
+  strategic_geo_tier2: false
+  log_file: ''
+  fallback_rules:
+    org_overlap_threshold: 3
+    org_members_map: {}
+    person_country_map: {}
+prompts:
+  l2_entity_rules: |-
+    你是通用博弈分析专家。
+    ## 本域基本博弈单位
+    - 有独立行为+独立决策权的实体 = tier1——不论类型
+    - 该实体的领导/负责人 = tier2（决策⊆上级决策）
+    - 该实体的下属/部门/子品牌 = tier3（决策被覆盖）
+    - 工具/资源/概念/数据/地点 = tier3
+  l2_tier_table: |-
+    | 独立决策实体（不论类型） | tier1 | 始终——该域最高博弈单位 |
+    | 该实体的领导/负责人 | tier2 | 决策⊆上级决策 |
+    | 该实体的下属/部门/子品牌 | tier3 | 决策空间被覆盖 |
+    | 工具/资源/概念/数据/地点 | tier3 | 永远 |
+  l3_system_prompt: |-
+    你是通用博弈实体冗余检测专家。检测实体间是否存在决策权重叠。
+    ## 核心原则
+    - 一个实体决策空间 ⊆ 另一实体时 → 前者冗余
+    - 仅当重叠 ≥ 60% 且一方完全覆盖另一方时才判定冗余
+    - 不确定 → 保留不降级
+  l3_redundancy_rules: |-
+    ## 通用冗余检测
+    - 领导-实体重叠 → 保留实体，降级领导
+    - 组织-成员重叠 → 保留组织
+    - 子品牌/产品线-主体重叠 → 合并
+    - 不确定者 → 保留不降级
+  l3_downgrade_rules: tier2
+aliases:
+  _org_members: {}
+  _person_country: {}
+  _force_keep: []
+  entity_aliases: {}
+  _strategic_regions: []

@@ -1,0 +1,332 @@
+# StrategyForge DomainAdapter — 小说 (novel)
+# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+
+domain_meta:
+  domain_id: novel
+  display_name: 小说
+  detect_keywords:
+  - keyword: 主角
+    weight: 3
+  - keyword: 章节
+    weight: 3
+  - keyword: 小说
+    weight: 5
+  - keyword: 情节
+    weight: 2
+  - keyword: 内心独白
+    weight: 2
+  methodology_mode: narrative
+param_config:
+  shard_threshold: 12000
+  shard_size: 7500
+  shard_overlap: 800
+  jaccard_threshold: 0.5
+  max_sample_chars: 5000
+  sampling:
+    head_size: 1500
+    tail_size: 1500
+    lit_mode: true
+  token:
+    l1_normalize:
+      base: 200
+      per: 150
+      cap: 12000
+    l1_shard:
+      base: 200
+      per: 200
+      cap: 6000
+    l1_refine:
+      base: 200
+      per: 120
+      cap: 8000
+    l2_classify:
+      base: 200
+      per: 120
+      cap: 6000
+    l3_cross:
+      base: 300
+      per: 60
+      cap: 3000
+  cache:
+    l1_enabled: true
+    l1_max_entries: 16
+    l3_enabled: true
+    l3_max_entries: 64
+    ttl_sec: 1800
+base_type_mapping:
+  Agent:
+  - Organization
+  - 组织
+  - Country
+  - 国家
+  - 政权
+  - Company
+  - Enterprise
+  - 企业
+  - 公司
+  - InternationalOrganization
+  - 国际组织
+  - PoliticalParty
+  - 政党
+  - 政治组织
+  - 割据势力
+  - 叛军
+  - 军阀
+  - 武装组织
+  - NGO
+  - 非政府组织
+  - 军事组织
+  - MilitaryUnit
+  Subordinate:
+  - Person
+  - 人物
+  - 角色
+  - 官员
+  - 将领
+  - 发言人
+  - 员工
+  - 子公司
+  - 部门
+  - Division
+  - Department
+  Resource:
+  - 武器
+  - 资源
+  - 物资
+  - 兵器
+  - 原材料
+  - 产品
+  - 弹药
+  - 技术标准
+  - TechnologyStandard
+  Geography:
+  - Location
+  - 地点
+  - 地理区域
+  - 场景
+  - 地名
+  Contract:
+  - 条约
+  - 协议
+  - 法案
+  - 合同
+  - 贸易协定
+  Event:
+  - 事件
+  - 冲突
+  - 战争
+  - 项目
+  - 活动
+  - 会议
+  - 选举
+  Concept:
+  - 概念
+  - 政策
+  - 主义
+  - 数据指标
+  - 经济指标
+  - 意识形态
+  - 规则
+tier_rule:
+  force_tier1_base_types:
+  - Agent
+  force_tier2_base_types:
+  - Subordinate
+  force_tier3_base_types:
+  - Resource
+  - Geography
+  - Contract
+  - Event
+  - Concept
+  extra_rules: |-
+    你是小说角色分析专家。
+    ## 本域基本博弈单位
+    - 主角 = tier1——首位
+    - 主要配角（有独立行动线） = tier1
+    - 次要配角（仅作他人故事催化剂） = tier2
+    - 背景角色（无独立故事线） = tier3
+    - 地名/时间/天气/物品 = tier3
+layer_config:
+  skip_layer3: true
+  min_kept_for_check: 3
+  warn_threshold: 8
+  desc_truncate: 80
+  sample_chars_l3: 5000
+  monarchs_force_tier1: true
+  warlord_force_tier1: true
+  strategic_geo_tier2: true
+  log_file: ''
+  fallback_rules:
+    org_overlap_threshold: 3
+    org_members_map:
+      欧盟: &id001
+      - 法国
+      - 德国
+      - 意大利
+      - 荷兰
+      - 比利时
+      - 西班牙
+      北约: &id002
+      - 美国
+      - 英国
+      - 法国
+      - 德国
+      - 意大利
+      - 加拿大
+      G7: &id003
+      - 美国
+      - 日本
+      - 德国
+      - 英国
+      - 法国
+      - 意大利
+      - 加拿大
+      东盟: &id004
+      - 印度尼西亚
+      - 马来西亚
+      - 菲律宾
+      - 新加坡
+      - 泰国
+      - 越南
+      金砖: &id005
+      - 中国
+      - 俄罗斯
+      - 印度
+      - 巴西
+      - 南非
+    person_country_map:
+      特朗普: 美国
+      拜登: 美国
+      习近平: 中国
+      普京: 俄罗斯
+      泽连斯基: 乌克兰
+      内塔尼亚胡: 以色列
+      马克龙: 法国
+prompts:
+  l2_entity_rules: |-
+    你是小说角色分析专家。
+    ## 本域基本博弈单位
+    - 主角 = tier1——首位
+    - 主要配角（有独立行动线） = tier1
+    - 次要配角（仅作他人故事催化剂） = tier2
+    - 背景角色（无独立故事线） = tier3
+    - 地名/时间/天气/物品 = tier3
+  l2_tier_table: |-
+    | 主角 | tier1 | 始终 |
+    | 主要配角（有独立行动线） | tier1 | 原文≥3项独立行动/决策 |
+    | 次要配角（催化剂型） | tier2 | 推动他人故事但无独立弧线 |
+    | 背景角色 | tier3 | 无独立故事线 |
+    | 地名/时间/天气/物品 | tier3 | 永远 |
+  l3_system_prompt: |
+    你是文学叙事冗余检测专家。基于种子材料的整体语义和语境，在已提取的角色实体中，正确区分独立角色与从属角色。
+
+    ## 冗余类型
+    1. 角色-组织重叠：角色始终作为组织代言人行动 → 降级角色或组织（视主导性而定）
+    2. 主从关系重叠：配角行为完全受主角支配、无独立叙事弧 → 降级配角
+    3. 同名异人：不同分片提取的同名实体需核实是否为同一人——结合原文语义上下文判断
+    4. 背景人物：仅被提及而无行动/对话/决策 → 降级
+
+    ## 判断原则（语义理解优先）
+    - 不要仅根据名称模式机械降级——须结合原文中该角色的具体行为、对话、心理描写综合判断
+    - 有独立心理描写、独立行动、独立对话的角色 → KEEP
+    - 纯粹环境描写提到的群体、地名、官职 → DISCARD
+    - 宁可保留边缘但有独立行动的角色，不保留高频但无行为的功能性角色
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "角色名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字全局观察"
+    }
+    无冗余时数组为空。只输出 JSON。
+  l3_redundancy_rules: |-
+    ## 小说域冗余检测
+    - 别名合并：同一角色的不同称呼→合并为主体名
+    - 角色-隶属组织重叠 → 不降级
+    - 背景组织/机构 → 若仅作场景→tier3
+  l3_downgrade_rules: tier1（小说保守保留）
+aliases:
+  _org_members:
+    欧盟: *id001
+    北约: *id002
+    G7: *id003
+    东盟: *id004
+    金砖: *id005
+  _person_country:
+    特朗普: 美国
+    拜登: 美国
+    习近平: 中国
+    普京: 俄罗斯
+    泽连斯基: 乌克兰
+    内塔尼亚胡: 以色列
+    马克龙: 法国
+  _force_keep: []
+  entity_aliases:
+    宋江:
+    - 宋公明
+    - 及时雨
+    - 呼保义
+    - 宋押司
+    卢俊义:
+    - 玉麒麟
+    - 卢员外
+    吴用:
+    - 智多星
+    - 吴学究
+    林冲:
+    - 豹子头
+    - 林教头
+    武松:
+    - 行者
+    - 武二郎
+    - 武都头
+    鲁智深:
+    - 花和尚
+    - 鲁提辖
+    李逵:
+    - 黑旋风
+    - 铁牛
+    晁盖:
+    - 晁天王
+    高俅:
+    - 高太尉
+    贾宝玉:
+    - 宝玉
+    - 宝二爷
+    - 怡红公子
+    林黛玉:
+    - 黛玉
+    - 颦儿
+    - 潇湘妃子
+    薛宝钗:
+    - 宝钗
+    - 蘅芜君
+    王熙凤:
+    - 凤姐
+    - 凤辣子
+    崇祯:
+    - 朱由检
+    - 崇祯帝
+    - 思宗
+    李自成:
+    - 闯王
+    - 李闯
+    张献忠:
+    - 八大王
+    皇太极:
+    - 清太宗
+    周延儒:
+    - 周阁老
+    - 周首辅
+    温体仁:
+    - 温阁老
+    杨嗣昌:
+    - 杨兵部
+    黄宗羲:
+    - 黄梨洲
+    - 梨洲先生
+    阮大铖:
+    - 阮圆海
+    陈子龙:
+    - 陈卧子
+  _strategic_regions: []
