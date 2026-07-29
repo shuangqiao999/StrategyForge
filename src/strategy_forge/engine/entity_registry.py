@@ -99,6 +99,8 @@ class _LRUCache:
 # ── 方差日志限制 ──
 _MAX_VARIANCE_LOG = 200
 _layer3_variance_log: list[dict] = []
+_layer3_decision_cache = _LRUCache(64)
+_layer1_normalize_cache = _LRUCache(16)
 
 # ── 旧 entity_alias.json 模块级加载（向后兼容，用于方法论块）──
 def _load_alias_json() -> dict:
