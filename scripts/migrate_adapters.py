@@ -181,16 +181,17 @@ def _build_base_type_mapping(domain: str) -> dict[str, list[str]]:
                    "政党", "政治组织", "割据势力", "叛军", "军阀", "武装组织", "NGO",
                    "非政府组织", "军事组织", "MilitaryUnit"],
         "Subordinate": ["Person", "人物", "角色", "官员", "将领", "发言人", "员工",
-                        "子公司", "部门", "Division", "Department"],
+                         "子公司", "部门", "Division", "Department",
+                         "议员", "代表", "政治党派"],
         "Resource": ["武器", "资源", "物资", "兵器", "原材料", "产品", "弹药",
-                     "技术标准", "TechnologyStandard"],
+                      "技术标准", "TechnologyStandard", "基础设施"],
         "Geography": ["Location", "地点", "地理区域", "地理空间", "城市", "海峡",
-                      "走廊", "国家", "Country"],
+                       "走廊", "区域", "国家", "Country"],
         "Contract": ["条约", "协议", "法案", "合同", "贸易协定"],
         "Event": ["事件", "冲突", "战争", "项目", "活动", "会议", "选举"],
-        "Concept": ["概念", "政策", "主义", "数据指标", "经济指标", "意识形态", "规则"],
+        "Concept": ["概念", "政策", "主义", "数据指标", "经济指标", "意识形态", "规则",
+                     "政治口号", "思潮", "舆论"],
     }
-    # 叙事域差异化：Geography 中不放 Country
     if domain in ("novel", "history", "narrative"):
         result = dict(common)
         result["Geography"] = ["Location", "地点", "地理区域", "场景", "地名"]
@@ -382,21 +383,12 @@ def build_universal_neutral(l3cfg: dict, prompts: dict) -> dict:
                 "ttl_sec": 1800,
             },
         },
-        "base_type_mapping": {
-            "Agent": ["Organization", "组织", "Country", "国家", "政权", "Company", "Enterprise",
-                      "企业", "公司", "InternationalOrganization", "国际组织"],
-            "Subordinate": ["Person", "人物", "角色", "官员", "员工", "子公司", "部门"],
-            "Resource": ["武器", "资源", "物资", "原材料", "产品"],
-            "Geography": ["Location", "地点", "地理区域", "城市"],
-            "Contract": ["条约", "协议", "法案", "合同"],
-            "Event": ["事件", "冲突", "战争", "项目", "活动"],
-            "Concept": ["概念", "政策", "主义", "数据指标"],
-        },
+        "base_type_mapping": _build_base_type_mapping("universal_neutral"),
         "tier_rule": {
             "force_tier1_base_types": ["Agent"],
             "force_tier2_base_types": ["Subordinate"],
             "force_tier3_base_types": ["Resource", "Geography", "Contract", "Event", "Concept"],
-            "extra_rules": "仅依据实体独立决策能力分级：拥有完整独立行动与利益诉求为tier1；依附其他主体决策为tier2；纯资源/工具/概念为tier3。不默认降级任何人物、组织。",
+            "extra_rules": "仅依据实体独立决策能力分级。拥有完整独立行动与利益诉求为tier1；依附其他主体决策为tier2；纯资源/工具/概念/地理/事件为tier3。\n\n## 活性检验参考\n- 实体执行独立行为（宣布/决定/发起/签署/制裁/拒绝/要求/投资）→ 独立决策\n- 实体仅被报道/引用/分析 → 被动背景，tier3\n- 政党/政治派别 → tier2，依附更高层级政权\n- 频次陷阱：1次关键决策 > 10次背景提及",
         },
         "layer_config": {
             "skip_layer3": False,
@@ -411,15 +403,11 @@ def build_universal_neutral(l3cfg: dict, prompts: dict) -> dict:
             "fallback_rules": {"org_overlap_threshold": 3, "org_members_map": {}, "person_country_map": {}},
         },
         "prompts": {
-            "l2_entity_rules": dp.get("l2_entity_rules", ""),
-            "l2_tier_table": dp.get("l2_tier_table", ""),
-            "l3_system_prompt": """你是通用博弈实体冗余检测专家。检测实体间是否存在决策权重叠。
-## 核心原则
-- 一个实体决策空间 ⊆ 另一实体时 → 前者冗余
-- 仅当重叠 ≥ 60% 且一方完全覆盖另一方时才判定冗余
-- 不确定 → 保留不降级""",
-            "l3_redundancy_rules": dp.get("l3_redundancy_rules", ""),
-            "l3_downgrade_rules": dp.get("l3_downgrade_rules", "tier2"),
+            "l2_entity_rules": "你是通用博弈分析专家。\n## 本域基本博弈单位\n- 有独立行为+独立决策权的实体 = tier1——不论类型（企业/国家/组织/独立政权/军阀/有独立叙事弧的角色）\n- 该实体的领导/负责人 = tier2（决策⊆上级决策）\n- 该实体的下属/部门/子品牌/成员 = tier3（决策被覆盖）\n- 政党/政治派别/意识形态运动 = tier2（国内政治子系统，依附更高级政权）\n- 工具/资源/概念/数据/地点/报告/指标 = tier3\n\n## 活性检验（独立决策 vs 被动背景）\n- 实体执行了独立行为（宣布/决定/发起/签署/制裁/拒绝/要求/投资/出兵）→ 独立决策\n- 实体仅被报道/提及/引用/分析，无主动行为 → 被动背景，tier3\n- 实体名称含\"报告/数据/指标/趋势/调查\" → 信息产物，tier3\n- 频次陷阱：高频≠重要，1次关键决策 > 10次背景提及",
+            "l2_tier_table": "| 独立决策实体（不论类型） | tier1 | 始终——该域最高博弈单位 |\n| 该实体的领导/负责人 | tier2 | 决策⊆上级决策 |\n| 政党/政治派别 | tier2 | 国内政治子系统 |\n| 该实体的下属/部门/子品牌 | tier3 | 决策空间被覆盖 |\n| 工具/资源/概念/数据/地点/报告 | tier3 | 永远",
+            "l3_system_prompt": "你是通用博弈实体冗余检测专家。检测实体间是否存在决策权重叠。\n## 核心原则\n- 一个实体决策空间 ⊆ 另一实体时 → 前者冗余\n- 仅当重叠 ≥ 60% 且一方完全覆盖另一方时才判定冗余\n- 不确定 → 保留不降级",
+            "l3_redundancy_rules": "## 通用冗余检测（中立，无领域偏见）\n- 领导-实体重叠 → 保留实体，降级领导\n- 组织-成员重叠 → 核心成员≥3已独立列席时降级组织；否则保留\n- 子品牌/产品线/下级机构-主体重叠 → 合并到主体\n- 政党/政治派别-政权重叠 → 降级政党（国内子系统）\n- 政策口号/主义-国家重叠 → 降级口号（非独立博弈者）\n- 平行对等主体 → 互不冗余，分别保留\n- 不确定者 → 保守保留，不降级",
+            "l3_downgrade_rules": "tier2",
         },
         "aliases": {
             "_org_members": {},

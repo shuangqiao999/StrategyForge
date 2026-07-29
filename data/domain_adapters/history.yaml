@@ -93,6 +93,9 @@ base_type_mapping:
   - 部门
   - Division
   - Department
+  - 议员
+  - 代表
+  - 政治党派
   Resource:
   - 武器
   - 资源
@@ -103,6 +106,7 @@ base_type_mapping:
   - 弹药
   - 技术标准
   - TechnologyStandard
+  - 基础设施
   Geography:
   - Location
   - 地点
@@ -131,6 +135,9 @@ base_type_mapping:
   - 经济指标
   - 意识形态
   - 规则
+  - 政治口号
+  - 思潮
+  - 舆论
 tier_rule:
   force_tier1_base_types:
   - Agent
