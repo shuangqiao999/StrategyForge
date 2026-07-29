@@ -150,9 +150,9 @@ async def get_session(session_id: str, request: Request):
 
 
 @router.get("/sessions")
-async def list_sessions(limit: int = Query(50, ge=1, le=200), request: Request = None):
+async def list_sessions(request: Request = None):
     engine = _get_engine(request)
-    return engine.list_sessions(limit=limit)
+    return engine.list_sessions()
 
 
 @router.delete("/session/{session_id}")

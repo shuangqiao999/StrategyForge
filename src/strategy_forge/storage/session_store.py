@@ -150,14 +150,13 @@ class SessionStore:
         d["token_json"] = json.loads(d.get("token_json", "{}") or "{}")
         return d
 
-    def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, title, status, phase, entity_count, relation_count, "
                 "agent_count, current_round, total_rounds, config_json, "
                 "created_at, updated_at "
-                "FROM deduction_sessions ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                "FROM deduction_sessions ORDER BY created_at DESC"
             ).fetchall()
         out: list[dict[str, Any]] = []
         for r in rows:

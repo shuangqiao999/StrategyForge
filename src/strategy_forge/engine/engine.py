@@ -96,8 +96,8 @@ class DeductionEngine:
             return None
         return self._row_to_session(data)
 
-    def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self.session_store.list_all(limit=limit)
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return self.session_store.list_all()
 
     def delete_session(self, session_id: str, force: bool = False) -> None:
         existing = self.session_store.get(session_id)
