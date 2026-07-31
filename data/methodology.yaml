@@ -74,3 +74,121 @@ _domain_action_principles: |
   - 有独立行动+对话+心理描写的角色为最高博弈单位
   - 核心角色绝不可降级
   - 仅作为背景提及→tier3
+
+# ── 反思触发词 × 领域全覆盖 ──
+# 通用默认 15 类保留为基准，每域追加专属触发词
+# 格式：类别名: [触发词列表]
+
+_domain_triggers:
+  military:
+    战术突破: [突破防线, 奇袭成功, 围点打援, 焦土政策, 斩首行动, 迂回包抄, 闪电战, 纵深突破]
+    士气崩溃: [溃不成军, 士气瓦解, 投降, 哗变, 军心涣散, 临阵脱逃, 怯战, 厌战]
+    装备损失: [装备损毁, 武器失灵, 弹药耗尽, 后勤断裂, 补给断绝, 制空权丧失, 制海权丧失]
+    战线变动: [阵地推进, 战线收缩, 突围, 被合围, 战略撤退, 反攻]
+  business:
+    市场份额变化: [份额下滑, 市占率下降, 被抢占市场, 份额被蚕食, 用户流失, 客户流失, 活跃下降]
+    监管打击: [反垄断调查, 被罚款, 被约谈, 合规处罚, 牌照吊销, 被列入黑名单, 停业整顿]
+    竞品突破: [竞品发布, 颠覆性技术, 黑马崛起, 跨界打劫, 弯道超车, 降维打击, 新玩家入局]
+    人才流失: [核心离职, 团队出走, 被挖角, 人才断层, 高管跳槽, 联合创始人退出, 裁员风波]
+    融资事件: [融资失败, 估值下调, 对赌失败, 资金链紧张, 断贷, 投资人撤资, IPO推迟]
+    并购事件: [被收购, 恶意收购, 收购失败, 被吞并, 毒丸计划, 白衣骑士, 要约收购]
+    供应链中断: [物流中断, 工厂停产, 原材料暴涨, 断供危机, 产能不足, 代工厂解约, 品质事故]
+    财报未达标: [亏损扩大, 营收下滑, 利润腰斩, 未达预期, 评级下调, 股价暴跌, 退市风险]
+    数据安全: [数据泄露, 被黑客攻击, 用户隐私, 宕机, 信息泄露, 勒索软件]
+  politics:
+    选举事件: [选举失利, 民调暴跌, 被弹劾, 不信任案, 罢免, 重新选举, 投票舞弊]
+    立法受阻: [法案被否, 议会僵局, 立法冻结, 否决权行使, 违宪审查, 程序阻挠]
+    民意逆转: [支持率暴跌, 大规模示威, 舆论逆转, 联名反对, 公投失败, 街头运动]
+    党内斗争: [党内分裂, 派系冲突, 党魁挑战, 路线之争, 退党潮, 开除党籍]
+  ecology:
+    环境灾难: [污染泄露, 生态破坏, 物种灭绝, 森林大火, 石油泄漏, 核泄漏, 水华暴发]
+    气候事件: [极端天气, 洪水, 干旱, 海平面上升, 冰川消融, 热浪, 飓风]
+    政策变动: [碳税调整, 排放标准提高, 环保法规收紧, 退出气候协定, 补贴取消]
+  urban:
+    规划变更: [规划被否, 土地收回, 拆迁受阻, 用地调整, 容积率变更, 控规修改]
+    基础设施危机: [交通瘫痪, 供水中断, 电力危机, 管网破裂, 桥隧事故, 通信中断]
+    社会事件: [群体事件, 安全事故, 房市暴跌, 烂尾, 维权, 业主抗议, 钉子户]
+  tech:
+    技术突破: [重大突破, 专利获批, 标准制定, 里程碑, 代际跨越, 首发优势, 技术路线胜出]
+    技术封锁: [技术封锁, 断供, 出口管制, 实体清单, 架构封锁, 授权撤销, 专利无效]
+    产品事件: [产品召回, 安全漏洞, 体验崩塌, 被下架, 兼容性问题, 电池爆炸]
+    人才争夺: [挖角, 人才争夺, 核心团队出走, 首席科学家离职, 竞业限制纠纷]
+  info_war:
+    舆论逆转: [舆论反转, 被揭穿, 公信力崩塌, 事实核查推翻, 被群嘲, 翻车]
+    平台事件: [被封禁, 限流, 算法调整, 去平台化, 账号异常, 流量腰斩]
+    信息武器化: [深度伪造, AI换脸, 虚假信息扩散, 认知战, 水军攻击, 人肉搜索]
+  geo_strategy: {}
+  novel:
+    角色关系突变: [背叛, 告白, 决裂, 和解, 重逢, 误解消除, 反目, 冰释前嫌]
+    角色命运转折: [死亡, 失踪, 被捕, 逃离, 获救, 身份暴露, 假死, 失忆]
+    剧情关键揭露: [真相揭露, 秘密发现, 谎言戳穿, 伏笔兑现, 身世揭晓, 反转]
+  narrative:
+    角色关系突变: [背叛, 告白, 决裂, 和解, 重逢, 误解消除, 反目, 冰释前嫌]
+    角色命运转折: [死亡, 失踪, 被捕, 逃离, 获救, 身份暴露, 假死, 失忆]
+    剧情关键揭露: [真相揭露, 秘密发现, 谎言戳穿, 伏笔兑现, 身世揭晓, 反转]
+  history:
+    政权更迭: [篡位, 禅让, 兵变, 亡国, 复辟, 改朝换代, 宫廷政变, 摄政]
+    战争转折: [决战, 围城, 求和, 投降, 屠城, 迁都, 割地, 称臣]
+    制度变革: [变法, 新政, 废立, 削藩, 科举改革, 税制改革, 改土归流]
+  business_narrative:
+    市场份额变化: [份额下滑, 市占率下降, 用户流失, 客户流失]
+    监管打击: [反垄断, 被罚款, 被约谈, 合规处罚, 牌照吊销]
+    竞品突破: [竞品发布, 颠覆性技术, 跨界打劫, 新玩家入局]
+    人才流失: [核心离职, 团队出走, 被挖角, 高管跳槽]
+    融资事件: [融资失败, 估值下调, 对赌失败, 资金链紧张]
+    并购事件: [被收购, 恶意收购, 收购失败]
+    供应链中断: [断供危机, 工厂停产, 原材料暴涨, 产能不足]
+    财报未达标: [亏损扩大, 营收下滑, 股价暴跌]
+    数据安全: [数据泄露, 被黑客攻击, 用户隐私]
+
+# ── 反思严重度 × 领域覆盖 ──
+# 通用默认保留，每域可覆盖
+_severity_mapping:
+  default:
+    heavy: [遭攻击, 战败, 开战, 遭背叛, 关系恶化, 被胁迫, 内乱]
+    medium: [遭制裁, 资源危机, 情报泄露, 重大失败, 声誉危机]
+    light: [意外转折, 联盟变动, 意外成功]
+  business:
+    heavy: [监管打击, 并购事件, 数据安全, 融资事件, 供应链中断]
+    medium: [市场份额变化, 人才流失, 财报未达标, 遭制裁, 声誉危机]
+    light: [竞品突破]
+  politics:
+    heavy: [选举事件, 民意逆转, 党内斗争]
+    medium: [立法受阻]
+    light: [意外转折]
+  tech:
+    heavy: [技术封锁, 产品事件, 数据安全]
+    medium: [人才争夺, 遭制裁]
+    light: [技术突破]
+  ecology:
+    heavy: [环境灾难, 气候事件]
+    medium: [政策变动, 资源危机]
+    light: []
+  novel:
+    heavy: [角色命运转折]
+    medium: [角色关系突变]
+    light: [剧情关键揭露]
+  narrative:
+    heavy: [角色命运转折]
+    medium: [角色关系突变]
+    light: [剧情关键揭露]
+  history:
+    heavy: [政权更迭, 战争转折]
+    medium: [制度变革]
+    light: [意外转折]
+
+# ── 反思阈值 × 领域全覆盖 ──
+# 所有值均可从 adapter.methodology.reflection_thresholds 读取
+_reflection_thresholds:
+  military: {env_drift_single: 3, env_drift_cumulative: 8, no_reflect_rounds: 2, metric_alarm_mult: 1.15, self_reflect_interval: 3, pattern_warn_count: 3, max_persona_rules: 3, env_decay_rate: 0.97}
+  business: {env_drift_single: 8, env_drift_cumulative: 20, no_reflect_rounds: 5, metric_alarm_mult: 1.4, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 4, env_decay_rate: 0.93}
+  politics: {env_drift_single: 5, env_drift_cumulative: 12, no_reflect_rounds: 3, metric_alarm_mult: 1.25, self_reflect_interval: 4, pattern_warn_count: 4, max_persona_rules: 4, env_decay_rate: 0.95}
+  ecology: {env_drift_single: 10, env_drift_cumulative: 25, no_reflect_rounds: 6, metric_alarm_mult: 1.5, self_reflect_interval: 6, pattern_warn_count: 6, max_persona_rules: 3, env_decay_rate: 0.98}
+  urban: {env_drift_single: 6, env_drift_cumulative: 15, no_reflect_rounds: 4, metric_alarm_mult: 1.3, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 3, env_decay_rate: 0.96}
+  tech: {env_drift_single: 4, env_drift_cumulative: 10, no_reflect_rounds: 3, metric_alarm_mult: 1.2, self_reflect_interval: 3, pattern_warn_count: 4, max_persona_rules: 3, env_decay_rate: 0.94}
+  info_war: {env_drift_single: 3, env_drift_cumulative: 8, no_reflect_rounds: 2, metric_alarm_mult: 1.15, self_reflect_interval: 3, pattern_warn_count: 3, max_persona_rules: 3, env_decay_rate: 0.93}
+  geo_strategy: {env_drift_single: 5, env_drift_cumulative: 12, no_reflect_rounds: 4, metric_alarm_mult: 1.3, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 3, env_decay_rate: 0.95}
+  novel: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 5, env_decay_rate: 0.96}
+  narrative: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 5, env_decay_rate: 0.96}
+  history: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 5, env_decay_rate: 0.96}
+  business_narrative: {env_drift_single: 6, env_drift_cumulative: 15, no_reflect_rounds: 4, metric_alarm_mult: 0, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 4, env_decay_rate: 0.94}

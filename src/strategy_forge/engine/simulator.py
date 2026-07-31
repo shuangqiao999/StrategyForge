@@ -289,6 +289,9 @@ class SimulationEngine:
         self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
         # 叙事模式环境变量（仅叙事模式使用）
         self._narrative_env: dict[str, float] = self._init_narrative_env(domain)
+        self._domain = domain
+        self._reflection_thresholds = self._load_reflection_config(domain)
+        self._merged_triggers = self._merge_domain_triggers(domain)
 
     def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
         """根据域类型初始化不同的叙事环境变量。"""
@@ -346,6 +349,51 @@ class SimulationEngine:
 
         # ── B. 补全：无图谱关系的 agent 用 polarization 自动划分敌友 ──
         self._seed_polarization_relations(seeded)
+
+    def _load_reflection_config(self, domain: str) -> dict:
+        """从 methodology.yaml 加载域专属反思配置。"""
+        try:
+            from pathlib import Path
+            import yaml
+            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                thresholds = data.get("_reflection_thresholds", {}) or {}
+                domain_cfg = thresholds.get(domain, {})
+                if domain_cfg:
+                    return dict(domain_cfg)
+        except Exception:
+            pass
+        return {}
+
+    def _merge_domain_triggers(self, domain: str) -> dict[str, list[str]]:
+        """合并通用触发词与域专属触发词。"""
+        merged = dict(self._TRIGGER_RULES)
+        try:
+            from pathlib import Path
+            import yaml
+            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                domain_triggers = data.get("_domain_triggers", {}) or {}
+                extra = domain_triggers.get(domain, {})
+                if isinstance(extra, dict):
+                    for cat, kws in extra.items():
+                        if cat not in merged:
+                            merged[cat] = []
+                        merged[cat] = list(dict.fromkeys(merged[cat] + list(kws)))
+        except Exception:
+            pass
+        return merged
+
+    def _get_reflection_threshold(self, key: str, default: int | float) -> int | float:
+        """从 methodology 读取域专属反思阈值，无配置回退默认。"""
+        return self._reflection_thresholds.get(key, default)
+
+    def _max_persona_rules(self) -> int:
+        return int(self._get_reflection_threshold("max_persona_rules", 3))
 
     @staticmethod
     def _classify_relation(relation: str) -> str:
@@ -661,16 +709,38 @@ class SimulationEngine:
         content = getattr(action, "content", "") or ""
         action_type = getattr(action, "action_type", "") or ""
         text = f"{action_type} {content}"
-        for category, keywords in self._TRIGGER_RULES.items():
+        for category, keywords in self._merged_triggers.items():
             for kw in keywords:
                 if kw in text:
                     severity = self._get_severity(category)
                     return category, kw, severity
         return None
 
-    @staticmethod
-    def _get_severity(category: str) -> int:
-        """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。"""
+    def _get_severity(self, category: str) -> int:
+        """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。
+        优先使用 domain-specific severity mapping，无配置回退通用默认。
+        """
+        try:
+            from pathlib import Path
+            import yaml
+            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                sev_map = data.get("_severity_mapping", {}) or {}
+                domain_sev = sev_map.get(self._domain, sev_map.get("default", {}))
+                heavy = set(domain_sev.get("heavy", []))
+                medium = set(domain_sev.get("medium", []))
+                light = set(domain_sev.get("light", []))
+                if category in heavy:
+                    return 3
+                if category in medium:
+                    return 2
+                if category in light:
+                    return 1
+        except Exception:
+            pass
+        # 通用默认回退
         _heavy = {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"}
         _medium = {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"}
         _light = {"意外转折", "联盟变动", "意外成功"}
@@ -822,17 +892,24 @@ class SimulationEngine:
                          state: Any = None, rule_engine: Any = None) -> str | None:
         """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
         叙事和量化模式统一调用，返回触发原因或 None。
+        阈值从 methodology.yaml 读取，无配置回退硬编码默认。
         """
         baseline = self._reflection_baselines.get(agent_id, dict(self._narrative_env))
         last_r = self._last_reflection_round_n.get(agent_id, 0)
+        drift_single = self._get_reflection_threshold("env_drift_single", 5)
+        drift_cumul = self._get_reflection_threshold("env_drift_cumulative", 12)
+        no_reflect_rounds = self._get_reflection_threshold("no_reflect_rounds", 4)
+        alarm_mult = self._get_reflection_threshold("metric_alarm_mult", 1.3)
+        self_interval = self._get_reflection_threshold("self_reflect_interval", 5)
+        pattern_cnt = self._get_reflection_threshold("pattern_warn_count", 5)
         # 条件1：环境累积剧变
         total_drift = 0.0
         for k in self._narrative_env:
             delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
             total_drift += abs(delta)
-            if abs(delta) > 5:
+            if abs(delta) > drift_single:
                 return f"环境剧变({k}{delta:+.0f})"
-        if total_drift > 12:
+        if total_drift > drift_cumul:
             return f"环境累计漂移({total_drift:.0f})"
         # 条件2：关系网络变化
         prev_rels = getattr(self, "_prev_rel_map", {})
@@ -843,23 +920,23 @@ class SimulationEngine:
         curr_opps = set(curr_rels.get("opponents", []))
         if prev_allies != curr_allies or prev_opps != curr_opps:
             return "关系网络变化"
-        # 条件3：长期无反思保护（超过 6 轮）
-        if (round_number - last_r) > 4:
+        # 条件3：长期无反思保护
+        if (round_number - last_r) > no_reflect_rounds:
             return "长期无反思保护"
         # 量化模式补充：指标告急触发反思
         if state is not None and rule_engine is not None:
             thr_map = getattr(rule_engine, "thresholds", lambda: {})()
             for m, v in getattr(state, "metrics", {}).items():
                 thr = thr_map.get(m, 0)
-                if thr > 0 and v <= thr * 1.3:
+                if thr > 0 and v <= thr * alarm_mult:
                     return f"指标告急({m}={v:.0f},阈={thr:.0f})"
-        # 条件5: 内源主动自省（每5轮强制触发一次）
-        if round_number > 0 and round_number % 5 == 0:
+        # 条件5: 内源主动自省
+        if round_number > 0 and round_number % self_interval == 0:
             return "内源主动自省"
-        # 条件6: D5 模式累积升级——同类事件 ≥5 次触发战略反思
+        # 条件6: D5 模式累积升级
         cat_log = self._event_category_log.get(agent_id, {})
         for cat, entries in cat_log.items():
-            if len(entries) >= 5:
+            if len(entries) >= pattern_cnt:
                 return f"模式预警({cat}×{len(entries)})"
         return None
 
@@ -1275,9 +1352,9 @@ class SimulationEngine:
                 return False
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
-                # 最多保留 3 条准则，超限时替换最旧
                 parts = old_extra.split("；")
-                if len(parts) >= 3:
+                max_rules = self._max_persona_rules()
+                if len(parts) >= max_rules:
                     parts = parts[1:]  # 丢弃最旧
                     agent.system_prompt_extra = "；".join(parts + [text])
                 else:
@@ -1853,11 +1930,11 @@ class SimulationEngine:
             text = extract_text(resp).strip()
             if not text or "无需调整" in text or len(text) < 2:
                 return None
-            # 更新 agent 的行为准则（最多 3 条，满时替换最旧）
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
                 parts = old_extra.split("；")
-                if len(parts) >= 3:
+                max_rules = self._max_persona_rules()
+                if len(parts) >= max_rules:
                     parts = parts[1:]
                 agent.system_prompt_extra = "；".join(parts + [text])
             elif not old_extra:
