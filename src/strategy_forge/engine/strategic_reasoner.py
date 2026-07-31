@@ -20,8 +20,14 @@ from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
 
-_POSITIVE_KW = frozenset({"support", "help", "cooperate", "praise", "agree"})
-_NEGATIVE_KW = frozenset({"oppose", "attack", "betray", "insult", "threaten", "block"})
+_POSITIVE_KW = frozenset({
+    "support", "help", "cooperate", "praise", "agree", "ally", "invest",
+    "支持", "帮助", "合作", "赞扬", "同意", "援助", "联盟", "签约", "投资", "开放", "妥协",
+})
+_NEGATIVE_KW = frozenset({
+    "oppose", "attack", "betray", "insult", "threaten", "block", "sanction",
+    "反对", "攻击", "背叛", "侮辱", "威胁", "封锁", "制裁", "打压", "抵制", "围堵", "打破",
+})
 
 
 _CANDIDATE_PROMPT = """你是一个战略顾问。为 $agent_name 生成 $candidate_count 个不同的行动策略。
@@ -188,10 +194,15 @@ class StrategicReasoner:
         "talent_war", "poach_talent", "compete", "attack_opponent",
         "electronic_warfare", "military_offensive", "trade_warfare",
         "propaganda", "leak_info", "framing_battle",
+        "sanction", "boycott", "undercut", "blockade", "poach_customers",
+        "背叛同盟", "撕毁协议", "技术封锁", "恶意收购", "打压对手",
     })
     _TRUST_FRIENDLY_ACTIONS = frozenset({
         "diplomacy", "partner", "invest", "invest_rnd", "welfare",
         "diplomatic_engagement", "fact_check", "conserve", "restoration",
+        "collaborate", "trade", "support", "aid", "mediate", "ceasefire",
+        "结盟", "投资", "援助", "贸易合作", "技术转让", "市场开放",
+        "联合声明", "情报共享",
     })
 
     @staticmethod

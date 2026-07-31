@@ -157,6 +157,7 @@ _CONFLICT_KW = (
     "并购", "收购", "罢免", "起诉", "诉讼", "摊牌", "决裂", "反制", "曝光",
     "架空", "逼宫", "收买", "渗透", "通敌", "举报", "证据", "秘密资金",
     "情报交易", "联盟", "联合", "翻盘", "夺权", "继承权", "遗嘱",
+    "封锁", "制裁", "断交", "围堵", "禁令", "断供",
 )
 
 _TREND_KW = (
@@ -164,7 +165,24 @@ _TREND_KW = (
     "推动", "推进", "建设", "构建", "建立", "启动", "部署", "发布",
     "投资", "融资", "扩产", "招聘", "培训", "签约", "交付", "上线",
     "谈判", "协商", "提议", "建议", "申请", "批准", "授权", "签署",
+    "认证", "开源", "标准化", "减排", "修复", "再生",
 )
+
+
+def _get_domain_event_kw(domain: str, kw_type: str) -> tuple[str, ...]:
+    """从 DomainAdapter 读取域专属事件采样关键词，与通用默认合并。"""
+    extra: list[str] = []
+    try:
+        from strategy_forge.engine.domain_adapter import get_adapter
+        adapter = get_adapter(domain)
+        method = getattr(adapter, "methodology", None) or {}
+        raw = method.get(f"report_{kw_type}_kw", [])
+        if isinstance(raw, list):
+            extra = [str(x) for x in raw]
+    except Exception:
+        pass
+    base = _CONFLICT_KW if kw_type == "conflict" else _TREND_KW
+    return tuple(sorted(set(base + tuple(extra))))
 
 
 def _sample_arc_events(events: list[str], head_n: int = 5,

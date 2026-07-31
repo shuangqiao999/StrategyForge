@@ -82,6 +82,7 @@ class ParamConfig:
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
     token: TokenConfig = field(default_factory=TokenConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    fallback_thresholds: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -273,6 +274,7 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
         sampling=_parse_sampling_config(raw_params.get("sampling")),
         token=_parse_token_config(raw_params.get("token")),
         cache=_parse_cache_config(raw_params.get("cache")),
+        fallback_thresholds=raw_params.get("fallback_thresholds", {}) or {},
     )
 
     base_type_mapping = raw.get("base_type_mapping", {}) or {}

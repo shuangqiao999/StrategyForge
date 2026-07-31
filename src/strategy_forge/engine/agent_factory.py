@@ -20,6 +20,21 @@ from .preprocessor import DeductionPreprocessor
 logger = logging.getLogger(__name__)
 
 
+def _load_methodology() -> dict:
+    try:
+        from pathlib import Path
+        import yaml
+        path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    except Exception:
+        pass
+    return {}
+
+_METHODOLOGY = _load_methodology()
+
+
 _PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基于实体信息和原文事实，为该$domain_role生成一个独立人格档案。返回 JSON。
 
 ## 铁律（强制执行）
@@ -32,6 +47,8 @@ _PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基�
 
 ## 来自用户的特殊期望
 $user_expectations
+
+$role_inference
 
 ## 实体信息
 - 名称: $name
@@ -71,6 +88,8 @@ _PERSONA_PROMPT_FALLBACK = """你是客观中立的角色档案生成专家。�
 
 ## 来自用户的特殊期望
 $user_expectations
+
+$role_inference
 
 ## 实体信息
 - 名称: $name
@@ -155,35 +174,12 @@ async def create_agents_from_graph(
 
     _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
                       "公司", "企业", "组织", "机构"}
-    _CONSUMER_TYPES = {"消费品牌", "餐饮", "零售", "便利店", "咖啡"}
-    _AUTO_TYPES = {"车企", "汽车", "车辆"}
     def _entity_role(person: dict) -> str:
         from strategy_forge.core.rule_templates import get_domain_prompt
         etype = (person.get("type") or "").strip()
-        desc = (person.get("rich_description") or person.get("description", "") or "").strip()
         domain_role = get_domain_prompt(domain, "agent_domain_role")
         if not domain_role:
             domain_role = "独立博弈者"
-        # 根据实体类型和描述推断更准确的角色标签
-        if etype in _COMPANY_TYPES:
-            desc_lower = desc.lower()
-            for kw in ["咖啡", "奶茶", "餐饮", "零售", "便利店", "消费"]:
-                if kw in desc:
-                    return "消费品牌或零售商"
-            for kw in ["芯片", "AI", "人工智能", "算法", "软件", "云", "大模型"]:
-                if kw in desc:
-                    return "科技企业"
-            for kw in ["汽车", "新能源", "智驾", "电池", "整车"]:
-                if kw in desc:
-                    return "汽车制造商或出行服务商"
-            for kw in ["投资", "风投", "基金", "资本", "金融"]:
-                if kw in desc:
-                    return "投资机构或金融服务商"
-            for kw in ["媒体", "内容", "流量", "社交", "视频", "抖音", "快手"]:
-                if kw in desc:
-                    return "内容平台或媒体"
-            # 无法推断时，回退到领域角色
-            return domain_role
         if domain_role not in getattr(_entity_role, "_logged", set()):
             logger.info("[AgentFactory] 领域 %s 角色指南已注入 persona prompt", domain)
             _entity_role._logged = getattr(_entity_role, "_logged", set()) | {domain}
@@ -199,10 +195,10 @@ async def create_agents_from_graph(
         role = im.get("role", "独立博弈者")
         parent_info = str(im.get("parent") or "无")
         sub_info = ", ".join(str(s) for s in im.get("sub_entities", [])) or "无"
-        # 实体统计：频次+覆盖度帮助LLM区分差异，即使短文本LanceDB片段相同
         f = freq_map.get(person_name, 0) if freq_map.get(person_name, 0) > 0 else "?"
         c = preprocessor.result.entity_chunk_coverage.get(person_name, 0) if preprocessor and preprocessor.result else "?"
         entity_stats = f"频次={f}, 覆盖={c}个分块"
+        role_inference = _METHODOLOGY.get("_role_inference", "") or ""
         if fragments:
             from strategy_forge.core.tokenizer import compress_to_keywords
             full_context = "\n---\n".join(fragments)
@@ -214,13 +210,15 @@ async def create_agents_from_graph(
                 context=full_context[:8000],
                 keywords=", ".join(keywords) if keywords else "无",
                 user_expectations=ue, domain_role=_entity_role(person),
-                entity_stats=entity_stats)
+                entity_stats=entity_stats,
+                role_inference=role_inference)
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
             parent_info=parent_info, sub_info=sub_info,
             context=source_material[:2000], user_expectations=ue, domain_role=_entity_role(person),
-            entity_stats=entity_stats)
+            entity_stats=entity_stats,
+            role_inference=role_inference)
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")

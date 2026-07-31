@@ -1108,13 +1108,19 @@ def _fallback_classify(
             e.reason = "兜底(国家/组织)"
             registry.kept += 1
             registry.tier1_count += 1
-        elif e.type in ("Person", "人物") and e.freq >= 5:
+        elif e.type in ("Person", "人物") and e.freq >= _fallback_threshold(adapter, "person_freq_tier1", 5):
             e.decision = "KEEP"
-            e.tier = 2
+            if adapter and adapter.meta.methodology_mode == "narrative":
+                e.tier = 1
+            else:
+                e.tier = 2
             e.reason = "兜底(高频人物)"
             registry.kept += 1
-            registry.tier2_count += 1
-        elif e.freq >= 8:
+            if e.tier == 1:
+                registry.tier1_count += 1
+            else:
+                registry.tier2_count += 1
+        elif e.freq >= _fallback_threshold(adapter, "generic_freq_tier2", 8):
             e.decision = "KEEP"
             e.tier = 2
             e.reason = "兜底(高频>=8)"
@@ -1149,6 +1155,19 @@ def _layer3_cache_key(registry: EntityRegistry) -> str:
 def _load_alias_dict(adapter: "DomainAdapter") -> dict[str, set[str]]:
     """从 DomainAdapter 加载别名词典。返回 {主名: {别名集合}}。"""
     return dict(adapter.aliases.entity_aliases) if adapter else {}
+
+
+def _fallback_threshold(adapter: "DomainAdapter | None", key: str, default: int) -> int:
+    """从 adapter.param_config.fallback_thresholds 读取兜底阈值。"""
+    if adapter is None:
+        return default
+    try:
+        ft = getattr(adapter.params, "fallback_thresholds", None)
+        if isinstance(ft, dict):
+            return int(ft.get(key, default))
+    except Exception:
+        pass
+    return default
 
 
 def _get_default_domain_rules() -> str:

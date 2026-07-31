@@ -43,6 +43,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -235,3 +238,25 @@ aliases:
   _force_keep: []
   entity_aliases: {}
   _strategic_regions: []
+
+methodology:
+  role_examples: |
+    消费品牌：库迪、瑞幸、蜜雪冰城
+    汽车制造商：比亚迪、蔚来、理想、特斯拉
+    科技企业：华为、寒武纪、平头哥、英伟达
+    内容平台/媒体：抖音、快手、小红书、财新
+    金融机构：红杉资本、高瓴、软银
+    主权国家：中国、美国、俄罗斯
+    国际组织：联合国、欧盟、北约、WTO
+    武装力量：美军、俄军、胡塞武装、塔利班
+    政治力量：共和党、民主党、自民党
+
+  sentiment_examples: |
+    友好行动："A与B签署战略合作协议""A向B投资50亿""A与B联合发布声明"
+    敌对行动："A对B发起反倾销调查""A宣布对B实施技术封锁""A公开谴责B"
+    中性行动："A发布季度财报""A举行产品发布会""A进行内部人事调整"
+
+  trust_action_examples: |
+    敌对行动与影响：军事攻击(-5)、制裁/封锁(-4)、背叛同盟(-4)、技术封锁(-3)、价格战(-2)
+    友好行动与影响：军事同盟(+5)、战略投资(+4)、贸易协定(+3)、外交访问(+2)、技术交流(+1)
+    中性行动与影响：信息获取(0)、观察(0)、内部调整(0)
