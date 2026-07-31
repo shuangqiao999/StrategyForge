@@ -342,7 +342,7 @@ class ProviderRegistry:
         try:
             async with httpx.AsyncClient(timeout=10.0) as c:
                 r = await c.get(f"{base_url.rstrip('/')}/models", headers=headers)
-                return {"ok": r.status_code < 500, "status": r.status_code}
+                return {"ok": 200 <= r.status_code < 300, "status": r.status_code}
         except Exception as e:
             return {"ok": False, "status": 0, "error": str(e)}
 

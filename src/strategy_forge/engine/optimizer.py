@@ -180,6 +180,7 @@ class StrategyOptimizer:
                 elif domain == "auto":
                     detected = await RuleEngine.detect_domain(source, LLMClient())
                     if detected != "narrative":
+                        domain = detected
                         rule_engine = RuleEngine.from_domain(detected)
                 else:
                     rule_engine = RuleEngine.from_domain(domain)
@@ -220,13 +221,14 @@ class StrategyOptimizer:
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
-                        env=opt_env,
+                        env=opt_env, domain=domain, cancel_event=cancel_event,
                     )
                     actions: list[Any] = []
                     for rnd in range(1, total_rounds + 1):
                         if cancel_event is not None and cancel_event.is_set():
                             break
-                        await sim.run_round(rnd)
+                        rd = await sim.run_round(rnd)
+                        actions.extend(rd.actions)
                     outcome = self._judge_quantified(rule_engine, states_copy, sc)
                 else:
                     sim = SimulationEngine(
@@ -234,6 +236,8 @@ class StrategyOptimizer:
                         log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
+                        domain=domain, cancel_event=cancel_event,
+                        enable_multi_action=enable_multi_action, max_actions=max_actions,
                     )
                     actions = []
                     for rnd in range(1, total_rounds + 1):
@@ -302,7 +306,7 @@ class StrategyOptimizer:
                         seed=20240101, temperature=0.6, persist_events=True, max_concurrent=None,
                         rule_engine=rule_engine, states=rep_states, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
-                        env=opt_env,
+                        env=opt_env, domain=domain, cancel_event=cancel_event,
                     )
                     rep_rounds = []
                     for rnd in range(1, total_rounds + 1):
@@ -344,6 +348,8 @@ class StrategyOptimizer:
         无 weights 时回退等权平均。
         """
         win_target = scenario.get("win_target") or {}
+        if not isinstance(win_target, dict):
+            win_target = {}
         ref = (win_target.get("entity_ref") or "").strip()
         target_state = None
         if ref:
@@ -432,7 +438,7 @@ class StrategyOptimizer:
             n = len(runs)
             succ = sum(1 for r in runs if r.outcome.success)
             mean = statistics.mean(wins) if wins else 0.0
-            sd = statistics.pstdev(wins) if n > 1 else 0.0
+            sd = statistics.stdev(wins) if n > 1 else 0.0
             ci = 1.96 * sd / math.sqrt(n) if n > 0 else 0.0
             cost_mean = statistics.mean(costs) if costs else 0.0
             stats_list.append({

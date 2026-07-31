@@ -128,25 +128,19 @@ class DeductionGraphStore:
                   timestamp: str, agent_id: str = "", round_number: int = 0,
                   target_id: str = "", effect: str = "", driver: str = "") -> None:
         self._check_conn()
-        # String interpolation for CREATE: Kuzu event nodes use UUIDs (safe) and
-        # LLM-generated content (trusted source). MERGE+SET pattern used elsewhere
-        # is not compatible with CREATE semantics in Kuzu.
-        safe_id = event_id.replace("'", "\\'")
-        safe_desc = (description or "")[:500].replace("'", "\\'")
-        safe_type = event_type.replace("'", "\\'")
-        safe_ts = timestamp.replace("'", "\\'")
-        safe_aid = agent_id.replace("'", "\\'")
-        safe_tid = (target_id or "").replace("'", "\\'")
-        safe_eff = (effect or "")[:200].replace("'", "\\'")
-        safe_drv = (driver or "")[:16].replace("'", "\\'")
-        rnd = int(round_number)
+        safe_desc = (description or "")[:500]
+        safe_eff = (effect or "")[:200]
+        safe_drv = (driver or "")[:16]
         with self._lock:
             self._conn.execute(
-                f"CREATE (ev:{self.EVENT_TABLE} {{id: '{safe_id}', "
-                f"description: '{safe_desc}', event_type: '{safe_type}', "
-                f"timestamp: '{safe_ts}', agent_id: '{safe_aid}', "
-                f"round: {rnd}, target_id: '{safe_tid}', "
-                f"effect: '{safe_eff}', driver: '{safe_drv}'}})"
+                f"CREATE (ev:{self.EVENT_TABLE} {{id: $id, "
+                "description: $desc, event_type: $etype, "
+                "timestamp: $ts, agent_id: $aid, "
+                "round: $rnd, target_id: $tid, "
+                "effect: $eff, driver: $drv}})",
+                {"id": event_id, "desc": safe_desc, "etype": event_type,
+                 "ts": timestamp, "aid": agent_id, "rnd": int(round_number),
+                 "tid": target_id or "", "eff": safe_eff, "drv": safe_drv},
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:

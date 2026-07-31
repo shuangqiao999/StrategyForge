@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import threading
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -250,10 +252,11 @@ async def resume_deduction(session_id: str, request: Request):
         raise HTTPException(404, "Session not found")
     if session.status != SessionStatus.PAUSED:
         raise HTTPException(409, f"无法继续：当前状态为 {session.status.value}")
-    engine.log(session_id, "control", "用户继续推演")
-    # Re-use /start logic which handles paused→resume
-    cancel_event = asyncio.Event()
     cancels = _ded_cancel_state(request.app)
+    if session_id in cancels and not cancels[session_id].is_set():
+        raise HTTPException(409, "该会话的推演任务正在运行中")
+    engine.log(session_id, "control", "用户继续推演")
+    cancel_event = asyncio.Event()
     cancels[session_id] = cancel_event
     asyncio.create_task(_run_deduction(engine, session_id, cancel_event, cancels))
     return {"session_id": session_id, "status": "resuming"}
@@ -503,6 +506,8 @@ async def upload_rules(body: RulesUpload, request: Request):
     dom = (body.domain or "").strip()
     if not dom:
         raise HTTPException(400, "domain 不能为空")
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', dom):
+        raise HTTPException(400, "domain 只能包含字母、数字、下划线和连字符")
     try:
         rule = json.loads(body.content)
     except json.JSONDecodeError:
@@ -690,12 +695,17 @@ async def stream_deduction(session_id: str, request: Request):
     )
 
 
+_engine_lock = threading.Lock()
+
 def _get_engine(request: Request):
-    """Lazy-init the DeductionEngine on the FastAPI app state."""
+    """Lazy-init the DeductionEngine on the FastAPI app state (thread-safe)."""
     engine = getattr(request.app.state, "forge_engine", None)
     if engine is None:
-        from strategy_forge.core.config import config
-        from strategy_forge.engine.engine import DeductionEngine
-        engine = DeductionEngine(config.project_root)
-        request.app.state.forge_engine = engine
+        with _engine_lock:
+            engine = getattr(request.app.state, "forge_engine", None)
+            if engine is None:
+                from strategy_forge.core.config import config
+                from strategy_forge.engine.engine import DeductionEngine
+                engine = DeductionEngine(config.project_root)
+                request.app.state.forge_engine = engine
     return engine

@@ -198,6 +198,17 @@ class FiniteStateMachineModule(AlgorithmModule):
             targets = enemy_ids if "enemy" in metric else ally_ids
             if not targets:
                 return None
+            import numpy as np
+            sp = ctx.spatial
+            n = len(sp.positions)
+            min_dist = float("inf")
+            for tidx in targets:
+                if not isinstance(tidx, int) or tidx >= n:
+                    continue
+                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[tidx]))
+                if d < min_dist:
+                    min_dist = d
+            return min_dist if min_dist < float("inf") else None
 
     @staticmethod
     def _resolve_opponent_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:

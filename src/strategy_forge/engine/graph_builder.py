@@ -172,13 +172,17 @@ async def _extract_from_chunks(
             logger.warning("[Graph] Chunk %d parse failed: %s", i, e)
             continue
         for ent in entities:
-            ent_id = _make_id(ent.get("entity", ""), "")
-            graph.upsert_entity(ent_id, ent.get("entity", ""), ent.get("type", ""),
+            ett = ent.get("type", "")
+            ent_id = _make_id(ent.get("entity", ""), ett)
+            graph.upsert_entity(ent_id, ent.get("entity", ""), ett,
                                ent.get("description", ""))
             total_entities += 1
+        name_to_type = {e.get("entity", ""): e.get("type", "") for e in entities}
         for rel in relations:
-            sid = _make_id(rel.get("source", ""), "")
-            tid = _make_id(rel.get("target", ""), "")
+            st = name_to_type.get(rel.get("source", ""), "")
+            tt = name_to_type.get(rel.get("target", ""), "")
+            sid = _make_id(rel.get("source", ""), st)
+            tid = _make_id(rel.get("target", ""), tt)
             graph.upsert_relation(sid, tid, rel.get("relation", ""),
                                  evidence=rel.get("evidence", ""))
             total_relations += 1
