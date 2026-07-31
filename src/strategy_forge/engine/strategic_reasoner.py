@@ -87,6 +87,7 @@ $strategic_context
   3. 你有明确的对手或盟友 → 必须对其采取行动
 
 $trust_methodology
+$sentiment_methodology
   4. 即使没有明确对手，也应通过 diplomatic_statement/initiate 主动塑造局势、测试对手意图或巩固自身地位
 - 无事可做时的最优策略不是"观察"——而是"主动制造事件获取信息"或"巩固盟友确保安全"
 
@@ -312,6 +313,7 @@ class StrategicReasoner:
             relationship_context=world_state.get("relationship_context", "") or "（无已知关系）",
             strategic_context="根据你的角色和人格自主决策。",
             trust_methodology=_TRUST_GUIDE,
+            sentiment_methodology=_SENTIMENT_GUIDE,
         ))]
 
         candidates: list[dict[str, Any]] = []
@@ -517,8 +519,6 @@ class StrategicReasoner:
             sc = get_domain_prompt(domain, "strategic_context")
             if sc:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
-        if _TRUST_GUIDE:
-            agent_parts.append(f"{_TRUST_GUIDE}\n")
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"

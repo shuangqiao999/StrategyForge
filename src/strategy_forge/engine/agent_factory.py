@@ -50,6 +50,10 @@ $user_expectations
 
 $role_inference
 
+$role_examples
+
+$domain_principles
+
 ## 实体信息
 - 名称: $name
 - 类型: $type
@@ -90,6 +94,10 @@ _PERSONA_PROMPT_FALLBACK = """你是客观中立的角色档案生成专家。�
 $user_expectations
 
 $role_inference
+
+$role_examples
+
+$domain_principles
 
 ## 实体信息
 - 名称: $name
@@ -199,6 +207,8 @@ async def create_agents_from_graph(
         c = preprocessor.result.entity_chunk_coverage.get(person_name, 0) if preprocessor and preprocessor.result else "?"
         entity_stats = f"频次={f}, 覆盖={c}个分块"
         role_inference = _METHODOLOGY.get("_role_inference", "") or ""
+        role_examples = _METHODOLOGY.get("_entity_role_examples", "") or ""
+        domain_principles = _METHODOLOGY.get("_domain_action_principles", "") or ""
         if fragments:
             from strategy_forge.core.tokenizer import compress_to_keywords
             full_context = "\n---\n".join(fragments)
@@ -211,14 +221,18 @@ async def create_agents_from_graph(
                 keywords=", ".join(keywords) if keywords else "无",
                 user_expectations=ue, domain_role=_entity_role(person),
                 entity_stats=entity_stats,
-                role_inference=role_inference)
+                role_inference=role_inference,
+                role_examples=role_examples,
+                domain_principles=domain_principles)
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
             parent_info=parent_info, sub_info=sub_info,
             context=source_material[:2000], user_expectations=ue, domain_role=_entity_role(person),
             entity_stats=entity_stats,
-            role_inference=role_inference)
+            role_inference=role_inference,
+            role_examples=role_examples,
+            domain_principles=domain_principles)
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")
