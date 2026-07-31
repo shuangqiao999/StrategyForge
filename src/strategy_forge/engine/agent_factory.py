@@ -155,17 +155,39 @@ async def create_agents_from_graph(
 
     _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
                       "公司", "企业", "组织", "机构"}
+    _CONSUMER_TYPES = {"消费品牌", "餐饮", "零售", "便利店", "咖啡"}
+    _AUTO_TYPES = {"车企", "汽车", "车辆"}
     def _entity_role(person: dict) -> str:
         from strategy_forge.core.rule_templates import get_domain_prompt
         etype = (person.get("type") or "").strip()
-        if etype in _COMPANY_TYPES:
-            return "科技企业或行业参与者"
+        desc = (person.get("rich_description") or person.get("description", "") or "").strip()
         domain_role = get_domain_prompt(domain, "agent_domain_role")
-        if domain_role:
-            if domain not in getattr(_entity_role, "_logged", set()):
-                logger.info("[AgentFactory] 领域 %s 角色指南已注入 persona prompt", domain)
-                _entity_role._logged = getattr(_entity_role, "_logged", set()) | {domain}
-        return domain_role or "独立博弈者"
+        if not domain_role:
+            domain_role = "独立博弈者"
+        # 根据实体类型和描述推断更准确的角色标签
+        if etype in _COMPANY_TYPES:
+            desc_lower = desc.lower()
+            for kw in ["咖啡", "奶茶", "餐饮", "零售", "便利店", "消费"]:
+                if kw in desc:
+                    return "消费品牌或零售商"
+            for kw in ["芯片", "AI", "人工智能", "算法", "软件", "云", "大模型"]:
+                if kw in desc:
+                    return "科技企业"
+            for kw in ["汽车", "新能源", "智驾", "电池", "整车"]:
+                if kw in desc:
+                    return "汽车制造商或出行服务商"
+            for kw in ["投资", "风投", "基金", "资本", "金融"]:
+                if kw in desc:
+                    return "投资机构或金融服务商"
+            for kw in ["媒体", "内容", "流量", "社交", "视频", "抖音", "快手"]:
+                if kw in desc:
+                    return "内容平台或媒体"
+            # 无法推断时，回退到领域角色
+            return domain_role
+        if domain_role not in getattr(_entity_role, "_logged", set()):
+            logger.info("[AgentFactory] 领域 %s 角色指南已注入 persona prompt", domain)
+            _entity_role._logged = getattr(_entity_role, "_logged", set()) | {domain}
+        return domain_role
 
     def _fallback(nm: str) -> dict:
         return {"persona": f"{nm}是一个参与事件的独立个体",

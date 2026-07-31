@@ -261,6 +261,7 @@ class SimulationEngine:
         cancel_event: Any = None,
         algorithm_modules: list | None = None,
         fsm_override_store: dict | None = None,
+        domain: str = "",
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -286,8 +287,21 @@ class SimulationEngine:
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
         self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
-        # 叙事模式环境变量：舆论/抗议/媒体/国际压力/社会分裂（仅叙事模式使用）
-        self._narrative_env: dict[str, float] = {
+        # 叙事模式环境变量（仅叙事模式使用）
+        self._narrative_env: dict[str, float] = self._init_narrative_env(domain)
+
+    def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
+        """根据域类型初始化不同的叙事环境变量。"""
+        business_domains = {"business", "business_narrative"}
+        if domain in business_domains:
+            return {
+                "市场竞争烈度": 60.0,  # 0=垄断 50=充分竞争 100=恶性价格战
+                "资本流动性": 50.0,    # 0=枯竭 50=正常 100=过热
+                "技术壁垒高度": 40.0,  # 0=无壁垒 50=中等壁垒 100=极高壁垒
+                "监管压力": 30.0,      # 0=宽松 50=适度 100=高压
+                "消费者信心": 55.0,    # 0=恐慌 50=中性 100=狂热
+            }
+        return {
             "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
             "抗议规模": 0.0,     # 0=无 50=局部 100=全城
             "媒体关注": 20.0,    # 0=无人 50=全国 100=全球

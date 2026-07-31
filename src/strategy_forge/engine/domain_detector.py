@@ -18,7 +18,7 @@ _PERSON_TYPES = {"Person", "人物", "角色"}
 _ORG_TYPES = {"Organization", "组织", "国际组织", "InternationalOrganization",
               "PoliticalParty", "政党", "政治组织"}
 _COUNTRY_TYPES = {"Country", "国家", "政权", "割据势力"}
-_COMPANY_TYPES = {"Company", "Enterprise", "企业", "公司"}
+_COMPANY_TYPES = {"Company", "Enterprise", "企业", "公司", "Organization", "组织", "机构", "车企", "品牌"}
 _MILITARY_TYPES = {"MilitaryUnit", "军队", "军事组织", "武装部队", "武装组织"}
 _GEO_TYPES = {"Location", "地点", "地理区域", "地理空间"}
 

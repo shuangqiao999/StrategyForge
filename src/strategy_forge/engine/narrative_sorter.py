@@ -143,12 +143,12 @@ async def sort_narrative_entities(
         )
         batch_label = f"[NarrativeSorter batch {len(batch_names)} entities]"
         try:
-        resp = await client.chat_json(
-            [Message(role="user", content=prompt)],
-            system="你是故事编辑，输出结构化 JSON。只输出 JSON。",
-            schema_name="narrative_sort", temperature=0,
-            max_tokens=config.deduction_intel_max_tokens,
-        )
+            resp = await client.chat_json(
+                [Message(role="user", content=prompt)],
+                system="你是故事编辑，输出结构化 JSON。只输出 JSON。",
+                schema_name="narrative_sort", temperature=0,
+                max_tokens=config.deduction_intel_max_tokens,
+            )
             raw = _extract_text(resp)
             data = _parse_json(raw)
             if isinstance(data, list):

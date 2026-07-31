@@ -393,6 +393,7 @@ class DeductionOrchestrator:
         self._weather = str(cfg.get("weather", "") or "").strip()
         self._terrain = str(cfg.get("terrain", "") or "").strip()
         domain = (cfg.get("domain") or "narrative").strip()
+        self._domain = domain
         custom = cfg.get("custom_rules")
         if domain in ("", "narrative"):
             self._rule_engine = None
@@ -703,6 +704,7 @@ class DeductionOrchestrator:
             seed=abs(hash(self.session.id)) % (2**31),
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
+            domain=getattr(self, "_domain", ""),
         )
         self._engine = engine
 
