@@ -141,6 +141,7 @@ class DomainAdapter:
     layer: LayerConfig = field(default_factory=LayerConfig)
     prompts: Prompts = field(default_factory=Prompts)
     aliases: Aliases = field(default_factory=Aliases)
+    methodology: dict = field(default_factory=dict)
 
 
 # ── 适配器加载与缓存 ──
@@ -350,6 +351,8 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
         strategic_regions=strategic_regions,
     )
 
+    methodology = raw.get("methodology", {}) or {}
+
     return DomainAdapter(
         meta=meta,
         params=params,
@@ -358,6 +361,7 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
         layer=layer,
         prompts=prompts,
         aliases=aliases,
+        methodology=methodology,
     )
 
 

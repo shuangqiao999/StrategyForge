@@ -20,6 +20,24 @@ from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
 
+
+def _load_reasoner_methodology() -> dict:
+    try:
+        from pathlib import Path
+        import yaml
+        path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    except Exception:
+        pass
+    return {}
+
+_STRATEGY_METHOD = _load_reasoner_methodology()
+_SENTIMENT_GUIDE = _STRATEGY_METHOD.get("_sentiment_inference", "") or ""
+_TRUST_GUIDE = _STRATEGY_METHOD.get("_trust_action_mapping", "") or ""
+
+
 _POSITIVE_KW = frozenset({
     "support", "help", "cooperate", "praise", "agree", "ally", "invest",
     "支持", "帮助", "合作", "赞扬", "同意", "援助", "联盟", "签约", "投资", "开放", "妥协",
@@ -67,6 +85,8 @@ $strategic_context
   1. 你的核心目标未达成 → 必须选择主动行动（collaborate/compete/respond/initiate）
   2. 近期事件中有涉及你的行动 → 必须做出回应
   3. 你有明确的对手或盟友 → 必须对其采取行动
+
+$trust_methodology
   4. 即使没有明确对手，也应通过 diplomatic_statement/initiate 主动塑造局势、测试对手意图或巩固自身地位
 - 无事可做时的最优策略不是"观察"——而是"主动制造事件获取信息"或"巩固盟友确保安全"
 
@@ -291,6 +311,7 @@ class StrategicReasoner:
             trust_summary=trust,
             relationship_context=world_state.get("relationship_context", "") or "（无已知关系）",
             strategic_context="根据你的角色和人格自主决策。",
+            trust_methodology=_TRUST_GUIDE,
         ))]
 
         candidates: list[dict[str, Any]] = []
@@ -496,6 +517,8 @@ class StrategicReasoner:
             sc = get_domain_prompt(domain, "strategic_context")
             if sc:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
+        if _TRUST_GUIDE:
+            agent_parts.append(f"{_TRUST_GUIDE}\n")
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
         system = "你是量化推演中的战略决策者，只输出 JSON。"

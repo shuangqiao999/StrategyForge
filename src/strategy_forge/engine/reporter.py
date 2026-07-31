@@ -175,7 +175,7 @@ def _get_domain_event_kw(domain: str, kw_type: str) -> tuple[str, ...]:
     try:
         from strategy_forge.engine.domain_adapter import get_adapter
         adapter = get_adapter(domain)
-        method = getattr(adapter, "methodology", None) or {}
+        method = adapter.methodology or {}
         raw = method.get(f"report_{kw_type}_kw", [])
         if isinstance(raw, list):
             extra = [str(x) for x in raw]
@@ -186,12 +186,11 @@ def _get_domain_event_kw(domain: str, kw_type: str) -> tuple[str, ...]:
 
 
 def _sample_arc_events(events: list[str], head_n: int = 5,
-                       conflict_n: int = 15, tail_n: int = 15) -> list[str]:
-    """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。
-
-    事件总数 <= (head+conflict+tail) 时全量返回；超长推演（50轮+）自动
-    扩容比例——固定采样量在全本推演中会丢弃 95% 的事件，报告失去因果链。
-    """
+                       conflict_n: int = 15, tail_n: int = 15,
+                       domain: str = "") -> list[str]:
+    """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。"""
+    conflict_kw = _get_domain_event_kw(domain, "conflict") if domain else _CONFLICT_KW
+    trend_kw = _get_domain_event_kw(domain, "trend") if domain else _TREND_KW
     # 超长推演：conflict_n 随事件量线性扩容（取总数 15%，保底 15）
     total = len(events)
     if total > 200:
@@ -204,7 +203,7 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     middle = events[head_n:-tail_n]
     scored: list[tuple[int, int, str]] = []
     for idx, e in enumerate(middle):
-        hits = sum(1 for kw in _CONFLICT_KW if kw in e)
+        hits = sum(1 for kw in conflict_kw if kw in e)
         if hits > 0:
             scored.append((hits, idx, e))
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -213,7 +212,7 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     # 平缓事件采样通道：商业/科技推演缺少冲突关键词 → 补趋势型事件
     trend_scored: list[tuple[int, int, str]] = []
     for idx, e in enumerate(middle):
-        hits = sum(1 for kw in _TREND_KW if kw in e)
+        hits = sum(1 for kw in trend_kw if kw in e)
         if hits > 0:
             trend_scored.append((hits, idx, e))
     trend_scored.sort(key=lambda x: (-x[0], x[1]))
@@ -515,8 +514,25 @@ async def generate_report(
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
 
+    # ── 域标识（用于域专属事件采样）──
+    report_domain = ""
+    if states:
+        try:
+            first = next(iter(states.values()))
+            report_domain = getattr(first, "domain", "")
+        except (StopIteration, AttributeError):
+            pass
+    # 叙事模式从 entity_registry 回退
+    if not report_domain and entity_registry is not None:
+        try:
+            kept = entity_registry.get_kept()
+            if kept:
+                report_domain = getattr(kept[0], "domain", "") or ""
+        except Exception:
+            pass
+
     # ── 统一弧线采样（head + conflict + tail + trend），量化/叙事双模式共用 ──
-    arc_events = _sample_arc_events(key_events)
+    arc_events = _sample_arc_events(key_events, domain=report_domain)
     if len(arc_events) < 5 and len(key_events) >= 5:
         # 采样不足5条时从原文均匀补齐，保证报告有最低锚点数
         step = max(1, len(key_events) // 5)
@@ -534,7 +550,7 @@ async def generate_report(
                            else "（用户未指定核心问题——结局需明确交代各主要角色的最终结局与格局归属，不得含糊收尾）")
         if goal_resolution:
             narrative_goals += f"\n推演中期裁判已判定收敛结果（结局必须与之一致）：{goal_resolution}"
-        arc_events = _sample_arc_events(non_recall)
+        arc_events = _sample_arc_events(non_recall, domain=report_domain)
         evolution_lines: list[str] = []
         for p in (personality_log or [])[-30:]:
             old = p.get("old_extra") or "（初始人格）"
@@ -556,7 +572,7 @@ async def generate_report(
         report_temp = 0.75
     else:
         # 量化模式也使用弧线采样（与叙事模式一致），避免报告只引用尾轮事件
-        arc_events = _sample_arc_events(key_events)
+        arc_events = _sample_arc_events(key_events, domain=report_domain)
         numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(arc_events)]
         prompt_str = Template(_REPORT_PROMPT).substitute(
             title=session.title or "推演会话",
