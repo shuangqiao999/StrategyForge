@@ -174,7 +174,7 @@ async def sort_narrative_entities(
                 result.append({
                     "name": name,
                     "aliases": aliases,
-                    "include_in_simulation": True,  # 由 EntityRegistry 决定
+                    "include_in_simulation": e.get("include", True),
                     "role": str(e.get("reason", ""))[:80],
                     "parent": e.get("parent"),
                     "sub_entities": e.get("sub_entities", []),

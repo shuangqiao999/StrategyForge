@@ -1889,6 +1889,7 @@ async def build_registry(
             "description": ne.get("description", ""),
             "parent": str(intel.get("parent") or ""),
             "id": kuzu_id,
+            "include_in_simulation": intel.get("include_in_simulation", True),
         })
 
     # ── 5.0 语义中介层：域类型 → 7 大类基础类型 ──
@@ -1975,8 +1976,19 @@ async def build_registry(
         _resolve_hierarchy(registry, None, log_fn, adapter)
         return registry
 
-    # ── 8. 应用判定：优先级 基础类型硬约束 > 白名单 > LLM L2 ──
+    # ── 8. 应用判定：优先级 基础类型硬约束 > NarrativeSorter排除 > 白名单 > LLM L2 ──
     from strategy_forge.engine.semantic_mediator import ensure_min_tier
+
+    # 8a0. NarrativeSorter 排除：include_in_simulation=False → 强制 tier3
+    n_sorter_excluded = 0
+    for e in entity_list:
+        nm = e["name"]
+        if nm in decisions and not e.get("include_in_simulation", True):
+            if decisions[nm].get("tier", 3) != 3:
+                decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": "NarrativeSorter排除(背景)"}
+                n_sorter_excluded += 1
+    if n_sorter_excluded and log_fn:
+        log_fn("agents", f"NarrativeSorter排除: {n_sorter_excluded} 个实体强制 tier=3")
 
     # 8a. 基础类型硬约束（最高优先级，不可被白名单或 LLM 覆盖）
     force_t3 = set(adapter.tier_rule.force_tier3_base_types) if adapter.tier_rule.force_tier3_base_types else {"Resource", "Geography", "Contract", "Event", "Concept"}
@@ -2022,12 +2034,19 @@ async def build_registry(
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
 
     # 8c. 基础类型最低保证（仅升级：Agent≥tier1, Subordinate≥tier2）
+    # 叙事域特殊保护：低频 Agent（出场≤2次且无归属组）允许 tier2，防止背景企业误升级
     for e in entity_list:
         nm = e["name"]
         bt = e.get("base_type", "Unknown")
         if nm in decisions:
             llm_tier = int(decisions[nm].get("tier", 3))
             min_t = ensure_min_tier(llm_tier, bt, adapter)
+            # 叙事方法论：Agent 的频次保护
+            if adapter.meta.methodology_mode == "narrative" and bt == "Agent" and llm_tier >= 2:
+                e_freq = e.get("freq", 0)
+                e_group = decisions[nm].get("group", "")
+                if e_freq <= 2 and not e_group:
+                    min_t = max(2, llm_tier)
             if min_t != llm_tier:
                 decisions[nm]["tier"] = min_t
                 decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"

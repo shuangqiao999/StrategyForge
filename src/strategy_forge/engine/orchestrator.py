@@ -781,7 +781,7 @@ class DeductionOrchestrator:
                           phase=DeductionPhase.REPORT.value)
 
     async def _check_goal_convergence(self, rounds: list[SimulationRound]) -> tuple[bool, str]:
-        """用 LLM 判定推演核心问题是否已可基于事件给出明确答案。
+        """用 LLM 判定推演核心问题是否已可基于事件给出明确、可辩护的答案。
 
         返回 (resolved, verdict)。resolved=True 时 verdict 为答案+依据；
         False 时 verdict 为缺失的决定性条件（可为空）。判定失败一律视为未收敛。
@@ -796,33 +796,43 @@ class DeductionOrchestrator:
         for r in rounds[-12:]:
             for act in r.actions:
                 who = name_map.get(act.agent_id, act.agent_id[:8])
-                events.append(f"[轮{r.round_number}] {who}: {act.content[:60]}")
+                events.append(f"[轮{r.round_number}] {who}: {act.content[:80]}")
         if not events:
             return False, ""
 
         goals_text = "；".join(getattr(self, "_pre_goals", []))
         prompt = (
-            "你是推演裁判。基于近期事件，判断推演核心问题是否已经可以给出明确、可辩护的答案。\n"
-            "只有当事件序列显示出决定性的力量对比变化（如某方掌握了压倒性筹码、对手被淘汰或屈服）时才判定为已收敛；"
-            "局势仍胶着、各方仅在试探或表态时判定为未收敛。\n\n"
-            "## 示例\n"
-            '已收敛：{"resolved": true, "verdict": "A公司通过价格战+收购完成市场垄断，竞争对手C已退出。关键依据：[事件5]的降价+[事件12]的收购"}\n'
-            '未收敛：{"resolved": false, "verdict": "各方仍在试探性外交，尚未出现决定性军事行动或实质性联盟破裂"}\n\n'
-            f"## 核心问题\n{goals_text}\n\n"
+            "你是推演裁判。你的唯一任务：基于近期事件序列，判断推演核心问题是否已经有明确、可辩护的答案。\n\n"
+            "## 判定标准（三个条件都满足才判定为已收敛）\n"
+            "1. **答案明确**：核心问题可以直接用一句话回答（如'X公司通过Y策略走出了价格战陷阱'）\n"
+            "2. **证据充分**：答案中的每个关键论断都有 ≥2 个独立事件的支撑（事件=智能体行动，非背景描述）\n"
+            "3. **力量对比已变**：事件序列显示了决定性变化（某方获得压倒性优势/对手被淘汰或屈服/格局已不可逆）\n\n"
+            "## 判定标准（任何一个满足即判定为未收敛）\n"
+            "1. 局势仍胶着：各方仅试探、表态、观察，无决定性行动\n"
+            "2. 答案依赖种子材料的背景信息而非推演中生成的事件\n"
+            "3. 核心问题涉及多方，但仅有1-2方的行动被覆盖\n"
+            "4. 答案模糊或使用了'可能/也许/倾向于'等不确定表述\n\n"
+            "## 核心问题\n"
+            f"{goals_text}\n\n"
             "## 近期事件\n" + "\n".join(events[-40:]) + "\n\n"
             '## 输出 JSON（纯 JSON）\n'
-            '{"resolved": true或false, "verdict": "若已收敛：明确答案+关键依据(80字内)；'
-            '若未收敛：还缺什么决定性事件(40字内)"}'
+            '{"resolved": true或false, '
+            '"verdict": "若已收敛：[明确答案]+[关键事件编号作为证据](≤100字)；'
+            '若未收敛：缺失什么决定性事件(≤40字)"}'
         )
         try:
             client = LLMClient()
             resp = await client.chat_json(
                 [Message(role="user", content=prompt)],
-                system="你是推演收敛判定裁判，只输出 JSON。",
-                schema_name="convergence", temperature=0.2, max_tokens=300)
+                system="你是推演收敛判定裁判，严格按三条件判定，只输出 JSON。",
+                schema_name="convergence", temperature=0.2, max_tokens=400)
             data = extract_json(extract_text(resp))
             if isinstance(data, dict):
-                return bool(data.get("resolved")), str(data.get("verdict", ""))[:200]
+                resolved = bool(data.get("resolved"))
+                verdict = str(data.get("verdict", ""))[:200]
+                if resolved and len(verdict) < 20:
+                    resolved = False
+                return resolved, verdict
         except Exception as e:
             logger.debug("[Orchestrator] 目标收敛判定失败(忽略): %s", e)
         return False, ""

@@ -1,0 +1,217 @@
+# StrategyForge DomainAdapter — 商业叙事 (business_narrative)
+# 适用于商业竞争、产业博弈等非虚构叙事场景
+# 与 novel.yaml 的关键区别：skip_layer3=false（需要全局冗余检测），Agent 强制 tier1 受频次保护
+
+domain_meta:
+  domain_id: business_narrative
+  display_name: 商业叙事
+  detect_keywords:
+  - {keyword: 企业, weight: 3}
+  - {keyword: 竞争, weight: 2}
+  - {keyword: 市场份额, weight: 3}
+  - {keyword: 供应链, weight: 2}
+  - {keyword: 博弈, weight: 2}
+  - {keyword: 产业, weight: 2}
+  - {keyword: 存量, weight: 2}
+  - {keyword: 价格战, weight: 3}
+  - {keyword: 生态, weight: 2}
+  - {keyword: 标准, weight: 2}
+  methodology_mode: narrative
+
+param_config:
+  shard_threshold: 12000
+  shard_size: 7500
+  shard_overlap: 800
+  jaccard_threshold: 0.45
+  max_sample_chars: 8000
+  sampling:
+    head_size: 1500
+    tail_size: 1500
+    lit_mode: true
+  token:
+    l1_normalize: {base: 200, per: 150, cap: 12000}
+    l1_shard: {base: 200, per: 200, cap: 6000}
+    l1_refine: {base: 200, per: 120, cap: 8000}
+    l2_classify: {base: 200, per: 120, cap: 6000}
+    l3_cross: {base: 300, per: 60, cap: 3000}
+  cache:
+    l1_enabled: true
+    l1_max_entries: 16
+    l3_enabled: true
+    l3_max_entries: 64
+    ttl_sec: 1800
+
+base_type_mapping:
+  Agent:
+  - Organization
+  - 组织
+  - Country
+  - 国家
+  - Company
+  - Enterprise
+  - 企业
+  - 公司
+  - InternationalOrganization
+  - 国际组织
+  - 初创企业
+  - 风投机构
+  - 监管机构
+  - 行业协会
+  - 评级机构
+  Subordinate:
+  - Person
+  - 人物
+  - 角色
+  - 官员
+  - 员工
+  - 发言人
+  - 子公司
+  - 部门
+  - 品牌
+  - Division
+  - Department
+  Resource:
+  - 武器
+  - 资源
+  - 物资
+  - 原材料
+  - 产品
+  - 技术标准
+  - 基础设施
+  Geography:
+  - Location
+  - 地点
+  - 地理区域
+  - 城市
+  - 区域
+  Contract:
+  - 条约
+  - 协议
+  - 法案
+  - 合同
+  - 贸易协定
+  - 白皮书
+  - 标准
+  Event:
+  - 事件
+  - 冲突
+  - 战争
+  - 项目
+  - 活动
+  - 会议
+  Concept:
+  - 概念
+  - 政策
+  - 主义
+  - 数据指标
+  - 经济指标
+  - 规则
+  - 战略
+  - 趋势
+
+tier_rule:
+  force_tier1_base_types:
+  - Agent
+  force_tier2_base_types:
+  - Subordinate
+  force_tier3_base_types:
+  - Resource
+  - Geography
+  - Contract
+  - Event
+  - Concept
+  extra_rules: |-
+    你是商业博弈分析专家。
+    ## 本域博弈主体判定
+    - 有独立战略决策+独立行动+独立利益诉求的企业/组织 = tier1
+    - 仅作为背景提及、仅以数据/报告中出现的企业 → 可能是被动背景，审视其出场频次和上下文
+    - 企业CEO/创始人 → 决策⊆企业决策，tier2
+    - 品牌/产品线/部门/子公司 → 决策被上级覆盖，tier3
+    - 政策/标准/白皮书/报告/数据 → tier3（非决策者）
+    - 高频≠重要：1次关键战略决策 > 10次行业报告中的背景提及
+
+    ## 频次保护
+    - 出场仅1-2次且无独立决策行为的企业 → tier2（保留但不生成独立智能体）
+    - 出场≥3次且有独立战略行动的企业 → tier1
+
+layer_config:
+  skip_layer3: false
+  min_kept_for_check: 3
+  warn_threshold: 10
+  desc_truncate: 80
+  sample_chars_l3: 5000
+  monarchs_force_tier1: false
+  warlord_force_tier1: false
+  strategic_geo_tier2: false
+  log_file: ''
+  fallback_rules:
+    org_overlap_threshold: 3
+    org_members_map: {}
+    person_country_map: {}
+
+prompts:
+  l2_entity_rules: |-
+    你是商业博弈分析专家。
+    ## 本域博弈主体判定
+    - 有独立战略决策+独立行动+独立利益诉求的企业/组织 = tier1
+    - 仅作为背景提及、仅以数据/报告中出现的企业 → 审视其出场频次和上下文
+    - 企业CEO/创始人 → 决策⊆企业决策，tier2
+    - 品牌/产品线/部门/子公司 → 决策被上级覆盖，tier3
+    - 政策/标准/白皮书/报告/数据 → tier3（非决策者）
+    - 出场仅1-2次且无独立决策行为的企业 → tier2（保留但不生成独立智能体）
+    - 高频≠重要：1次关键战略决策 > 10次背景提及
+
+  l2_tier_table: |-
+    | 类型 | 层级 | 判定 | 易误判负例（看似tier1实为tier3） |
+    |------|------|------|------------------------------|
+    | 有独立战略决策的企业/组织 | tier1 | 出场≥3次且有独立行动 | 仅以数据/报告出现1-2次→tier2 |
+    | 高频出场但仅被动被报道的企业 | tier2 | 保留但不生成独立智能体 | "据XX财报显示"→背景提及 |
+    | CEO/创始人 | tier2 | 决策⊆企业决策 | 即使媒体高频曝光 |
+    | 品牌/产品线/部门/子公司 | tier3 | 决策空间被覆盖 | "XX品牌""XX系列" |
+    | 政策/标准/数据/报告 | tier3 | 非决策者 | "白皮书""标准""趋势报告" |
+
+  l3_system_prompt: |-
+    你是商业博弈冗余检测专家。严格按以下机械规则检测。
+
+    ## 必检清单（逐条执行）
+    1. CEO-企业重叠：CEO对应企业已在列表 → 降级CEO
+    2. 品牌-集团重叠：品牌是集团的子品牌 → 合并到集团
+    3. 子公司-母公司：子公司归属母公司 → 降级子公司
+       例外：子公司独立上市且原文明确独立战略 → 保留
+    4. 同质竞争者：多个企业在同一赛道且无差异化独立决策 → 保留最活跃者
+    5. 仅以数据/报告出现的企业：出场≤2次且无独立决策 → 降级
+    6. 不满足以上任何一条 → 不冗余，保留
+
+    ## 深度检测指引（不强制执行，有能力则执行）
+    - 产业链关系：上下游企业形成单一利益链 → 保留链主，降级附属
+    - 生态壁垒：多个企业受同一标准/平台控制 → 保留标准制定者
+    - 无法判断 → 跳过，不影响必检结果
+
+    ## 保守原则
+    - 平行竞争企业 → 互不冗余，分别保留
+    - 不确定 → 保留不降级
+
+    ## 输出 JSON
+    {
+      "downgrades": [{"name": "实体名", "reason": "≤25字理由"}],
+      "merges": [{"keep": "保留名", "discard": ["待合并名"], "reason": "≤25字理由"}],
+      "notes": "≤50字"
+    }
+    无冗余时数组为空。只输出 JSON。
+
+  l3_redundancy_rules: |-
+    ## 商业叙事域冗余检测
+    - CEO-公司重叠 → 保留公司，降级CEO
+    - 品牌-集团重叠 → 合并到集团
+    - 低频无行动企业 → 出场≤2次且无独立决策 → 降级
+    - 平行竞争者 → 互不冗余，分别保留
+    - 不确定者 → 保守保留
+
+  l3_downgrade_rules: tier2
+
+aliases:
+  _org_members: {}
+  _person_country: {}
+  _force_keep: []
+  entity_aliases: {}
+  _strategic_regions: []

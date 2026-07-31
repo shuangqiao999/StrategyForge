@@ -100,8 +100,14 @@ def detect_domain(
                 _boost("narrative", person_ratio * 0.8)
                 if org_ratio < 0.2:
                     _boost("history", person_ratio * 0.6)
+                if company_ratio > 0.2:
+                    _boost("business_narrative", person_ratio * 0.7)
             if company_ratio > 0.3:
                 _boost("business", company_ratio)
+                if person_ratio > 0.2:
+                    _boost("business_narrative", company_ratio * 0.9)
+            if company_ratio > 0.15 and person_ratio < 0.5 and org_ratio < 0.3:
+                _boost("business_narrative", company_ratio * 0.6)
             if military_ratio > 0.25:
                 _boost("military", military_ratio)
                 _boost("geo_strategy", military_ratio * 0.6)
