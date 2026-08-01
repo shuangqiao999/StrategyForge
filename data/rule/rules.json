@@ -385,7 +385,66 @@
           "combat": null
         }
       }
-    }
+    },
+    "event_impact": {
+      "军事封锁": {
+        "supply": -20,
+        "morale": -8,
+        "strength": -5
+      },
+      "全面开战": {
+        "strength": -15,
+        "morale": -10,
+        "supply": -8
+      },
+      "斩首行动": {
+        "leadership": -15,
+        "morale": -10
+      },
+      "国际制裁": {
+        "supply": -12,
+        "morale": -5,
+        "leadership": -3
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "supply",
+        "op": "<",
+        "value": 25,
+        "event": "后勤补给危机",
+        "content": "后勤补给中断：弹药与燃料告急",
+        "impact": {
+          "supply": -8,
+          "morale": -6
+        },
+        "once": true
+      },
+      {
+        "metric": "morale",
+        "op": "<",
+        "value": 35,
+        "event": "士气崩溃风险",
+        "content": "部队士气持续低迷：逃兵与哗变风险上升",
+        "impact": {
+          "strength": -8,
+          "supply": -5
+        },
+        "once": true
+      },
+      {
+        "metric": "fatigue",
+        "op": ">",
+        "value": 75,
+        "event": "军队过度疲劳",
+        "content": "连续作战致军队极度疲劳：战斗力下降",
+        "impact": {
+          "strength": -8,
+          "morale": -8
+        },
+        "once": true
+      }
+    ]
   },
   "business": {
     "name": "📊 商业竞争",
@@ -1177,7 +1236,48 @@
           }
         }
       }
-    }
+    },
+    "event_impact": {
+      "政治丑闻": {
+        "support_rate": -15,
+        "unity": -8,
+        "legislative_power": -5
+      },
+      "外交制裁": {
+        "intl_relations": -12,
+        "economy": -8
+      },
+      "党内分裂": {
+        "unity": -15,
+        "legislative_power": -8
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "support_rate",
+        "op": "<",
+        "value": 30,
+        "event": "支持率崩盘预警",
+        "content": "支持率持续下滑：执政合法性受质疑",
+        "impact": {
+          "unity": -8,
+          "legislative_power": -6
+        },
+        "once": true
+      },
+      {
+        "metric": "unity",
+        "op": "<",
+        "value": 25,
+        "event": "党内分裂危机",
+        "content": "党内路线斗争激化：分裂风险上升",
+        "impact": {
+          "support_rate": -8,
+          "legislative_power": -6
+        },
+        "once": true
+      }
+    ]
   },
   "ecology": {
     "name": "🌿 生态环境",
@@ -1440,7 +1540,49 @@
           }
         }
       }
-    }
+    },
+    "event_impact": {
+      "生态灾难": {
+        "biodiversity": -20,
+        "pollution": 15,
+        "population": -8
+      },
+      "重大污染": {
+        "pollution": 15,
+        "biodiversity": -10
+      },
+      "资源枯竭": {
+        "resources": -15,
+        "stability": -8
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "pollution",
+        "op": ">",
+        "value": 70,
+        "event": "严重环境污染",
+        "content": "污染物超标：生态链受损",
+        "impact": {
+          "population": -6,
+          "biodiversity": -6,
+          "stability": -5
+        },
+        "once": true
+      },
+      {
+        "metric": "biodiversity",
+        "op": "<",
+        "value": 25,
+        "event": "物种灭绝危机",
+        "content": "生物多样性锐减：生态系统失衡",
+        "impact": {
+          "stability": -8,
+          "resources": -6
+        },
+        "once": true
+      }
+    ]
   },
   "urban": {
     "name": "🏙️ 城市规划",
@@ -1713,7 +1855,48 @@
           }
         }
       }
-    }
+    },
+    "event_impact": {
+      "城市灾害": {
+        "infrastructure": -20,
+        "finance": -10,
+        "satisfaction": -8
+      },
+      "重大事故": {
+        "infrastructure": -15,
+        "satisfaction": -10
+      },
+      "经济下行": {
+        "finance": -15,
+        "employment": -8
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "finance",
+        "op": "<",
+        "value": 30,
+        "event": "财政危机",
+        "content": "城市财政紧张：公共服务面临削减",
+        "impact": {
+          "infrastructure": -8,
+          "satisfaction": -6
+        },
+        "once": true
+      },
+      {
+        "metric": "satisfaction",
+        "op": "<",
+        "value": 30,
+        "event": "市民不满加剧",
+        "content": "市民满意度下滑：抗议与迁离风险上升",
+        "impact": {
+          "population": -6,
+          "finance": -5
+        },
+        "once": true
+      }
+    ]
   },
   "tech": {
     "name": "🔬 科技竞赛",
@@ -1946,7 +2129,48 @@
           "launch": null
         }
       }
-    }
+    },
+    "event_impact": {
+      "技术封锁": {
+        "chip_stock": -20,
+        "tech_lead": -10,
+        "talent_pool": -5
+      },
+      "供应链断供": {
+        "chip_stock": -25,
+        "commercialization": -8
+      },
+      "人才挖角潮": {
+        "talent_pool": -15,
+        "patent_barrier": -5
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "chip_stock",
+        "op": "<",
+        "value": 30,
+        "event": "芯片库存告急",
+        "content": "芯片库存告急：产线面临停产风险",
+        "impact": {
+          "commercialization": -10,
+          "tech_lead": -6
+        },
+        "once": true
+      },
+      {
+        "metric": "talent_pool",
+        "op": "<",
+        "value": 25,
+        "event": "核心技术人才流失",
+        "content": "核心技术人才大量流失：研发能力受损",
+        "impact": {
+          "tech_lead": -8,
+          "patent_barrier": -6
+        },
+        "once": true
+      }
+    ]
   },
   "info_war": {
     "name": "📰 舆论信息战",
@@ -2183,7 +2407,47 @@
           }
         }
       }
-    }
+    },
+    "event_impact": {
+      "舆论危机": {
+        "public_trust": -15,
+        "narrative_dominance": -8
+      },
+      "信息泄露": {
+        "public_trust": -12,
+        "polarization": 8
+      },
+      "事实核查反噬": {
+        "narrative_dominance": -10,
+        "public_trust": -6
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "public_trust",
+        "op": "<",
+        "value": 30,
+        "event": "公众信任危机",
+        "content": "公众信任崩塌：舆论主导权丧失",
+        "impact": {
+          "narrative_dominance": -8,
+          "polarization": 5
+        },
+        "once": true
+      },
+      {
+        "metric": "polarization",
+        "op": ">",
+        "value": 75,
+        "event": "社会严重撕裂",
+        "content": "社会对立加剧：信息战失控",
+        "impact": {
+          "public_trust": -6,
+          "narrative_dominance": -5
+        },
+        "once": true
+      }
+    ]
   },
   "geo_strategy": {
     "name": "🌐 大国博弈（跨域联动）",
@@ -2749,6 +3013,67 @@
       "politics",
       "tech",
       "info_war"
+    ],
+    "event_impact": {
+      "全面贸易封锁": {
+        "supply_chain": -20,
+        "cash_flow": -15,
+        "tech_lead": -8
+      },
+      "军事冲突升级": {
+        "strength": -15,
+        "supply": -10,
+        "morale": -8
+      },
+      "能源断供": {
+        "energy_resource": -20,
+        "supply_chain": -10,
+        "grain_resource": -5
+      },
+      "国际孤立": {
+        "intl_relations": -12,
+        "global_reputation": -10,
+        "alliance_trust": -8
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "energy_resource",
+        "op": "<",
+        "value": 30,
+        "event": "能源危机",
+        "content": "能源供应吃紧：工业与民生承压",
+        "impact": {
+          "supply_chain": -8,
+          "cash_flow": -6,
+          "support_rate": -5
+        },
+        "once": true
+      },
+      {
+        "metric": "grain_resource",
+        "op": "<",
+        "value": 25,
+        "event": "粮食危机",
+        "content": "粮食储备告急：社会动荡风险上升",
+        "impact": {
+          "support_rate": -10,
+          "unity": -8
+        },
+        "once": true
+      },
+      {
+        "metric": "global_reputation",
+        "op": "<",
+        "value": 30,
+        "event": "国际声誉受损",
+        "content": "国际声誉下滑：盟友信任动摇",
+        "impact": {
+          "alliance_trust": -8,
+          "intl_relations": -6
+        },
+        "once": true
+      }
     ]
   }
 }

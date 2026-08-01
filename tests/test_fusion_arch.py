@@ -34,6 +34,64 @@ class TestRuleEngineExt:
         assert "embargo" in re.event_impact_map()
         assert len(re.event_triggers()) >= 1
 
+    def test_all_domains_fusion_rules(self):
+        """所有量化域都应配置 event_impact + event_triggers。"""
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.rule_engine import RuleEngine
+
+        domains = ["military", "politics", "ecology", "urban",
+                   "tech", "info_war", "geo_strategy", "business"]
+        for dom in domains:
+            re = RuleEngine(get_template(dom))
+            assert re.event_impact_map(), f"{dom} missing event_impact"
+            assert re.event_triggers(), f"{dom} missing event_triggers"
+
+    def test_trigger_threshold_above_death(self):
+        """触发阈值应高于死亡阈值（预警型），避免触发永远晚于出局。"""
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.rule_engine import RuleEngine
+
+        domains = ["military", "politics", "ecology", "urban",
+                   "tech", "info_war", "geo_strategy", "business"]
+        for dom in domains:
+            re = RuleEngine(get_template(dom))
+            thr = re.thresholds()
+            for t in re.event_triggers():
+                m = t.get("metric", "")
+                op = t.get("op", ">=")
+                val = float(t.get("value", 0))
+                death = thr.get(m)
+                if death is None:
+                    continue  # 该指标非死亡阈值指标（如 morale 在 business 中）
+                if op == "<":
+                    assert val > death, \
+                        f"{dom} trigger {m}<{val} must be above death {death}"
+                elif op == ">":
+                    assert val < death, \
+                        f"{dom} trigger {m}>{val} must be below death {death}"
+
+    def test_military_channel2(self):
+        """military 域通道②：supply<25 触发后勤补给危机。"""
+        from strategy_forge.engine.simulator import SimulationEngine
+        from strategy_forge.engine.rule_engine import RuleEngine
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.models import EntityState
+
+        re = RuleEngine(get_template("military"))
+        full = {"strength": 50, "morale": 50, "supply": 20, "fatigue": 30, "leadership": 50}
+        eng = object.__new__(SimulationEngine)
+        eng._quantified = True
+        eng._rule_engine = re
+        eng._states = {"m1": EntityState(id="m1", name="甲军", metrics=dict(full))}
+        eng._event_history = []
+        eng._log = lambda p, m: None
+        eng._persist_events = False
+        eng._preprocessor = None
+        n = eng._trigger_events_from_metrics(1)
+        assert n >= 1, "military supply crisis should trigger"
+        sys_events = [e for e in eng._event_history if e.get("is_system_event")]
+        assert sys_events and sys_events[0]["event_type"] == "后勤补给危机"
+
     def test_eval_metric_op(self):
         from strategy_forge.engine.rule_engine import RuleEngine
 
