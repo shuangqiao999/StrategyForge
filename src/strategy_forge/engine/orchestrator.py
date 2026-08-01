@@ -42,7 +42,8 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
     """实体质量预检：对高频实体检查类型合理性 + 行动证据覆盖率。
 
     在 Phase 2 图谱构建完成后、Phase 2.5 情报整理前调用。
-    仅输出日志，不修改数据。
+    闭环：对"高频 + 拒收类型"的实体，若名称匹配领域无关主体词（国家/企业/组织/人物），
+    实际修正图中类型，使其在语义中介层归入正确基础类型（缺口2 修复）。
     """
     try:
         result = graph._conn.execute(
@@ -67,6 +68,14 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
 
     suspicious: list[str] = []
     high_freq_no_action: list[str] = []
+    corrected: list[str] = []
+
+    # 领域无关的拒收类型→正确主体类型 修正映射（名称匹配词，跨领域通用）
+    _TYPE_CORRECTIONS = [
+        (("国家", "政权", "国", "共和国", "联邦"), "国家"),
+        (("企业", "公司", "集团", "银行", "平台", "车企", "厂商", "品牌", "机构", "组织"), "企业"),
+        (("人物", "主席", "总统", "部长", "创始人", "CEO", "总裁"), "人物"),
+    ]
 
     for e in entities:
         name = str(e.get("name", "") or "").strip()
@@ -76,16 +85,36 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
 
         # 检查1：高频实体类型属于拒收类型
         if freq >= 3 and etype in _PRECheck_DISCARD_TYPES:
-            if not any(kw in name for kw in _PRECheck_SKIP_KW):
+            if any(kw in name for kw in _PRECheck_SKIP_KW):
+                continue
+            # 闭环修正：名称匹配主体词 → 更新图中类型
+            fixed = False
+            for kw_list, correct_type in _TYPE_CORRECTIONS:
+                if any(kw in name for kw in kw_list):
+                    try:
+                        graph._conn.execute(
+                            f"MATCH (e:{graph.NODE_TABLE} {{name: $n}}) "
+                            "SET e.type = $t",
+                            {"n": name, "t": correct_type},
+                        )
+                        corrected.append(f"{name}({etype}→{correct_type})")
+                        fixed = True
+                    except Exception as _e:
+                        logger.warning("[Precheck] 修正 %s 类型失败: %s", name, _e)
+                    break
+            if not fixed:
                 suspicious.append(f"{name}(type={etype}, freq={freq})")
 
         # 检查2：高频实体但描述中无行动动词（描述为空或仅含静态词）
         if freq >= 5 and etype not in _PRECheck_DISCARD_TYPES:
             action_kw = ("制裁", "攻击", "签署", "宣布", "部署", "发动",
-                          "制裁", "出口", "进口", "限制", "投资", "谈判")
+                         "出口", "进口", "限制", "投资", "谈判")
             if not desc or not any(kw in desc for kw in action_kw):
                 high_freq_no_action.append(f"{name}(freq={freq})")
 
+    if corrected:
+        log_fn("graph",
+               f"预检修正: {len(corrected)} 个高频实体类型已纠正 → {', '.join(corrected[:8])}")
     if suspicious:
         log_fn("graph",
                f"预检: {len(suspicious)} 个高频实体归类可能不当 → {', '.join(suspicious[:8])}")
@@ -93,7 +122,7 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
         log_fn("graph",
                f"预检: {len(high_freq_no_action)} 个高频实体描述缺少行动证据 → {', '.join(high_freq_no_action[:8])}")
 
-    if not suspicious and not high_freq_no_action:
+    if not suspicious and not high_freq_no_action and not corrected:
         logger.info("[Precheck] 实体质量预检通过 (n=%d)", len(entities))
 
 

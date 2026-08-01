@@ -326,8 +326,8 @@ class SimulationEngine:
         self._spatial_state = None   # cached SpatialState, updated after each module run
         # 关系→敌友极性：Layer A 结构化映射（ontology+适配器）；None 时仅用 Layer B 关键字兜底
         self._relation_polarity: dict[str, str] = merge_polarity_map(relation_polarity)
-        # Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 精判的缓存（entity_id → {neighbor: polarity}）
-        self._relation_llm_overrides: dict[str, dict[str, str]] = {}
+        # Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 精判的缓存（relation → polarity）
+        self._relation_llm_overrides: dict[str, str] = {}
         from strategy_forge.core.config import config
         from strategy_forge.core.providers import registry as _reg
 
@@ -541,8 +541,13 @@ class SimulationEngine:
         self._layer_c_done = True
         if self.graph is None:
             return
-        # 过滤：仅精判出现 >=2 个样本的关系名，避免一次性大量 LLM 调用
-        candidates = {rel: samples for rel, samples in pending.items() if len(samples) >= 2}
+        # 过滤：精判所有出现过的 neutral 关系（>=1 样本，放宽阈值），
+        # 但设总候选数上限防一次性大量 LLM 调用（缺口5 修复）
+        candidates = {rel: samples for rel, samples in pending.items() if samples}
+        if len(candidates) > 12:
+            # 按样本数排序，优先精判出现更频繁的关系
+            candidates = dict(sorted(candidates.items(),
+                                     key=lambda kv: len(kv[1]), reverse=True)[:12])
         if not candidates:
             return
         try:
@@ -1082,13 +1087,14 @@ class SimulationEngine:
             self._event_history = self._event_history[-200:]
 
     async def run_round(self, round_number: int) -> SimulationRound:
+        # Layer C: 首次开局精判 neutral 关系（幂等，仅一次）。
+        # 置于量化/叙事分支之前，保证两种模式都执行（Bug1 修复）。
+        await self._run_layer_c_judgment()
+
         if self._quantified:
             return await self._run_round_quantified(round_number)
 
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-
-        # Layer C: 首次开局精判 neutral 关系（幂等，仅一次）
-        await self._run_layer_c_judgment()
 
         sim_round = SimulationRound(round_number=round_number)
         client = LLMClient()

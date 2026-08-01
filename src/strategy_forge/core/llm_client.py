@@ -607,6 +607,10 @@ class DeductionLLMClient:
                 "type": "json_schema",
                 "json_schema": {"name": schema_name, "schema": schema},
             }
+        else:
+            # 未注册 schema 名 → 警告暴露（此前静默降级为无约束 JSON，难以排查）
+            logger.warning("[LLM] chat_json schema '%s' 未在 _JSON_SCHEMAS 注册，降级为无约束 JSON",
+                           schema_name)
         return await self.chat(messages, system=system,
                                max_tokens=max_tokens, temperature=temperature, **kwargs)
 
