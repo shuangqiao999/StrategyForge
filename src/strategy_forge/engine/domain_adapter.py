@@ -156,18 +156,17 @@ BASE_TYPES = ["Agent", "Subordinate", "Resource", "Geography", "Contract", "Even
 
 
 def _find_adapter_dir() -> Path:
-    """查找 domain_adapters 目录。优先 FORGE_RULE_DIR 环境变量。"""
-    import os
+    """查找 domain_adapters 目录。统一经 config.resolve_rule_dirs() 解析（P1#8）。"""
+    from strategy_forge.core.config import resolve_rule_dirs
 
-    env_dir = os.environ.get("FORGE_RULE_DIR", "")
-    if env_dir:
-        candidates = [
-            Path(env_dir) / "domain_adapters",
-            Path(env_dir).parent / "domain_adapters",
-        ]
-        for c in candidates:
-            if c.exists():
-                return c
+    builtin, _custom = resolve_rule_dirs()
+    candidates = [
+        builtin / "domain_adapters",
+        builtin.parent / "domain_adapters",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
 
     rule_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "domain_adapters"
     if not rule_dir.exists():

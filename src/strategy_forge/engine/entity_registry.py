@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 # ── LRU 缓存 (协程安全 + TTL过期 + 主动清理) ──
 class _LRUCache:
-    """LRU 缓存，asyncio 锁保护，TTL 过期，主动后台清理。"""
+    """LRU 缓存，asyncio 锁保护，TTL 过期，主动后台清理。
+
+    P2#11: 改用纯 maxsize 条目计数淘汰——sys.getsizeof 对嵌套结构估算不准，
+    简单计数约束更可靠、无系统性误差。
+    """
     def __init__(self, maxsize: int = 64, ttl_sec: int = 1800):
         self._maxsize = maxsize
         self._ttl = ttl_sec
@@ -39,8 +43,6 @@ class _LRUCache:
         self._timestamps: dict[str, float] = {}
         self._order: list[str] = []
         self._lock = asyncio.Lock()
-        self._total_memory_bytes = 0
-        self._max_memory_bytes = 256 * 1024 * 1024  # 256MB hard cap
 
     def _expire_stale(self, now: float) -> None:
         """清理所有过期键（调用方需持有锁）。"""
@@ -64,26 +66,23 @@ class _LRUCache:
             return None
 
     async def set(self, key: str, value: object) -> None:
-        import time, sys
+        import time
         async with self._lock:
             now = time.time()
             self._expire_stale(now)
             if key in self._data:
                 self._order.remove(key)
             else:
-                while len(self._data) >= self._maxsize or self._total_memory_bytes > self._max_memory_bytes:
+                while len(self._data) >= self._maxsize:
                     if not self._order:
                         break
                     oldest = self._order.pop(0)
-                    val_size = sys.getsizeof(self._data.get(oldest, b""))
-                    self._total_memory_bytes = max(0, self._total_memory_bytes - val_size)
                     del self._data[oldest]
                     self._timestamps.pop(oldest, None)
                     logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
             self._data[key] = value
             self._timestamps[key] = now
             self._order.append(key)
-            self._total_memory_bytes += sys.getsizeof(value)
 
     async def contains(self, key: str) -> bool:
         async with self._lock:

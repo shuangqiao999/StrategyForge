@@ -118,11 +118,61 @@ class TestSimulatorClassify:
         assert eng._classify_relation("竞争") == "ally"
 
 
+class TestEventVisibility:
+    def test_private_only_participants(self):
+        from strategy_forge.engine.simulator import _is_event_visible_to
+
+        priv = {"visibility": "private", "participants": "A|B", "agent": "A"}
+        assert _is_event_visible_to("A", "AgentA", priv) is True
+        assert _is_event_visible_to("B", "AgentB", priv) is True
+        assert _is_event_visible_to("C", "AgentC", priv) is False
+
+    def test_private_actor_visible(self):
+        from strategy_forge.engine.simulator import _is_event_visible_to
+
+        priv = {"visibility": "private", "participants": "", "agent": "X"}
+        assert _is_event_visible_to("X", "AgentX", priv) is True
+        assert _is_event_visible_to("Y", "AgentY", priv) is False
+
+    def test_public_visible_to_all(self):
+        from strategy_forge.engine.simulator import _is_event_visible_to
+
+        pub = {"visibility": "public", "participants": "", "agent": "A"}
+        assert _is_event_visible_to("C", "AgentC", pub) is True
+
+
+class TestStateSnapshotSig:
+    def test_stable_unchanged(self):
+        from strategy_forge.engine.simulator import _state_snapshot_sig
+
+        class St:
+            def __init__(self, m, h):
+                self.metrics = m
+                self.history = h
+
+        s1 = {"e1": St({"a": 1.0, "b": 2.0}, [])}
+        s2 = {"e1": St({"a": 1.0, "b": 2.0}, [])}
+        assert _state_snapshot_sig(s1, ["e1"]) == _state_snapshot_sig(s2, ["e1"])
+
+    def test_changes_on_metric(self):
+        from strategy_forge.engine.simulator import _state_snapshot_sig
+
+        class St:
+            def __init__(self, m, h):
+                self.metrics = m
+                self.history = h
+
+        s1 = {"e1": St({"a": 1.0, "b": 2.0}, [])}
+        s3 = {"e1": St({"a": 9.0, "b": 2.0}, [])}
+        assert _state_snapshot_sig(s1, ["e1"]) != _state_snapshot_sig(s3, ["e1"])
+
+
 if __name__ == "__main__":
     import traceback
 
     failed = 0
-    for cls in (TestInferPolarity, TestMergePolarityMap, TestOntologyPolarity, TestSimulatorClassify):
+    for cls in (TestInferPolarity, TestMergePolarityMap, TestOntologyPolarity,
+                TestSimulatorClassify, TestEventVisibility, TestStateSnapshotSig):
         for name in dir(cls):
             if not name.startswith("test_"):
                 continue

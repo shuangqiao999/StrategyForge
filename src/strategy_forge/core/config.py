@@ -122,4 +122,26 @@ class DeductionConfig:
         )
 
 
+def resolve_rule_dirs() -> tuple[Path, Path]:
+    """统一解析内置规则目录与自定义规则目录，消除 FORGE_RULE_DIR 路径歧义（P1#8）。
+
+    打包环境：
+      FORGE_RULE_DIR → 内置规则根（安装目录，只读，随安装包更新），其下含
+                       rules.json / domain_adapters/ / methodology.yaml
+      FORGE_DATA_DIR → 运行期数据根，自定义规则位于 <data>/rule/custom/
+    开发环境（FORGE_RULE_DIR 未设置）：内置与自定义均在 <data>/rule/ 下。
+
+    返回 (builtin_rule_dir, custom_rule_dir)。builtin 目录可能不存在（调用方判断）。
+    """
+    root = _get_root()
+    data_dir = _get_data_dir()
+    env_rule = os.getenv("FORGE_RULE_DIR", "")
+    if env_rule:
+        builtin = Path(env_rule)
+    else:
+        builtin = data_dir / "rule"
+    custom = data_dir / "rule" / "custom"
+    return builtin, custom
+
+
 config = DeductionConfig()

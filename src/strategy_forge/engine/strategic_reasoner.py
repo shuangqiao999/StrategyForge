@@ -136,18 +136,24 @@ class StrategicReasoner:
         self._recent_actions: dict[str, list[str]] = defaultdict(list)
 
     def _cached_intervention(self, round_number: int) -> str:
-        """Fetch latest intervention, cached per round."""
+        """Fetch latest intervention, cached per round.
+
+        P2#12: 检索异常时不更新 _intervention_round，保留旧缓存并允许下轮重试，
+        避免暂时性故障导致整轮干预信息永久丢失。
+        """
         if self._intervention_round == round_number and self._intervention_cache is not None:
             return self._intervention_cache
-        self._intervention_round = round_number
         if self._preprocessor is not None:
             try:
                 iv = self._preprocessor.retrieve_latest_intervention()
                 if iv:
+                    self._intervention_round = round_number
                     self._intervention_cache = iv.get("content", "")
                     return self._intervention_cache
             except Exception:
-                pass
+                # 检索失败：不消费本轮，保留旧缓存，允许下轮重试
+                return self._intervention_cache if self._intervention_cache is not None else ""
+        self._intervention_round = round_number
         self._intervention_cache = ""
         return ""
 
@@ -534,7 +540,10 @@ class StrategicReasoner:
                     self._chat_fn, [Message(role="user", content=prompt)], system, self._temperature)
             else:
                 resp = await llm.chat_json([Message(role="user", content=prompt)],
-                                      system=system, schema_name="strategy_single", temperature=self._temperature)
+                                      system=system,
+                                      schema_name=("strategy_multi" if self._enable_multi_action
+                                                   else "strategy_single"),
+                                      temperature=self._temperature)
                 content = extract_text(resp)
             data = extract_json(content)
             if not isinstance(data, dict):

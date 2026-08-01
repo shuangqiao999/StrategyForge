@@ -163,15 +163,31 @@ class DeductionPreprocessor:
             if cached is not None:
                 self.embed_cache_hits += 1
                 return cached
-        r = self._http.post(self._embed_url, json={
-            "input": key,
-            "model": self._embed_model,
-        }, timeout=60)
-        r.raise_for_status()
-        vec = r.json()["data"][0]["embedding"]
-        with self._cache_lock:
-            self._embed_cache[key] = vec
-        return vec
+        # 指数退避重试：嵌入服务短暂抖动/超时不再导致预处理整体失败（P1#6）
+        import time as _t
+        import random as _r
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                r = self._http.post(self._embed_url, json={
+                    "input": key,
+                    "model": self._embed_model,
+                }, timeout=60)
+                r.raise_for_status()
+                vec = r.json()["data"][0]["embedding"]
+                with self._cache_lock:
+                    self._embed_cache[key] = vec
+                return vec
+            except (requests.RequestException, KeyError, ValueError) as e:
+                last_exc = e
+                if attempt >= max_retries:
+                    break
+                backoff = 0.5 * (2 ** attempt) + _r.uniform(0, 0.3)
+                logger.warning("[Preprocessor] 嵌入调用失败(第%d次)，%.1fs 后重试: %s",
+                               attempt + 1, backoff, e)
+                _t.sleep(backoff)
+        raise last_exc if last_exc else RuntimeError("embedding call failed")
 
     def _sync_embed_batch(self, texts: list[str]) -> list[list[float]]:
         r = self._http.post(self._embed_url, json={
@@ -509,7 +525,7 @@ class DeductionPreprocessor:
         try:
             vecs = self._sync_embed_batch(chunk_prefixes)
         except Exception as e:
-            logger.warning("[Preprocessor] Batch embed failed: %s", e)
+            logger.error("[Preprocessor] Batch embed failed，LanceDB 向量索引跳过（仅纯文本检索）: %s", e)
             self._result = PreprocessResult(
                 session_id=self.session_id, chunks=list(chunks),
                 high_freq_entities=high_freq, low_freq_entities=low_freq,

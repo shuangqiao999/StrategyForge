@@ -148,12 +148,16 @@ class SessionStore:
         invalid = set(kwargs) - self._ALLOWED_COLUMNS
         if invalid:
             raise ValueError(f"不允许的列: {', '.join(sorted(invalid))}。允许的列: {', '.join(sorted(self._ALLOWED_COLUMNS))}")
-        # JSON 列：调用方若传 dict/list 则自动序列化，避免 sqlite3 绑定报错
+        # JSON 列：调用方若传 dict/list 则自动序列化，避免 sqlite3 绑定报错；
+        # 不可序列化对象（含嵌套）兜底为字符串，杜绝存储阶段 500（P1#9）
         json_cols = {"config_json", "report_json", "optimization_report_json", "token_json"}
         for k in json_cols & set(kwargs):
             v = kwargs[k]
-            if isinstance(v, (dict, list)):
-                kwargs[k] = json.dumps(v, ensure_ascii=False)
+            if v is not None and not isinstance(v, str):
+                try:
+                    kwargs[k] = json.dumps(v, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    kwargs[k] = str(v)
         now = datetime.now().isoformat()
         set_parts = [f"{k} = ?" for k in kwargs]
         set_parts.append("updated_at = ?")

@@ -167,6 +167,39 @@ def _distort_event_content(content_raw: str, distortion: float) -> str:
     return result
 
 
+def _is_event_visible_to(entity_id: str, entity_name: str, evt: dict) -> bool:
+    """事件可见性判定：私密事件仅参与者/发起者可见，其余对所有人可见。
+
+    供 _agent_decide 可见历史与 _dispatch_events 知识队列分发两处复用，
+    保证私密事件不会经任何途径泄漏给非参与者。
+    """
+    if (evt.get("visibility", "") or "public") != "private":
+        return True
+    parts = evt.get("participants", "") or ""
+    if entity_name in parts or entity_id in parts:
+        return True
+    return evt.get("agent") == entity_id
+
+
+def _state_snapshot_sig(states: dict, alive_ids: list) -> int:
+    """计算量化状态快照的签名，用于 _other_ctxs 跨轮缓存失效判断。
+
+    仅对活体实体取 metrics（有序值元组）与 history 长度/末条哈希，成本 O(alive)。
+    """
+    parts = []
+    for eid in alive_ids:
+        st = states.get(eid)
+        if st is None:
+            continue
+        parts.append((eid, tuple(st.metrics.get(k, 0.0)
+                                 for k in sorted(st.metrics or {}))))
+        hist = getattr(st, "history", []) or []
+        if hist:
+            last = hist[-1]
+            parts.append((eid, len(hist), str(last)[:120]))
+    return hash(tuple(parts))
+
+
 class ConnectionFailureError(Exception):
     """连接故障导致推演中断（含原文，供界面日志展示）。"""
     pass
@@ -327,6 +360,9 @@ class SimulationEngine:
 
         # A. 关系反哺：开局一次性从 Kuzu 预取盟友/对手并播种信任(关系在一次推演内静态)
         self._rel_context: dict[str, dict] = {}
+        # P1#7: 量化 other_ctxs 跨轮缓存
+        self._other_ctxs_cache: dict = {}
+        self._other_ctxs_sig = None
         self._build_relationship_context()
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
 
@@ -636,6 +672,11 @@ class SimulationEngine:
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
                                   "opponents": list(v.get("opponents", []))}
                               for k, v in getattr(self, "_prev_rel_map", {}).items()},
+            # 反思机制动态塑造的行为准则：暂停恢复后不丢失（P0#2）
+            "_agent_extra_rules": {
+                a.entity_id: (a.system_prompt_extra or "")
+                for a in getattr(self, "agents", [])
+            },
         }
 
     def restore_state(self, saved: dict[str, Any]) -> None:
@@ -652,6 +693,13 @@ class SimulationEngine:
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
+        # 恢复反思行为准则到 agent 对象（P0#2）
+        extra_rules = saved.get("_agent_extra_rules", {}) or {}
+        if extra_rules and getattr(self, "agents", None):
+            for a in self.agents:
+                extra = extra_rules.get(a.entity_id, "")
+                if extra:
+                    a.system_prompt_extra = extra
 
     # ── 用户强制 override ──
     def _pop_override(self, agent: Any) -> dict | None:
@@ -1415,31 +1463,47 @@ class SimulationEngine:
         )
             _mt = 80
         try:
-            resp = await client.chat(
-                [Message(role="user", content=prompt)],
-                system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
+            # P2#14: 结构化反思输出——统一约束为 JSON，替代自由文本字符串匹配。
+            # prompt 末尾追加 JSON 输出说明（不改动各 mode 模板主体）。
+            json_instruct = (
+                "\n\n## 输出（仅 JSON，无其他文字）\n"
+                '{"new_rule": "≤20字的新行为准则；无需调整时留空字符串", '
+                '"changed": true/false, "memory": "重要人际承诺/债务/背叛，无则空字符串"}'
+            )
+            resp = await client.chat_json(
+                [Message(role="user", content=prompt + json_instruct)],
+                system="你是潜意识分析师。输出结构化 JSON，new_rule 为 ≤20字中文行为准则；无需调整时 changed=false 且 new_rule 为空。",
+                schema_name="reflection_result",
                 temperature=0.3 if mode != "emotional" else 0.5,
                 max_tokens=_mt,
             )
             text = extract_text(resp).strip()
             if not text:
                 return False
-            # 提取私人记忆行（"记忆：..."），与人格准则分离处理
-            if "记忆：" in text:
-                parts = text.split("记忆：", 1)
-                rule_text = parts[0].strip()
-                mem_text = parts[1].strip()[:40] if len(parts) > 1 else ""
-                if mem_text:
-                    if not hasattr(self, "_character_journal"):
-                        self._character_journal: dict[str, list[str]] = {}
-                    self._character_journal.setdefault(agent.entity_id, []).append(
-                        f"R{round_number}: {mem_text}")
-                    if len(self._character_journal[agent.entity_id]) > 5:
-                        self._character_journal[agent.entity_id] = \
-                            self._character_journal[agent.entity_id][-5:]
-                text = rule_text
-            if not text or "无需调整" in text or len(text) < 2:
+            try:
+                import json as _json
+                data = _json.loads(text)
+                changed = bool(data.get("changed", False))
+                rule_text = str(data.get("new_rule", "") or "").strip()
+                mem_text = str(data.get("memory", "") or "").strip()[:40]
+            except (ValueError, TypeError):
+                # 兼容：偶发非 JSON 回退自由文本解析
+                data = {}
+                changed = text not in ("", "无需调整")
+                rule_text = "" if "无需调整" in text else text
+                mem_text = ""
+            # 提取私人记忆行（结构化 memory 字段），与人格准则分离处理
+            if mem_text:
+                if not hasattr(self, "_character_journal"):
+                    self._character_journal: dict[str, list[str]] = {}
+                self._character_journal.setdefault(agent.entity_id, []).append(
+                    f"R{round_number}: {mem_text}")
+                if len(self._character_journal[agent.entity_id]) > 5:
+                    self._character_journal[agent.entity_id] = \
+                        self._character_journal[agent.entity_id][-5:]
+            if not changed or not rule_text or "无需调整" in rule_text or len(rule_text) < 2:
                 return False
+            text = rule_text
             old_extra = agent.system_prompt_extra
             if old_extra and text not in old_extra:
                 parts = old_extra.split("；")
@@ -1696,14 +1760,8 @@ class SimulationEngine:
     ) -> SimulationAction | None:
         from strategy_forge.core.config import config
         # ── 近期事件（可见性过滤：私密事件仅参与者可见）──
-        def _visible_to_agent(e: dict) -> bool:
-            if (e.get("visibility", "") or "public") != "private":
-                return True
-            parts = e.get("participants", "") or ""
-            return (agent.name in parts or agent.entity_id in parts
-                    or e.get("agent") == agent.entity_id)
-
-        visible_history = [e for e in self._event_history if _visible_to_agent(e)]
+        visible_history = [e for e in self._event_history
+                           if _is_event_visible_to(agent.entity_id, agent.name, e)]
         recent = visible_history[-max(1, config.deduction_sim_recent_events):]
         recent_text = "\n".join(
             f"- [{e.get('round', '?')}] {e.get('agent_name', e.get('agent', '?'))}: "
@@ -2060,6 +2118,11 @@ class SimulationEngine:
             for a_id in alive_ids:
                 if a_id == actor_id:
                     continue
+                # 可见性过滤：私密事件仅分发给参与者/发起者，避免信息不对称泄漏
+                a_name = name_to_id and next(
+                    (k for k, v in name_to_id.items() if v == a_id), actor_name)
+                if not _is_event_visible_to(a_id, a_name, evt):
+                    continue
                 # Trust lookup: matrix is indexed by [entity_id][name]; seed_trust stores
                 # by source entity_id → target name. We need observer's entity_id (a_id)
                 # looking at actor's name.
@@ -2281,8 +2344,17 @@ class SimulationEngine:
             _rc = max(200, _cfg.deduction_sim_recall_chars)
             return await self._shared_dual_recall(agent, _rk, _rc)
 
-        # Pre-compute per-agent contexts once before concurrent execution
-        _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
+        # P1#7: _other_ctxs 跨轮缓存——仅当各实体 metrics/history 快照变化时重建，
+        # 避免数千实体下每轮全量 O(N) 字符串构建。
+        sig = hash((_state_snapshot_sig(states, alive_ids),))
+        if getattr(self, "_other_ctxs_cache", None) is None:
+            self._other_ctxs_cache = {}
+        if self._other_ctxs_sig == sig and self._other_ctxs_cache:
+            _other_ctxs = self._other_ctxs_cache
+        else:
+            _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
+            self._other_ctxs_cache = _other_ctxs
+            self._other_ctxs_sig = sig
         _spatial_ctxs = {a.entity_id: spatial_self_ctx(a.entity_id) for a in alive_agents}
         _env_ctx = env_context()
         # ── 增强因果反馈：per-agent 上次行动复盘 ──

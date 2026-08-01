@@ -359,6 +359,41 @@ _JSON_SCHEMAS: dict[str, dict] = {
         },
         "required": ["action"]
     },
+    "relation_polarity": {
+        "type": "object",
+        "properties": {
+            "polarity": {"type": "string", "enum": ["foe", "ally", "neutral"]},
+        },
+        "required": ["polarity"]
+    },
+    "strategy_multi": {
+        "type": "object",
+        "properties": {
+            "budget": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action_type": {"type": "string"},
+                        "weight": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "target": {"type": "string"},
+                    },
+                    "required": ["action_type", "weight"]
+                },
+            },
+            "rationale": {"type": "string"},
+        },
+        "required": ["budget", "actions"]
+    },
+    "reflection_result": {
+        "type": "object",
+        "properties": {
+            "new_rule": {"type": "string"},
+            "changed": {"type": "boolean"},
+        },
+        "required": ["new_rule", "changed"]
+    },
 }
 
 

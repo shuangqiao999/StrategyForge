@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .config import _get_data_dir
+from .config import resolve_rule_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -211,38 +211,24 @@ def reload_rules() -> None:
     """
     global _RULE_CACHE, _rules_loaded_from_file
     try:
-        data_dir = _get_data_dir()
+        from .config import resolve_rule_dirs
     except Exception:
         logger.warning("[rule_templates] 无法确定数据目录，使用兜底规则")
         _RULE_CACHE = dict(_FALLBACK_RULES)
         _rules_loaded_from_file = False
         return
 
-    import os
-    rule_root = os.getenv("FORGE_RULE_DIR", "")
+    bundle_dir, custom_dir = resolve_rule_dirs()
     loaded: dict[str, dict[str, Any]] = {}
-    if rule_root:
-        bundle_dir = Path(rule_root)
-        if bundle_dir.is_dir():
-            # 1) 内置规则包（安装包提供）
-            default_file = bundle_dir / "rules.json"
-            if default_file.exists():
-                rules = _load_json_file(default_file)
-                if rules:
-                    loaded.update(rules)
-                    logger.info("[rule_templates] 加载内置规则(FORGE_RULE_DIR): %d 个领域", len(rules))
-    else:
-        # 开发模式：回退到 data/rule/
-        bundle_dir = data_dir / "rule"
-        if bundle_dir.is_dir():
-            default_file = bundle_dir / "rules.json"
-            if default_file.exists():
-                rules = _load_json_file(default_file)
-                if rules:
-                    loaded.update(rules)
-                    logger.info("[rule_templates] 加载内置规则(data/rule): %d 个领域", len(rules))
+    if bundle_dir.is_dir():
+        # 1) 内置规则包（安装包提供或开发环境 data/rule）
+        default_file = bundle_dir / "rules.json"
+        if default_file.exists():
+            rules = _load_json_file(default_file)
+            if rules:
+                loaded.update(rules)
+                logger.info("[rule_templates] 加载内置规则: %d 个领域 (%s)", len(rules), bundle_dir)
     # 2) 用户自定义规则（持久化目录，卸载不丢）
-    custom_dir = data_dir / "rule" / "custom"
     if custom_dir.is_dir():
         for f in sorted(custom_dir.glob("*.json")):
             rules = _load_json_file(f)
