@@ -173,7 +173,34 @@ async def create_agents_from_graph(
         max_agents = len(persons)
         log_fn("agents", f"从 {max_agents} 个注册实体中生成最多 {max_agents} 个智能体")
 
-
+    else:
+        # 无 EntityRegistry 时：从 intel_list 回退构建 persons（兼容测试/脚本）
+        persons = []
+        if intel_list:
+            seen: set[str] = set()
+            for e in intel_list:
+                nm = (e.get("name") or "").strip()
+                if nm and nm not in seen:
+                    seen.add(nm)
+                    persons.append({"id": e.get("id", ""), "name": nm,
+                                    "type": e.get("type", "Person"), "description": ""})
+        intel_map = {}
+        if intel_list:
+            for e in intel_list:
+                nm = (e.get("name") or "").strip()
+                if nm:
+                    intel_map[nm] = e
+                for a in e.get("aliases", []):
+                    a = str(a).strip()
+                    if a and a not in intel_map:
+                        intel_map[a] = e
+        freq_map = {}
+        if preprocessor and preprocessor.result:
+            freq_map = getattr(preprocessor.result, "entity_frequencies", {}) or {}
+        max_agents = len(persons)
+        if max_agents == 0:
+            log_fn("agents", "无 EntityRegistry 且无 intel_list，智能体工厂返回空")
+            return []
 
     client = LLMClient()
     agents: list[DeductionAgentProfile] = []

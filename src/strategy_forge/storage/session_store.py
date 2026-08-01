@@ -11,6 +11,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _safe_json_load(raw: Any) -> Any:
+    """容错 JSON 解析：损坏/非 JSON 值回退空 dict，避免 500。"""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
 class SessionStore:
 
     def __init__(self, db_path: str | Path) -> None:
@@ -144,10 +154,10 @@ class SessionStore:
         if row is None:
             return None
         d = dict(row)
-        d["config_json"] = json.loads(d.get("config_json", "{}") or "{}")
-        d["report_json"] = json.loads(d.get("report_json", "{}") or "{}")
-        d["optimization_report_json"] = json.loads(d.get("optimization_report_json", "{}") or "{}")
-        d["token_json"] = json.loads(d.get("token_json", "{}") or "{}")
+        d["config_json"] = _safe_json_load(d.get("config_json", "{}"))
+        d["report_json"] = _safe_json_load(d.get("report_json", "{}"))
+        d["optimization_report_json"] = _safe_json_load(d.get("optimization_report_json", "{}"))
+        d["token_json"] = _safe_json_load(d.get("token_json", "{}"))
         return d
 
     def list_all(self) -> list[dict[str, Any]]:

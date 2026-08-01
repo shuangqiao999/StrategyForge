@@ -90,6 +90,7 @@ def detect_domain(
             org_ratio = (n_org + n_country) / total
             company_ratio = n_company / total
             military_ratio = n_military / total
+            geo_ratio = n_geo / total
 
             # 实体类型加权推断
             def _boost(domain: str, val: float) -> None:

@@ -23,13 +23,17 @@ logger = logging.getLogger(__name__)
 # 全局 LLM 并发信号量——所有 client.chat() 统一经过此锁，
 # 确保全推演（图构建/分类器/智能体/模拟/优化器）的总并发 ≤ 界面配置值
 _global_sem: asyncio.Semaphore | None = None
+_global_sem_conc: int = 0
 
 
 def _ensure_global_sem() -> asyncio.Semaphore:
-    global _global_sem
-    if _global_sem is None:
-        mc = max(1, _reg.max_concurrent)
+    global _global_sem, _global_sem_conc
+    mc = max(1, _reg.max_concurrent)
+    # max_concurrent 热更新：配置变更时重建信号量（生产路径会初始化后长驻，
+    # 重建仅在并发配额变化瞬间发生一次，可安全接受）
+    if _global_sem is None or mc != _global_sem_conc:
         _global_sem = asyncio.Semaphore(mc)
+        _global_sem_conc = mc
     return _global_sem
 
 
@@ -374,6 +378,7 @@ class DeductionLLMClient:
         self._conn_timeout = float(_env_conn) if _env_conn else max(10.0, _reg.connect_timeout)
         _env_gen = os.getenv("FORGE_LLM_GENERATION_TIMEOUT")
         self._gen_timeout = float(_env_gen) if _env_gen else _reg.generation_timeout
+        _client_registry.add(self)
 
     async def _ensure_client(self):
         if self._http is None:
@@ -482,7 +487,15 @@ class DeductionLLMClient:
                         await asyncio.sleep(delay)
                         attempt += 1
                         continue
-                    resp.raise_for_status()
+                    try:
+                        resp.raise_for_status()
+                    except httpx.HTTPStatusError:
+                        # 重试耗尽后 429/5xx 统一归类为 LLMConnectionError（与传输错误一致），
+                        # 使下游按连接故障重试/统计
+                        raise LLMConnectionError(
+                            f"LLM 服务端错误：{url}（HTTP {resp.status_code}，"
+                            f"已重试 {max_retries} 次仍失败）",
+                            endpoint=url, retries=max_retries, cause=f"HTTP {resp.status_code}") from None
                     return resp
                 except (httpx.TransportError, httpx.TimeoutException) as e:
                     is_conn = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout))
@@ -556,6 +569,20 @@ class DeductionLLMClient:
         if self._http:
             await self._http.aclose()
             self._http = None
+        _client_registry.discard(self)
 
 
 _client_instance: DeductionLLMClient | None = None
+
+# 追踪所有已创建但可能泄漏 httpx 连接的客户端实例，供进程退出时统一清理
+_client_registry: set[DeductionLLMClient] = set()
+
+
+async def close_all_llm_clients() -> None:
+    """关闭所有已创建的 LLM 客户端连接池（进程退出/热重启时调用）。"""
+    for c in list(_client_registry):
+        try:
+            await c.close()
+        except Exception:
+            pass
+    _client_registry.clear()

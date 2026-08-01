@@ -316,7 +316,8 @@ class StrategyOptimizer:
                     session.current_round = total_rounds
                     rep = await generate_report(
                         session=session, graph=graph, rounds=rep_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=None)
+                        log_fn=lambda _p, _m: None, preprocessor=None,
+                        states=rep_states or None, domain=domain)
                     payload = {
                         "summary": rep.summary,
                         "key_events": rep.key_events,

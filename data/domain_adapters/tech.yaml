@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 科技竞争 (tech)
-# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
+# 由 migrate_adapters.py 生成 + 人工增强。methodology_mode=neutral（用自有 L3 prompt）
 
 domain_meta:
   domain_id: tech
@@ -17,7 +17,7 @@ domain_meta:
     weight: 3
   - keyword: 制裁
     weight: 2
-  methodology_mode: geo
+  methodology_mode: neutral
 param_config:
   shard_threshold: 12000
   shard_size: 7500

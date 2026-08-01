@@ -28,6 +28,16 @@ app.add_middleware(
 app.include_router(forge_router)
 app.include_router(config_router)
 
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    """进程退出时关闭所有 LLM httpx 连接池，避免 keepalive 连接泄漏。"""
+    try:
+        from strategy_forge.core.llm_client import close_all_llm_clients
+        await close_all_llm_clients()
+    except Exception:
+        pass
+
 # 前端静态文件（打包模式自动服务；开发模式 Vite 代理到本机 5173）
 _frontend_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))), "frontend")
 if _os.path.isdir(_frontend_dir):

@@ -366,6 +366,7 @@ async def generate_report(
     goal_resolution: str = "",
     personality_log: list[dict[str, Any]] | None = None,
     entity_registry: Any = None,
+    domain: str = "",
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
@@ -515,20 +516,12 @@ async def generate_report(
         immutable_goals += f"（收敛判定：{goal_resolution}）"
 
     # ── 域标识（用于域专属事件采样）──
-    report_domain = ""
-    if states:
+    report_domain = str(domain or "").strip()
+    if not report_domain and states:
         try:
             first = next(iter(states.values()))
             report_domain = getattr(first, "domain", "")
         except (StopIteration, AttributeError):
-            pass
-    # 叙事模式从 entity_registry 回退
-    if not report_domain and entity_registry is not None:
-        try:
-            kept = entity_registry.get_kept()
-            if kept:
-                report_domain = getattr(kept[0], "domain", "") or ""
-        except Exception:
             pass
 
     # ── 统一弧线采样（head + conflict + tail + trend），量化/叙事双模式共用 ──

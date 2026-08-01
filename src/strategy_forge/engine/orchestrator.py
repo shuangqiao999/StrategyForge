@@ -251,6 +251,7 @@ class DeductionOrchestrator:
 
         # 2. 恢复规则包
         domain = (cfg.get("domain") or "").strip()
+        self._domain = domain if domain else "narrative"
         custom = cfg.get("custom_rules")
         if domain and domain != "narrative":
             from .rule_engine import RuleEngine
@@ -317,7 +318,7 @@ class DeductionOrchestrator:
                     preprocessor=getattr(self, "_preprocessor", None),
                     intel_list=getattr(self, "_intel_list", None) or None,
                     source_material=self.session.source_material,
-                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+                    domain=getattr(self, "_domain", "narrative"),
                     log_fn=self._log,
                 )
                 agents = await create_agents_from_graph(
@@ -325,7 +326,7 @@ class DeductionOrchestrator:
                     source_material=self.session.source_material,
                     log_fn=self._log,
                     preprocessor=self._preprocessor,
-                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+                    domain=getattr(self, "_domain", "narrative"),
                     entity_registry=entity_registry,
                 )
                 self._agents = agents
@@ -584,7 +585,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             intel_list=getattr(self, "_intel_list", None) or None,
             source_material=self.session.source_material,
-            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+            domain=getattr(self, "_domain", "narrative"),
             log_fn=self._log,
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
@@ -597,7 +598,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             pre_interventions=pre_goals if pre_goals else None,
             intel_list=getattr(self, "_intel_list", None) or None,
-            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
+            domain=getattr(self, "_domain", "narrative"),
             entity_registry=entity_registry,
         )
         self.session.agent_count = len(agents)
@@ -859,6 +860,7 @@ class DeductionOrchestrator:
             thresholds=self._rule_engine.pack.get("thresholds", {}) if self._rule_engine else None,
             goal_resolution=getattr(self, "_goal_resolution", ""),
             personality_log=getattr(self, "_personality_log", []),
+            domain=getattr(self, "_domain", "narrative"),
         )
         self.session.report = report
 
