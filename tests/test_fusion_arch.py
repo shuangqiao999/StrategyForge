@@ -263,6 +263,107 @@ class TestNoiseDefense:
         assert any("自身行动" in t for t in items), "self event must remain visible"
 
 
+class TestDefectRegression:
+    """H. 深度核查缺陷回归验证。"""
+
+    def test_pause_resume_fired_roundtrip(self):
+        """缺陷1：_event_trigger_fired JSON 往返后 restore 不崩溃。"""
+        import json
+        from strategy_forge.engine.simulator import SimulationEngine
+
+        eng = object.__new__(SimulationEngine)
+        eng._event_history = []
+        eng._narrative_env = {}
+        eng._agent_knowledge = {}
+        eng._intel_bonuses = {}
+        eng._personality_log = []
+        eng._character_journal = {}
+        eng._reflection_baselines = {}
+        eng._env_snapshots = {}
+        eng._last_reflection_round_n = {}
+        eng._last_round_outcomes = {}
+        eng._prev_rel_map = {}
+        eng.agents = []
+        eng._event_trigger_fired = {("e1", "员工大规模离职潮")}
+
+        saved = eng.get_state()
+        blob = json.dumps(saved)  # 模拟 SQLite 往返
+        restored = json.loads(blob)
+        eng2 = object.__new__(SimulationEngine)
+        eng2.agents = []
+        eng2.restore_state(restored)  # 不应抛异常
+        assert ("e1", "员工大规模离职潮") in eng2._event_trigger_fired
+
+    def test_dead_entity_not_settled(self):
+        """缺陷7：已出局实体不被事件冲击结算。"""
+        from strategy_forge.engine.simulator import SimulationEngine
+        from strategy_forge.engine.rule_engine import RuleEngine
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.models import EntityState
+
+        re = RuleEngine(get_template("business"))
+        full = {"market_share": 30, "cash_flow": 50, "brand": 50, "rnd": 50,
+                "morale": 50, "supply_chain": 5, "tech_lead": 50}
+        eng = object.__new__(SimulationEngine)
+        eng._quantified = True
+        eng._rule_engine = re
+        eng._states = {"e2": EntityState(id="e2", name="B公司", metrics=dict(full))}
+        eng._event_history = []
+        eng._log = lambda p, m: None
+        eng._injected_events_store = {"pending": [
+            {"event_type": "embargo", "content": "制裁", "target_id": "e2", "round": 1}]}
+        eng._apply_event_impacts(1)
+        assert eng._states["e2"].get_metric("supply_chain") == 5, \
+            "dead entity must not be settled"
+
+    def test_name_target_resolution(self):
+        """缺陷4：target_id 传实体名可解析到 id。"""
+        from strategy_forge.engine.simulator import SimulationEngine
+        from strategy_forge.engine.rule_engine import RuleEngine
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.models import EntityState
+
+        re = RuleEngine(get_template("business"))
+        full = {"market_share": 30, "cash_flow": 50, "brand": 50, "rnd": 50,
+                "morale": 50, "supply_chain": 50, "tech_lead": 50}
+        eng = object.__new__(SimulationEngine)
+        eng._quantified = True
+        eng._rule_engine = re
+        eng._states = {"e2": EntityState(id="e2", name="B公司", metrics=dict(full))}
+        eng._event_history = []
+        eng._log = lambda p, m: None
+        eng._injected_events_store = {"pending": [
+            {"event_type": "embargo", "content": "制裁", "target_id": "B公司", "round": 1}]}
+        eng.agents = [type("Ag", (), {"name": "B公司", "entity_id": "e2"})()]
+        eng._apply_event_impacts(1)
+        assert eng._states["e2"].get_metric("supply_chain") == 30, \
+            "name target_id must resolve to entity"
+
+    def test_custom_impact_applies(self):
+        """缺陷5：事件自带自定义 impact（未匹配规则包）应生效。"""
+        from strategy_forge.engine.simulator import SimulationEngine
+        from strategy_forge.engine.rule_engine import RuleEngine
+        from strategy_forge.core.rule_templates import get_template
+        from strategy_forge.engine.models import EntityState
+
+        re = RuleEngine(get_template("business"))
+        full = {"market_share": 30, "cash_flow": 50, "brand": 50, "rnd": 50,
+                "morale": 50, "supply_chain": 50, "tech_lead": 50}
+        eng = object.__new__(SimulationEngine)
+        eng._quantified = True
+        eng._rule_engine = re
+        eng._states = {"e1": EntityState(id="e1", name="A公司", metrics=dict(full))}
+        eng._event_history = []
+        eng._log = lambda p, m: None
+        eng._injected_events_store = {"pending": [
+            {"event_type": "custom_shock", "content": "自定义冲击",
+             "target_id": "e1", "impact": {"cash_flow": -15}, "round": 1}]}
+        eng.agents = [type("Ag", (), {"name": "A公司", "entity_id": "e1"})()]
+        eng._apply_event_impacts(1)
+        assert eng._states["e1"].get_metric("cash_flow") == 35, \
+            "custom impact must apply"
+
+
 class TestModeBoundary:
     """F. 模式边界：叙事模式不调用融合通道（边界不被模糊）。"""
 
@@ -293,7 +394,8 @@ if __name__ == "__main__":
     failed = 0
     total = 0
     for cls in (TestRuleEngineExt, TestChannel1, TestChannel2,
-                TestDispatchDedup, TestBlindspot4, TestNoiseDefense, TestModeBoundary):
+                TestDispatchDedup, TestBlindspot4, TestNoiseDefense,
+                TestDefectRegression, TestModeBoundary):
         for name in dir(cls):
             if not name.startswith("test_"):
                 continue

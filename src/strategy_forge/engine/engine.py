@@ -171,6 +171,8 @@ class DeductionEngine:
         if hasattr(self, '_round_snapshots'):
             self._round_snapshots.pop(session_id, None)
         self._fsm_overrides.pop(session_id, None)
+        # 修复B：清理外部注入事件队列，防会话删除后内存泄漏/残留生效
+        self._injected_events.pop(session_id, None)
 
     # ── 用户强制动作 override ──
     def get_fsm_override_store(self, session_id: str) -> dict[str, dict]:
@@ -204,6 +206,26 @@ class DeductionEngine:
         store = self.get_injected_events_store(session_id)
         store.setdefault("pending", []).append(dict(event))
         self.log(session_id, "intervene", f"注入系统事件: {event.get('event_type') or event.get('content')}")
+
+    def is_quantified_session(self, session_id: str) -> bool:
+        """判断会话是否量化模式（规则包驱动）。
+
+        量化模式 = domain 存在且非 narrative（auto 视为潜在量化，探测后回写具体域）。
+        用于 API 层决定 event_type 干预是否走数值冲击（修复A）。
+        """
+        try:
+            data = self.session_store.get(session_id)
+            if not data:
+                return False
+            cfg = data.get("config_json", {}) or {}
+            if isinstance(cfg, str):
+                import json as _json
+                cfg = _json.loads(cfg)
+            dom = str(cfg.get("domain") or "").strip()
+            # 缺陷3：auto 视为潜在量化（探测后会回写具体域），避免 event_type 干预被误降级
+            return dom not in ("", "narrative")
+        except Exception:
+            return False
 
     async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)

@@ -426,8 +426,12 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
             round_number=round_num,
             event_type="user_intervention", priority=1.0,
         )
-        # 融合架构·盲点4：可选结构化事件 → 走规则包 event_impact 通道①确定性冲击指标
-        if req.event_type:
+        # 融合架构·盲点4：可选结构化事件 → 走规则包 event_impact 通道①确定性冲击指标。
+        # 修复A：仅量化模式支持数值冲击；叙事模式忽略 event_type 并按文字提示处理，
+        # 避免"静默不生效"的误导（事件只作为决策提示，不冲击数值）。
+        quantified = engine.is_quantified_session(session_id)
+
+        if req.event_type and quantified:
             engine.inject_system_event(session_id, {
                 "event_type": req.event_type,
                 "content": req.content,
@@ -436,10 +440,18 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
             })
             engine.log(session_id, "intervene",
                        f"注入系统事件(数值冲击): {req.event_type} → {req.target_id or session_id}")
-        else:
-            engine.log(session_id, "intervene", f"用户干预: {req.content}")
+            return {"session_id": session_id, "injected": True, "round_number": round_num,
+                    "event_type": req.event_type, "mode": "quantified"}
+        if req.event_type and not quantified:
+            # 叙事模式：不注入数值冲击，仅作为文字提示（避免静默无效）
+            engine.log(session_id, "intervene",
+                       f"用户干预(叙事模式，event_type忽略): {req.content}")
+            return {"session_id": session_id, "injected": True, "round_number": round_num,
+                    "event_type": req.event_type, "mode": "narrative",
+                    "note": "叙事模式不支持数值冲击，已按文字提示注入"}
+        engine.log(session_id, "intervene", f"用户干预: {req.content}")
         return {"session_id": session_id, "injected": True, "round_number": round_num,
-                "event_type": req.event_type or "user_intervention"}
+                "event_type": "user_intervention", "mode": "narrative" if not quantified else "quantified"}
     except Exception as e:
         raise HTTPException(500, f"干预注入失败: {e}")
 

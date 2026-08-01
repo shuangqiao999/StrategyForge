@@ -680,8 +680,13 @@ class SimulationEngine:
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
                                   "opponents": list(v.get("opponents", []))}
                               for k, v in getattr(self, "_prev_rel_map", {}).items()},
-            # 融合架构：通道② 已触发的 (实体id, 事件名) 去重集合
-            "_event_trigger_fired": list(getattr(self, "_event_trigger_fired", set()) or set()),
+            # 融合架构：通道② 已触发的 (实体id, 事件名) 去重集合（list of list，JSON 可序列化）
+            "_event_trigger_fired": [
+                list(x) if isinstance(x, (tuple, list)) else [x]
+                for x in (getattr(self, "_event_trigger_fired", set()) or set())
+            ],
+            # 融合架构：已分发事件去重集合（缺陷6：纳入快照 + 有界）
+            "_dispatched_eids": list(getattr(self, "_dispatched_eids", set()) or set()),
             # 反思机制动态塑造的行为准则：暂停恢复后不丢失（P0#2）
             "_agent_extra_rules": {
                 a.entity_id: (a.system_prompt_extra or "")
@@ -703,9 +708,17 @@ class SimulationEngine:
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
-        # 融合架构：恢复通道②去重集合
+        # 融合架构：恢复通道②去重集合（兼容 JSON 往返：元素可能是 tuple 或 list）
         _fired = saved.get("_event_trigger_fired", [])
-        self._event_trigger_fired = set(_fired) if isinstance(_fired, list) else set()
+        self._event_trigger_fired = set()
+        for _x in (_fired if isinstance(_fired, list) else []):
+            if isinstance(_x, (tuple, list)) and len(_x) == 2:
+                self._event_trigger_fired.add((str(_x[0]), str(_x[1])))
+            elif _x is not None:
+                self._event_trigger_fired.add(str(_x))
+        # 融合架构：恢复已分发事件去重集合（缺陷6）
+        _dsp = saved.get("_dispatched_eids", [])
+        self._dispatched_eids = set(_dsp) if isinstance(_dsp, list) else set()
         # 恢复反思行为准则到 agent 对象（P0#2）
         extra_rules = saved.get("_agent_extra_rules", {}) or {}
         if extra_rules and getattr(self, "agents", None):
@@ -1115,17 +1128,27 @@ class SimulationEngine:
         # 融合架构·盲点4：消费外部注入的系统事件（注入为当前轮系统事件，随后走通道①）
         pending = self._injected_events_store.get("pending", []) if self._injected_events_store else []
         if pending:
+            # name→id 解析（修复缺陷4：target_id 传实体名时也能命中）
+            _name_to_id = {a.name: a.entity_id for a in getattr(self, "agents", [])}
             for _ev in pending:
+                _et = _ev.get("event_type", "")
+                _imp = impact_map.get(_et)
+                # 自定义 impact 优先（修复缺陷5）：事件自带 impact 且未匹配规则包时使用
+                if not _imp:
+                    _imp = _ev.get("impact") if isinstance(_ev.get("impact"), dict) else None
+                _tid = str(_ev.get("target_id", "") or "").strip()
+                if _tid and _tid not in self._states and _tid in _name_to_id:
+                    _tid = _name_to_id[_tid]
                 self._append_event({
-                    "agent": _ev.get("agent", "system"),
-                    "agent_name": _ev.get("agent_name", "系统"),
+                    "agent": "system",
+                    "agent_name": "系统",
                     "action": "system_injected",
-                    "content": _ev.get("content", _ev.get("event_type", "") or "外部事件"),
+                    "content": _ev.get("content", _et or "外部事件"),
                     "round": round_number,
-                    "event_type": _ev.get("event_type", ""),
-                    "target_id": _ev.get("target_id", ""),
+                    "event_type": _et,
+                    "target_id": _tid,
                     "is_system_event": True,
-                    "impact_map": _ev.get("impact") or {},
+                    "_injected_impact": _imp,
                 })
             self._injected_events_store["pending"] = []
 
@@ -1133,20 +1156,28 @@ class SimulationEngine:
             if evt.get("round") != round_number:
                 continue
             et = evt.get("event_type", "") or evt.get("action", "")
-            imp = impact_map.get(et)
+            # 注入事件可携带自定义 impact（缺陷5）；否则查规则包映射
+            imp = evt.get("_injected_impact") or impact_map.get(et)
             if not imp or not isinstance(imp, dict):
                 continue
             # 跳过 agent 主动行动：避免"行动结算 + 事件冲击"双重扣减
             if not evt.get("is_system_event") and et in action_set:
                 continue
             targets = set()
-            if evt.get("agent"):
-                targets.add(evt["agent"])
-            if evt.get("target_id"):
-                targets.add(evt["target_id"])
+            if evt.get("is_system_event") and not evt.get("target_id"):
+                # 无目标指定 → 系统级事件作用于全部存活实体（修复缺陷4）
+                targets.update(eid for eid in self._states)
+            else:
+                if evt.get("agent") and evt.get("agent") in self._states:
+                    targets.add(evt["agent"])
+                if evt.get("target_id") and evt["target_id"] in self._states:
+                    targets.add(evt["target_id"])
             for eid in targets:
                 st = self._states.get(eid)
                 if st is None:
+                    continue
+                # 修复缺陷7：不结算已出局实体（避免污染死后历史）
+                if self._rule_engine is not None and not self._rule_engine.is_alive(st):
                     continue
                 st.apply_deltas({k: float(v) for k, v in imp.items()},
                                 round_number, ranges)
@@ -1204,6 +1235,20 @@ class SimulationEngine:
                             event_type=f"system_{name}", priority=0.9)
                     except Exception as _e:
                         logger.debug("[Simulator] 系统事件写入 LanceDB 失败: %s", _e)
+                # 系统事件写入 Kuzu Event 节点 + ACTED 边（缺陷2 修复）：
+                # 使系统事件在报告时间线/因果视图与暂停恢复中可见，而非仅存内存/向量库。
+                if self._persist_events and getattr(self, "graph", None) is not None:
+                    try:
+                        from datetime import datetime as _dt
+                        _eid = f"evt-{uuid.uuid4().hex[:8]}"
+                        _ts = _dt.now().isoformat()
+                        self.graph.add_event(_eid, content[:200], f"system_{name}",
+                                             _ts, st.id, round_number=round_number,
+                                             effect=", ".join(f"{k}{v:+.0f}" for k, v in (imp or {}).items()),
+                                             driver="system")
+                        self.graph.add_acted(st.id, _eid, f"system_{name}", _ts)
+                    except Exception as _e:
+                        logger.debug("[Simulator] 系统事件写入 Kuzu 失败: %s", _e)
                 generated += 1
         return generated
 
@@ -2289,6 +2334,10 @@ class SimulationEngine:
                     self._agent_knowledge[a_id] = queue[-500:]
             # 事件分发完成，标记去重（缺陷3 修复）
             dispatched.add(_eid)
+        # 缺陷6：有界化去重集合——只保留最近 ~400 条，防止长期推演内存无界膨胀
+        if len(dispatched) > 400:
+            for _old in list(dispatched)[: len(dispatched) - 400]:
+                dispatched.discard(_old)
 
     def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
         """交付该 agent 的已熟事件（deliver_round <= 当前轮），从队列中移除。"""
@@ -2348,6 +2397,9 @@ class SimulationEngine:
                         if a.entity_id in states and re_engine.is_alive(states[a.entity_id])]
         alive_ids = [a.entity_id for a in alive_agents]
         if not alive_agents:
+            # 缺陷8：全灭后无实体可结算，清空待处理注入事件，避免滞留内存
+            if getattr(self, "_injected_events_store", None):
+                self._injected_events_store["pending"] = []
             return sim_round
 
         # 融合架构·通道①：本轮高优先级事件冲击相关实体指标（在决策前结算）

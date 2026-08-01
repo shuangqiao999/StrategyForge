@@ -448,6 +448,19 @@ class DeductionOrchestrator:
                     return
                 self._rule_engine = RuleEngine.from_domain(detected)
                 self._log("quantify", f"识别领域: {self._rule_engine.pack.get('display_name', detected)}")
+                # 缺陷3 修复：将探测结果回写 config，保证 is_quantified_session /
+                # 暂停恢复 与规则包一致（否则 auto 会话恢复时 from_domain("auto") 抛异常回退叙事）
+                self._domain = detected
+                try:
+                    _data = self.store.get(self.session.id) or {}
+                    _cfg = (_data.get("config_json", {}) or {})
+                    if isinstance(_cfg, str):
+                        _cfg = _json.loads(_cfg)
+                    _cfg["domain"] = detected
+                    self.store.update(self.session.id,
+                                      config_json=_json.dumps(_cfg, ensure_ascii=False))
+                except Exception as _e:
+                    logger.warning("[Orchestrator] 回写探测领域失败: %s", _e)
             else:
                 self._rule_engine = RuleEngine.from_domain(domain)
                 self._log("quantify", f"阶段1.5: 使用领域规则包: {self._rule_engine.pack.get('display_name', domain)}")
