@@ -159,16 +159,25 @@ def extract_named_entities(
         # 寻找同现别名: 2-3 字, 与该实体有公共字符, 相同 POS 标签
         aliases: set[str] = {entity}
         entity_chars = set(entity)
+        e_latin = bool(re.search(r'[A-Za-z]', entity))
         for other, flag in tagged:
             if other != entity and len(other) >= 2:
                 other_chars = set(other)
                 shared = entity_chars & other_chars
+                o_latin = bool(re.search(r'[A-Za-z]', other))
+                # 双语映射: 一个含拉丁字符，一个纯中文（OPEC ↔ 欧佩克）
+                if e_latin != o_latin and len(entity) >= 2 and len(other) >= 2:
+                    aliases.add(other)
+                    continue
                 if shared and len(shared) >= 1 and len(entity) >= 3:
                     if len(other) == 2 and entity.endswith(other):
                         aliases.add(other)
                     elif len(other) == 3 and len(entity) == 3:
                         if shared == entity_chars or shared == other_chars:
                             aliases.add(other)
+                    # 前缀缩写: 长实体以短实体开头且短实体是独立完整词
+                    elif len(other) < len(entity) and entity.startswith(other) and len(other) >= 2:
+                        aliases.add(other)
         entity_map[entity] = aliases
 
     return entity_map

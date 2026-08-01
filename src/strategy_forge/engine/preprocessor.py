@@ -120,7 +120,7 @@ class DeductionPreprocessor:
             try:
                 return self._db.open_table(name)
             except Exception as e2:
-                logger.warning("[Preprocessor] open '%s' 也失败 (%s)，覆盖重建", name, e2)
+                logger.error("[Preprocessor] open '%s' 也失败 (%s)，覆盖重建 — 旧表数据将不可逆丢失!", name, e2)
                 return self._db.create_table(name, schema=schema, mode="overwrite")
 
     def _ensure_table(self, dim: int) -> None:
@@ -240,7 +240,8 @@ class DeductionPreprocessor:
                 except Exception as e3:
                     logger.error("[Preprocessor] event add failed (all schemas): %s — event data lost", e3)
         # 事件表已变更，标记 FTS 索引需在下次检索前重建（每轮至多一次）
-        self._event_fts_dirty = True
+        with self._cache_lock:
+            self._event_fts_dirty = True
 
     def retrieve_latest_intervention(self) -> dict | None:
         """检索最近的用户干预或不可变目标指令。
@@ -266,21 +267,25 @@ class DeductionPreprocessor:
             return self._intervention_scan()
 
     def _intervention_scan(self) -> dict | None:
-        """回退路径：全表扫描筛选干预/目标（旧实现，兼容不支持 where 的环境）。"""
+        """回退路径：分页扫描筛选干预/目标（限制加载行数，避免整表内存爆炸）。"""
         try:
-            raw = self._event_table.to_arrow().to_pydict()
-            has_priority = "priority" in raw
-            has_etype = "event_type" in raw
+            _CAP = 5000
+            rows = self._event_table.to_arrow().to_pydict()
+            has_priority = "priority" in rows
+            has_etype = "event_type" in rows
             interventions = []
-            for i in range(len(raw["event_id"])):
-                p = raw.get("priority", [0])[i] if has_priority else 0
-                et = raw.get("event_type", [""])[i] if has_etype else ""
+            n = len(rows.get("event_id", []))
+            for i in range(n):
+                p = rows.get("priority", [0])[i] if has_priority else 0
+                et = rows.get("event_type", [""])[i] if has_etype else ""
                 if p >= 0.9 or et in ("user_intervention", "immutable_goal"):
                     interventions.append({
-                        "content": raw["content"][i],
-                        "round_number": raw["round_number"][i],
+                        "content": rows["content"][i],
+                        "round_number": rows["round_number"][i],
                         "priority": p,
                     })
+                    if len(interventions) >= _CAP:
+                        break
             if interventions:
                 interventions.sort(key=lambda x: (-x["priority"], -x.get("round_number", 0)))
                 return interventions[0]
@@ -298,15 +303,19 @@ class DeductionPreprocessor:
         """
         if self._event_table is None:
             return
-        if self._event_fts_ready and not self._event_fts_dirty:
+        with self._cache_lock:
+            _dirty = self._event_fts_dirty
+        if self._event_fts_ready and not _dirty:
             return
         try:
             self._event_table.create_fts_index("content", replace=True)
-            self._event_fts_ready = True
-            self._event_fts_dirty = False
+            with self._cache_lock:
+                self._event_fts_ready = True
+                self._event_fts_dirty = False
             logger.debug("[Preprocessor] Rebuilt event FTS index (hybrid enabled)")
         except Exception as e:
-            self._event_fts_ready = False
+            with self._cache_lock:
+                self._event_fts_ready = False
             logger.debug("[Preprocessor] event FTS skipped (vector-only): %s", e)
 
     def retrieve_dynamic_events(
@@ -456,10 +465,19 @@ class DeductionPreprocessor:
         entity_freq: dict[str, int] = {}
         entity_chunk_cov: dict[str, int] = {}
         for std_name, aliases in all_entities.items():
-            count = len(re.findall(re.escape(std_name), source))
+            # 单字实体加词边界（避免 "中" 匹配 "中心/其中/中国"）；多字实体直接子串计数
+            if len(std_name) == 1 and re.match(r'[\u4e00-\u9fff]', std_name):
+                pat = re.compile(r'(?<![\u4e00-\u9fff])' + re.escape(std_name) + r'(?![\u4e00-\u9fff])')
+                count = len(pat.findall(source))
+            else:
+                count = len(re.findall(re.escape(std_name), source))
             for alias in aliases:
                 if alias != std_name and alias not in std_name:
-                    count += len(re.findall(re.escape(alias), source))
+                    if len(alias) == 1 and re.match(r'[\u4e00-\u9fff]', alias):
+                        apat = re.compile(r'(?<![\u4e00-\u9fff])' + re.escape(alias) + r'(?![\u4e00-\u9fff])')
+                        count += len(apat.findall(source))
+                    else:
+                        count += len(re.findall(re.escape(alias), source))
             entity_freq[std_name] = count
             entity_chunk_cov[std_name] = sum(
                 1 for ct in chunk_texts

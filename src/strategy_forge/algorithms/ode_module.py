@@ -153,7 +153,7 @@ _ODE_DEPS: dict[str, list[str]] = {
     "supply_consumption": ["strength"],
     "pollution_spread": ["factory_output", "green_coverage"],
     "resource_depletion": ["population"],
-    "cash_flow_dynamics": ["supply_chain", "tech_lead"],
+    "cash_flow_dynamics": ["supply_chain", "tech_lead", "rnd"],
 }
 
 

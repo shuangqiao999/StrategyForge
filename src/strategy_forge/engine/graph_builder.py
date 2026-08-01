@@ -99,9 +99,29 @@ async def build_graph(
     if preprocessor and preprocessor.result:
         result = preprocessor.result
         log_fn("graph", f"全量语义分块抽取: {len(result.chunks)} 个语义块")
+        # 注入预处理器高频实体作为候选白名单，引导 LLM 图谱构建
+        candidate_entities = ""
+        alias_map_str = "{}"
+        try:
+            hi_freq = getattr(result, "high_freq_entities", {}) or {}
+            lo_freq = getattr(result, "low_freq_entities", {}) or {}
+            cand_names = sorted(set(list(hi_freq.keys()) + list(lo_freq.keys())))
+            if cand_names:
+                candidate_entities = "\n".join(cand_names[:200])
+            # 别名映射: {标准名: 别名集合}
+            alias_map: dict[str, list[str]] = {}
+            for std, aliases in {**hi_freq, **lo_freq}.items():
+                a = [x for x in aliases if x != std]
+                if a:
+                    alias_map[std] = a[:20]
+            if alias_map:
+                alias_map_str = json.dumps(alias_map, ensure_ascii=False)
+        except Exception as e:
+            logger.warning("[Graph] 候选实体构建失败，使用无限制: %s", e)
         await _extract_from_chunks(
             client=client, chunks=result.chunks, graph=graph, log_fn=log_fn,
             entity_types=entity_type_names, relation_types=relation_type_names,
+            candidate_entities=candidate_entities, alias_map=alias_map_str,
         )
     else:
         # ── 回退模式: 全量语义分块 (无预处理器时) ──
@@ -120,6 +140,7 @@ async def build_graph(
 async def _extract_from_chunks(
     client, chunks, graph, log_fn,
     entity_types, relation_types,
+    candidate_entities: str = "", alias_map: str = "",
 ) -> None:
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
@@ -132,22 +153,31 @@ async def _extract_from_chunks(
     _raw = "\n\n---\n\n".join(texts[i][:600] for i in [0, _n//4, _n//2, 3*_n//4, _n-1] if 0 <= i < _n)
     _overview = _raw[:1500] if _raw.strip() else "(无概览)"
 
+    if not candidate_entities:
+        candidate_entities = "(无限制)"
+        entity_constraint = "提取实体时优先使用语义合理名称；可根据文本语义自行命名实体。"
+    else:
+        entity_constraint = "实体名必须来自上述候选白名单，禁止新增白名单外实体。"
+    if not alias_map:
+        alias_map = "{}"
+
     _chunk_base = Template(_EXTRACT_PROMPT).substitute(
         text="__TEXT__",
         text_overview=_overview,
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
-        candidate_entities="(无限制)",
-        entity_constraint="提取实体时优先使用上述白名单中的标准名；若白名单为空，可根据文本语义自行命名实体。",
-        alias_map="{}",
+        candidate_entities=candidate_entities,
+        entity_constraint=entity_constraint,
+        alias_map=alias_map,
     )
 
     # 并发抽取（上限由全局 Semaphore 控制），随后按原顺序写库
 
     async def _chunk_call(text: str) -> str | None:
         try:
+            chunk_limit = max(5000, config.deduction_chunk_size * 2)
             resp = await client.chat_json(
-                [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
+                [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:chunk_limit]))],
                 system=system, schema_name="graph_extract", temperature=0)
             return _extract_text(resp)
         except LLMConnectionError:
@@ -167,6 +197,18 @@ async def _extract_from_chunks(
         except Exception as e:
             logger.warning("[Graph] Chunk %d parse failed: %s", i, e)
             continue
+        # 质量预检: 过滤空名/纯标点/垃圾类型
+        valid_entities = []
+        for ent in entities:
+            nm = (ent.get("entity") or "").strip()
+            ett = (ent.get("type") or "").strip()
+            if not nm or len(nm) < 1 or re.fullmatch(r'[\s\W_]+', nm):
+                continue
+            if ett == "_UNKNOWN" or not ett:
+                ett = "_UNKNOWN"
+            ent["type"] = ett
+            valid_entities.append(ent)
+        entities = valid_entities
         for ent in entities:
             ett = ent.get("type", "")
             ent_id = _make_id(ent.get("entity", ""), ett)
@@ -176,6 +218,8 @@ async def _extract_from_chunks(
         for rel in relations:
             st = name_to_type.get(rel.get("source", ""), "")
             tt = name_to_type.get(rel.get("target", ""), "")
+            if not st or not tt:
+                continue
             sid = _make_id(rel.get("source", ""), st)
             tid = _make_id(rel.get("target", ""), tt)
             graph.upsert_relation(sid, tid, rel.get("relation", ""),
@@ -222,4 +266,4 @@ def _parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, An
 def _make_id(name: str, etype: str) -> str:
     import hashlib
     raw = f"{name}:{etype}".encode()
-    return hashlib.md5(raw).hexdigest()[:12]
+    return hashlib.sha256(raw).hexdigest()[:16]

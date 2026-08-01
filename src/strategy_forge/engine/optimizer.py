@@ -291,7 +291,7 @@ class StrategyOptimizer:
         )
 
         # ── 4. 推荐方案"代表性 run"：persist=True 生成叙事报告 + 点亮时间线/因果页 ──
-        if not cancelled and rule_engine is not None and base_states and report.get("recommended"):
+        if not cancelled and report.get("recommended"):
             try:
                 import json
                 rec_name = report["recommended"]["name"]
@@ -304,7 +304,8 @@ class StrategyOptimizer:
                         log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[rec_sc["directive"]] if rec_sc.get("directive") else [],
                         seed=20240101, temperature=0.6, persist_events=True, max_concurrent=None,
-                        rule_engine=rule_engine, states=rep_states, enable_narrate=False,
+                        rule_engine=rule_engine, states=rep_states or None,
+                        enable_narrate=(rule_engine is None),
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
                         env=opt_env, domain=domain, cancel_event=cancel_event,
                     )
@@ -321,13 +322,13 @@ class StrategyOptimizer:
                         "key_events": rep.key_events,
                         "risk_alerts": rep.risk_alerts,
                         "recommendations": rep.recommendations,
-                        "quantified": True,
-                        "domain": rule_engine.domain,
+                        "quantified": rule_engine is not None,
+                        "domain": (rule_engine.domain if rule_engine is not None else domain),
                         "optimized_scenario": rec_name,
                         "final_states": {
                             eid: {"name": st.name, "metrics": st.metrics,
                                   "history": st.history[-60:],
-                                  "alive": rule_engine.is_alive(st)}
+                                  "alive": rule_engine.is_alive(st) if rule_engine is not None else True}
                             for eid, st in rep_states.items()
                         },
                     }
