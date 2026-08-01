@@ -292,6 +292,7 @@ class SimulationEngine:
         self._domain = domain
         self._reflection_thresholds = self._load_reflection_config(domain)
         self._merged_triggers = self._merge_domain_triggers(domain)
+        self._severity_map = self._load_severity_map(domain)
 
     def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
         """根据域类型初始化不同的叙事环境变量。"""
@@ -387,6 +388,31 @@ class SimulationEngine:
         except Exception:
             pass
         return merged
+
+    def _load_severity_map(self, domain: str) -> dict[str, set[str]]:
+        """加载域专属严重度映射，一次读取缓存（避免热路径反复解析 YAML）。"""
+        sev_map = {}
+        try:
+            from pathlib import Path
+            import yaml
+            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                all_map = data.get("_severity_mapping", {}) or {}
+                domain_sev = all_map.get(domain, all_map.get("default", {}))
+                sev_map["heavy"] = set(domain_sev.get("heavy", []))
+                sev_map["medium"] = set(domain_sev.get("medium", []))
+                sev_map["light"] = set(domain_sev.get("light", []))
+        except Exception:
+            pass
+        if not sev_map:
+            sev_map = {
+                "heavy": {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"},
+                "medium": {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"},
+                "light": {"意外转折", "联盟变动", "意外成功"},
+            }
+        return sev_map
 
     def _get_reflection_threshold(self, key: str, default: int | float) -> int | float:
         """从 methodology 读取域专属反思阈值，无配置回退默认。"""
@@ -718,28 +744,16 @@ class SimulationEngine:
 
     def _get_severity(self, category: str) -> int:
         """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。
-        优先使用 domain-specific severity mapping，无配置回退通用默认。
+        优先使用 __init__ 缓存的 domain-specific severity mapping，无匹配回退通用默认。
         """
-        try:
-            from pathlib import Path
-            import yaml
-            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                sev_map = data.get("_severity_mapping", {}) or {}
-                domain_sev = sev_map.get(self._domain, sev_map.get("default", {}))
-                heavy = set(domain_sev.get("heavy", []))
-                medium = set(domain_sev.get("medium", []))
-                light = set(domain_sev.get("light", []))
-                if category in heavy:
-                    return 3
-                if category in medium:
-                    return 2
-                if category in light:
-                    return 1
-        except Exception:
-            pass
+        sm = getattr(self, "_severity_map", None)
+        if sm:
+            if category in sm.get("heavy", set()):
+                return 3
+            if category in sm.get("medium", set()):
+                return 2
+            if category in sm.get("light", set()):
+                return 1
         # 通用默认回退
         _heavy = {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"}
         _medium = {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"}

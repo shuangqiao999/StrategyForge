@@ -346,7 +346,8 @@ class StrategicReasoner:
                 score += 0.1
             # User intervention bonus: match actual intervention keywords
             if intervention_text:
-                keywords = [w for w in intervention_text[:40].split() if len(w) >= 2]
+                keywords = [w for w in re.findall(r"[\u4e00-\u9fff]{2,4}|[A-Za-z]{3,}", intervention_text[:40])
+                            if len(w) >= 2]
                 if any(kw in c.get("content", "") or kw in c.get("rationale", "")
                        for kw in keywords):
                     score += 0.5

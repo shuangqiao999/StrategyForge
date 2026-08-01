@@ -369,10 +369,10 @@ class StrategyOptimizer:
             return SimulationOutcome(False, 0.0, 1.0, "无量化实体")
         alive = sum(1 for st in states.values() if rule_engine.is_alive(st))
         n = len(states)
-        win_score = round(alive / n, 4)
+        survival = alive / n
         # 使用规则包 elimination.weights 做加权平均，无 weights 时回退等权
         weights = rule_engine.pack.get("elimination", {}).get("weights", {})
-        metric_list = getattr(rule_engine, "_metrics", []) or rule_engine.metrics()
+        metric_list = rule_engine.metrics()
         if not weights:
             weights = {m: 1.0 / len(metric_list) for m in metric_list} if metric_list else {}
         total_weighted = 0.0
@@ -383,6 +383,8 @@ class StrategyOptimizer:
                 total_weighted += val * w
                 total_weight += w
         avg_weighted = (total_weighted / max(1, total_weight)) / 100.0 if total_weight > 0 else 0.0
+        # win_score = 存活率 + 加权健康度 综合（避免"濒死但存活"与"满血"得分相同）
+        win_score = round(survival * 0.3 + avg_weighted * 0.7, 4)
         cost = round(1.0 - avg_weighted, 4)
         return SimulationOutcome(success=win_score >= 0.5, win_score=win_score,
                                  cost=cost, rationale=f"存活 {alive}/{n}，加权健康度 {avg_weighted:.0%}")

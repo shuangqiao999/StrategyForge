@@ -108,6 +108,8 @@ _SECRET_ACTION_KW = (
     "秘密", "私下", "暗中", "潜入", "密谈", "密会", "窃听", "卧底",
     "间谍", "情报交易", "情报渗透", "秘密录音", "线人", "匿名",
     "内部清洗", "逃亡计划",
+    "secret", "covert", "clandestine", "undercover", "surveillance",
+    "backchannel", "wiretap", "spy", "whisper", "infiltrate",
 )
 
 
