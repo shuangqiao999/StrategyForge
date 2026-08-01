@@ -293,25 +293,6 @@ class SimulationEngine:
         self._reflection_thresholds = self._load_reflection_config(domain)
         self._merged_triggers = self._merge_domain_triggers(domain)
         self._severity_map = self._load_severity_map(domain)
-
-    def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
-        """根据域类型初始化不同的叙事环境变量。"""
-        business_domains = {"business", "business_narrative"}
-        if domain in business_domains:
-            return {
-                "市场竞争烈度": 60.0,  # 0=垄断 50=充分竞争 100=恶性价格战
-                "资本流动性": 50.0,    # 0=枯竭 50=正常 100=过热
-                "技术壁垒高度": 40.0,  # 0=无壁垒 50=中等壁垒 100=极高壁垒
-                "监管压力": 30.0,      # 0=宽松 50=适度 100=高压
-                "消费者信心": 55.0,    # 0=恐慌 50=中性 100=狂热
-            }
-        return {
-            "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
-            "抗议规模": 0.0,     # 0=无 50=局部 100=全城
-            "媒体关注": 20.0,    # 0=无人 50=全国 100=全球
-            "国际压力": 10.0,    # 0=无视 50=关注 100=干预
-            "社会分裂": 30.0,    # 0=团结 50=分歧 100=对立
-        }
         self._spatial_state = None   # cached SpatialState, updated after each module run
         from strategy_forge.core.config import config
         from strategy_forge.core.providers import registry as _reg
@@ -350,6 +331,25 @@ class SimulationEngine:
 
         # ── B. 补全：无图谱关系的 agent 用 polarization 自动划分敌友 ──
         self._seed_polarization_relations(seeded)
+
+    def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
+        """根据域类型初始化不同的叙事环境变量。"""
+        business_domains = {"business", "business_narrative"}
+        if domain in business_domains:
+            return {
+                "市场竞争烈度": 60.0,  # 0=垄断 50=充分竞争 100=恶性价格战
+                "资本流动性": 50.0,    # 0=枯竭 50=正常 100=过热
+                "技术壁垒高度": 40.0,  # 0=无壁垒 50=中等壁垒 100=极高壁垒
+                "监管压力": 30.0,      # 0=宽松 50=适度 100=高压
+                "消费者信心": 55.0,    # 0=恐慌 50=中性 100=狂热
+            }
+        return {
+            "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
+            "抗议规模": 0.0,     # 0=无 50=局部 100=全城
+            "媒体关注": 20.0,    # 0=无人 50=全国 100=全球
+            "国际压力": 10.0,    # 0=无视 50=关注 100=干预
+            "社会分裂": 30.0,    # 0=团结 50=分歧 100=对立
+        }
 
     def _load_reflection_config(self, domain: str) -> dict:
         """从 methodology.yaml 加载域专属反思配置。"""
