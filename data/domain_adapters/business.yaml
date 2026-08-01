@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 商业经济 (business)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: business
@@ -57,6 +57,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -275,6 +278,14 @@ prompts:
     - 子公司-母公司重叠 → 降级子公司
     - 供应商-客户重叠 → 若供应商独立服务多客户→保留；若独家依附→降级
   l3_downgrade_rules: tier2
+  agent_domain_role: 企业或行业参与者。关注市场份额、供应链安全、技术创新、融资能力、监管合规。
+  intel_extra_rules: |-
+    商业领域实体分类：
+    - 归属判断：集团/母公司→自身决策权；子公司/部门/产品线→权力来自母公司，归入；CEO/创始人→归入所领导的企业
+    - 冗余检测：某品牌→若所属集团已保留则排除；合资企业→若合资双方均已保留则排除
+    - 活性检验：是否投资/收购/发布产品/被制裁/发起诉讼？
+    - 核心原则：有独立财务和战略决策权的企业为基本单位。行业报告、经济指标、股价指数为非实体
+  strategic_context: 作为商业决策者，你的行动影响股价、市场地位和行业格局。
 aliases:
   _org_members:
     欧盟: *id001
@@ -359,3 +370,20 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 市场份额下滑
+  - 反垄断
+  - 裁员
+  - 亏损
+  - 数据泄露
+  - 被调查
+  - 收购
+  report_trend_kw:
+  - 投资
+  - 融资
+  - 新品发布
+  - 扩产
+  - 签约
+  - 上市
+  - 研发

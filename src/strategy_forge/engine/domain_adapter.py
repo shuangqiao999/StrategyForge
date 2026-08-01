@@ -121,6 +121,9 @@ class Prompts:
     l3_system_prompt: str = ""
     l3_redundancy_rules: str = ""
     l3_downgrade_rules: str = ""
+    agent_domain_role: str = ""
+    intel_extra_rules: str = ""
+    strategic_context: str = ""
 
 
 @dataclass
@@ -313,6 +316,9 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
         l3_system_prompt=str(raw_prompts.get("l3_system_prompt", "")),
         l3_redundancy_rules=str(raw_prompts.get("l3_redundancy_rules", "")),
         l3_downgrade_rules=str(raw_prompts.get("l3_downgrade_rules", "")),
+        agent_domain_role=str(raw_prompts.get("agent_domain_role", "")),
+        intel_extra_rules=str(raw_prompts.get("intel_extra_rules", "")),
+        strategic_context=str(raw_prompts.get("strategic_context", "")),
     )
 
     # 解析别名

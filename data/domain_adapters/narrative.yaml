@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 叙事/故事 (narrative)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: narrative
@@ -51,6 +51,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 3
+    generic_freq_tier2: 5
 base_type_mapping:
   Agent:
   - Organization
@@ -262,6 +265,14 @@ prompts:
     - 反派-外部威胁 → 不降级——只要原文有具体行动/动机/决策描写
     - 保守原则：文学叙事宁可多留角色，不可合并关键叙事主体。5-10个角色是合理下限
   l3_downgrade_rules: tier1（文学叙事保守保留）
+  agent_domain_role: 故事角色或叙事主体。拥有独立的欲望、恐惧、人际关系和性格弧线。
+  intel_extra_rules: |-
+    叙事/故事领域实体分类：
+    - 归属判断：每个有独立行动+对话+心理描写的角色→自身决策权；国家/组织→背景，除非被拟人化描写
+    - 冗余检测：组织与其领导人→若领导人贯穿全文且组织仅作背景→降级组织；若两者都深度参与→均保留
+    - 活性检验：是否有独立行动/对话/决策/内心独白？
+    - 核心原则：有独立叙事弧线的角色为基本博弈单位。场景/物品/背景国家为非实体
+  strategic_context: 作为故事中的角色，你的选择推动情节发展并影响其他角色的命运。
 aliases:
   _org_members:
     欧盟: *id001
@@ -280,3 +291,20 @@ aliases:
   _force_keep: []
   entity_aliases: {}
   _strategic_regions: []
+methodology:
+  report_conflict_kw:
+  - 背叛
+  - 死亡
+  - 决裂
+  - 复仇
+  - 决斗
+  - 阴谋
+  - 揭露
+  report_trend_kw:
+  - 重逢
+  - 成长
+  - 决意
+  - 羁绊
+  - 试探
+  - 结盟
+  - 和解

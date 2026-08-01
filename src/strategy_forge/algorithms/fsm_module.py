@@ -135,8 +135,7 @@ class FiniteStateMachineModule(AlgorithmModule):
 
         return ctx
 
-    @staticmethod
-    def _match_condition(ctx: ModuleContext, idx: int, condition: dict) -> bool:
+    def _match_condition(self, ctx: ModuleContext, idx: int, condition: dict) -> bool:
         """Check if entity idx satisfies all condition thresholds.
         
         Supports virtual spatial metrics:
@@ -148,9 +147,9 @@ class FiniteStateMachineModule(AlgorithmModule):
             # opponent.<metric>：读取最强对手的指标值
             if metric.startswith("opponent."):
                 real_metric = metric[len("opponent."):]
-                val = FiniteStateMachineModule._resolve_opponent_metric(ctx, idx, real_metric)
+                val = self._resolve_opponent_metric(ctx, idx, real_metric)
             else:
-                val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
+                val = self._resolve_metric(ctx, idx, metric)
             if val is None:
                 return False
             if op == "<" and not (val < float(threshold)):
@@ -165,8 +164,7 @@ class FiniteStateMachineModule(AlgorithmModule):
                 return False
         return True
 
-    @staticmethod
-    def _resolve_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
+    def _resolve_metric(self, ctx: ModuleContext, idx: int, metric: str) -> float | None:
         """Resolve a metric value: real arrays first, then virtual spatial metrics."""
         # Real metric from arrays
         if metric in ctx.arrays:
@@ -212,8 +210,7 @@ class FiniteStateMachineModule(AlgorithmModule):
                     min_dist = d
             return min_dist if min_dist < float("inf") else None
 
-    @staticmethod
-    def _resolve_opponent_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
+    def _resolve_opponent_metric(self, ctx: ModuleContext, idx: int, metric: str) -> float | None:
         """读取最强对手的指标值。从 enemy_ids 中找到距离最近的敌人，读取其 metric。"""
         sp = ctx.spatial
         n = len(sp.positions)
@@ -224,8 +221,9 @@ class FiniteStateMachineModule(AlgorithmModule):
             polar = ctx.arrays.get("polarization")
             if polar is not None and len(polar) == n:
                 own_pol = float(polar[idx])
+                pt = getattr(self, "_polar_threshold", 3.0)
                 enemy_ids = [j for j in range(n) if j != idx and
-                            (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0)]
+                            (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > pt)]
             else:
                 enemy_ids = [j for j in range(n) if j != idx]
         if not enemy_ids:

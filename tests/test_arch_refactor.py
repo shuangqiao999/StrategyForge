@@ -27,7 +27,7 @@ registry._data["max_concurrent"] = "2"
 
 from strategy_forge.engine.models import DeductionSession
 from strategy_forge.engine.orchestrator import DeductionOrchestrator
-from strategy_forge.engine.entity_registry import build_registry, _classify_one
+from strategy_forge.engine.domain_adapter import load_adapter
 from strategy_forge.storage.graph_store import DeductionGraphStore
 from strategy_forge.storage.session_store import SessionStore
 
@@ -35,42 +35,33 @@ SOURCE = r"E:\gongxiang\软件\资本论\大国博弈.txt"
 
 
 def test_classification_logic():
-    """离线测试：验证代码规则的分类逻辑。不调用 LLM。"""
+    """离线测试：验证 DomainAdapter 基础类型映射与 tier 硬约束。不调用 LLM。"""
+    from strategy_forge.engine.semantic_mediator import map_to_base_type, get_min_tier
     print("=" * 60)
-    print("  单元测试：_classify_one 分类逻辑")
+    print("  单元测试：SemanticMediator 基础类型映射 + tier 硬约束")
     print("=" * 60)
+    adapter = load_adapter("geo_strategy")
     tests = [
-        # (name, type, freq, total, expected_keep)
-        ("普京", "Person", 5, 100, True),
-        ("特朗普", "Person", 4, 100, True),
-        ("吕特", "Person", 3, 100, True),
-        ("赖清德", "Person", 3, 100, True),
-        ("某个小角色", "Person", 1, 100, False),  # freq < threshold(2)
-        ("白宫", "政府部门", 20, 100, False),      # 政府部门排除
-        ("财政部", "Organization", 15, 100, False), # 政府部门排除
-        ("北约", "Organization", 8, 100, True),     # freq >= 4
-        ("联合国", "Organization", 5, 100, True),  # freq=5 < 4? No, 5 >= 4 → True. Wait, 100/50=2, threshold*2=4
-        ("中美关系", "Other", 20, 100, False),      # 二元关系词
-        ("西方阵营", "Other", 10, 100, False),      # 集合概念
-        ("太平洋舰队", "军队编制", 8, 100, False),  # 军队编制
-        ("总统", "Person", 50, 100, False),         # 职务头衔
-        ("美国", "Country", 30, 100, True),         # freq >= 10
-        ("南海", "Location", 15, 100, False),       # 类型排除
-        ("俄乌", "Other", 20, 100, False),          # 二元关系词
-        ("哈尔科夫", "Location", 5, 100, False),    # 类型排除
+        # (type, expected_base, expected_min_tier)
+        ("国家", "Agent", 1),
+        ("企业", "Agent", 1),
+        ("人物", "Subordinate", 2),
+        ("地理区域", "Geography", 3),
+        ("条约", "Contract", 3),
+        ("事件", "Event", 3),
+        ("政策", "Concept", 3),
     ]
-    threshold = max(1, 100 // 50)
-    print(f"  threshold={threshold} (total=100)")
     correct = 0
     wrong = []
-    for name, etype, freq, total, expected in tests:
-        keep, reason = _classify_one(name, etype, freq, total)
-        status = "OK" if keep == expected else "FAIL"
-        if keep == expected:
+    for etype, exp_base, exp_tier in tests:
+        bt = map_to_base_type(etype, adapter)
+        mt = get_min_tier(bt, adapter) if bt != "Unknown" else 3
+        ok = bt == exp_base and mt == exp_tier
+        if ok:
             correct += 1
         else:
-            wrong.append(f"  {status} {name:12s} {etype:16s} freq={freq:<3} → {str(keep):5s} ({reason}) expected {expected}")
-        print(f"  {status} {name:12s} {etype:16s} freq={freq:<3} → {str(keep):5s} ({reason})")
+            wrong.append(f"  FAIL {etype}: base={bt} (exp {exp_base}), tier={mt} (exp {exp_tier})")
+        print(f"  {'OK' if ok else 'FAIL'} {etype:8s} → base={bt:12s} min_tier={mt} (exp {exp_base}/{exp_tier})")
 
     print(f"\n  结果: {correct}/{len(tests)} 通过")
     if wrong:

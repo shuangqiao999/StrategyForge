@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 城市管理 (urban)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: urban
@@ -53,6 +53,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -261,6 +264,14 @@ prompts:
     - 下级区-上级市重叠 → 降级下级
     - 开发商-承建方重叠 → 保留开发商
   l3_downgrade_rules: tier2
+  agent_domain_role: 城市管理机构或市政实体。关注土地规划、交通设施、住房供给、公共财政、市民满意度。
+  intel_extra_rules: |-
+    城市管理领域实体分类：
+    - 归属判断：市政府/规划部门→自身决策权；下属区/街道办→权力来自上级，归入；开发商→独立企业决策权
+    - 冗余检测：某区规划局→若市规划局已在列表则排除
+    - 活性检验：是否批准项目/修改规划/征地拆迁/投资开发？
+    - 核心原则：基础设施项目（地铁线路、桥梁）、交通线路为工具非决策者，归入规划部门
+  strategic_context: 作为城市规划者，你的决策影响数百万居民的生活质量。
 aliases:
   _org_members:
     欧盟: *id001
@@ -288,3 +299,19 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 拆迁冲突
+  - 安全事故
+  - 烂尾
+  - 交通瘫痪
+  - 群体事件
+  - 维权
+  report_trend_kw:
+  - 规划
+  - 改造
+  - 建设
+  - 绿化
+  - 地铁
+  - 项目
+  - 更新

@@ -15,9 +15,7 @@ $res = "apps\strategy-forge\src-tauri\resources\strategy-forge-backend"
 Remove-Item "$res\_internal","$res\strategy-forge-backend.exe" -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item "dist\strategy-forge-backend\strategy-forge-backend.exe","dist\strategy-forge-backend\_internal" -Destination $res -Recurse -Force
 Copy-Item "data\rule\rules.json" -Destination "$res\data\rule\rules.json" -Force
-Copy-Item "data\rule\domain_prompts.json" -Destination "$res\data\rule\domain_prompts.json" -Force
-Copy-Item "data\rule\entity_alias.json" -Destination "$res\data\rule\entity_alias.json" -Force
-Copy-Item "data\rule\layer3_config.yaml" -Destination "$res\data\rule\layer3_config.yaml" -Force
+Copy-Item "data\methodology.yaml" -Destination "$res\data\methodology.yaml" -Force
 Copy-Item "data\domain_adapters\*.yaml" -Destination "$res\data\domain_adapters\" -Force
 
 # 3. 构建前端 + Tauri + NSIS 安装包
@@ -94,7 +92,7 @@ build_registry()
 
 ### 领域配置文件
 
-统一配置格式 `data/domain_adapters/xxx.yaml`（由 `scripts/migrate_adapters.py` 从旧三套配置自动生成）：
+统一配置格式 `data/domain_adapters/xxx.yaml`（每个域一份，直接手工维护）：
 
 | 文件 | 域 |
 |------|-----|
@@ -117,5 +115,5 @@ build_registry()
 
 - `build_registry()` 入口签名不变 — 上游调用者零修改
 - `EntityRegistry` / `RegisteredEntity` 数据结构不变
-- 旧配置文件 `domain_prompts.json`、`entity_alias.json`、`layer3_config.yaml` 保留不删
+- 旧配置文件 `domain_prompts.json`、`entity_alias.json`、`layer3_config.yaml` 已删除 — 内容全部迁入 `data/domain_adapters/*.yaml` 与 `data/methodology.yaml`
 - `RegisteredEntity` 新增可选字段 `base_type: str` (不影响现有序列化)

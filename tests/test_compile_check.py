@@ -18,7 +18,7 @@ def test_all_imports():
     from strategy_forge.engine.narrative_sorter import sort_narrative_entities
     from strategy_forge.engine.intel_sorter import sort_entities
     from strategy_forge.engine.orchestrator import DeductionOrchestrator
-    from strategy_forge.core.rule_templates import get_domain_prompt
+    from strategy_forge.engine.domain_adapter import load_adapter
     print("  [OK] All module imports")
 
     # 验证共享方法存在
@@ -30,9 +30,9 @@ def test_all_imports():
     assert "$text_overview" in _EXTRACT_PROMPT, "text_overview placeholder missing"
     print("  [OK] text_overview in _EXTRACT_PROMPT")
 
-    # 验证 domain_prompts.json 各领域有 intel_examples
+    # 验证 domain_adapters 各领域有 intel_extra_rules
     for d in ['politics', 'business', 'military', 'ecology', 'urban', 'tech', 'info_war', 'geo_strategy']:
-        rules = get_domain_prompt(d, 'intel_extra_rules')
+        rules = load_adapter(d).prompts.intel_extra_rules
         assert rules, f"{d} missing intel_extra_rules"
     print("  [OK] All 8 domains have intel rules + examples")
 

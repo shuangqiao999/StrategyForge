@@ -515,8 +515,12 @@ class StrategicReasoner:
             agent_parts.append(f"## 空间环境\n{spatial_context}\n")
         domain = getattr(rule_engine, "domain", "")
         if domain:
-            from strategy_forge.core.rule_templates import get_domain_prompt
-            sc = get_domain_prompt(domain, "strategic_context")
+            sc = ""
+            try:
+                from strategy_forge.engine.domain_adapter import get_adapter
+                sc = get_adapter(domain).prompts.strategic_context or ""
+            except Exception:
+                pass
             if sc:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
 

@@ -397,7 +397,8 @@
       "brand",
       "rnd",
       "morale",
-      "supply_chain"
+      "supply_chain",
+      "tech_lead"
     ],
     "initial_metrics": {
       "market_share": 20,
@@ -405,12 +406,14 @@
       "brand": 60,
       "rnd": 50,
       "morale": 70,
-      "supply_chain": 70
+      "supply_chain": 70,
+      "tech_lead": 40
     },
     "thresholds": {
       "cash_flow": 10,
       "market_share": 5,
-      "supply_chain": 15
+      "supply_chain": 15,
+      "tech_lead": 10
     },
     "actions": [
       "price_war",
@@ -2146,7 +2149,8 @@
       "energy_resource",
       "grain_resource",
       "global_reputation",
-      "alliance_trust"
+      "alliance_trust",
+      "rnd"
     ],
     "initial_metrics": {
       "strength": 100,
@@ -2164,7 +2168,8 @@
       "energy_resource": 70,
       "grain_resource": 65,
       "global_reputation": 60,
-      "alliance_trust": 50
+      "alliance_trust": 50,
+      "rnd": 45
     },
     "thresholds": {
       "strength": 15,
@@ -2179,7 +2184,8 @@
       "energy_resource": 15,
       "grain_resource": 10,
       "global_reputation": 15,
-      "alliance_trust": 10
+      "alliance_trust": 10,
+      "rnd": 10
     },
     "actions": [
       "military_offensive",
@@ -2509,7 +2515,9 @@
           "supply": "supply_consumption",
           "cash_flow": "cash_flow_dynamics",
           "supply_chain": "supply_consumption",
-          "tech_lead": "competitive_logistic"
+          "tech_lead": "competitive_logistic",
+          "energy_resource": "resource_depletion",
+          "grain_resource": "logistic"
         },
         "params": {
           "fatigue": {
@@ -2655,7 +2663,8 @@
             "intensity": 0.5,
             "target": ""
           }
-        }
+        },
+        "polar_threshold": 25.0
       }
     },
     "elimination": {
@@ -2684,13 +2693,6 @@
       "politics",
       "tech",
       "info_war"
-    ],
-    "ode_engine": {
-      "equations": {
-        "energy_resource": "resource_depletion",
-        "grain_resource": "logistic"
-      },
-      "params": {}
-    }
+    ]
   }
 }

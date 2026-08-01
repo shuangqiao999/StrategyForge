@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 信息战/舆论 (info_war)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: info_war
@@ -53,6 +53,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -263,6 +266,14 @@ prompts:
     - 媒体集团-旗下媒体重叠 → 若旗下均保留→降级集团
     - 政府宣传部门-国家重叠 → 降级
   l3_downgrade_rules: tier2
+  agent_domain_role: 信息舆论参与方。关注舆论风向、媒体信任度、信息传播速度、受众情绪。
+  intel_extra_rules: |-
+    信息战领域实体分类：
+    - 归属判断：媒体机构→自身编辑决策权；记者/编辑→权力来自所属媒体，归入；政府宣传部门→若该国政府已在列表则归入
+    - 冗余检测：某媒体集团→若旗下主要媒体已全部保留则排除
+    - 活性检验：是否发布报道/引导舆论/被封禁/发起信息攻势/操纵话题？
+    - 核心原则：社交平台（X/Facebook/微博）为传播渠道/工具非决策者；假新闻/谣言为内容非实体，排除
+  strategic_context: 作为信息战参与者，你的核心资源是公众注意力和信任。
 aliases:
   _org_members:
     欧盟: *id001
@@ -290,3 +301,20 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 舆论反转
+  - 丑闻
+  - 封禁
+  - 翻车
+  - 谣言
+  - 指控
+  - 曝光
+  report_trend_kw:
+  - 造势
+  - 辟谣
+  - 传播
+  - 引导
+  - 叙事
+  - 投放
+  - 运营

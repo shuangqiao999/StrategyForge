@@ -478,8 +478,12 @@ class DeductionOrchestrator:
                 from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
                 domain = self._rule_engine.domain
-                from strategy_forge.core.rule_templates import get_domain_prompt
-                dr = get_domain_prompt(domain, "intel_extra_rules")
+                from strategy_forge.engine.domain_adapter import get_adapter
+                dr = ""
+                try:
+                    dr = get_adapter(domain).prompts.intel_extra_rules or ""
+                except Exception:
+                    pass
                 if dr:
                     self._log("graph", f"领域 {domain} 自定义筛选规则已启用（{len(dr)} chars）")
                 self._intel_list = await sort_entities(

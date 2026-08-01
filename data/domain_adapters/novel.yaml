@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 小说 (novel)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: novel
@@ -53,6 +53,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 3
+    generic_freq_tier2: 5
 base_type_mapping:
   Agent:
   - Organization
@@ -226,7 +229,6 @@ prompts:
     | 次要配角（催化剂型） | tier2 | 推动他人故事但无独立弧线 | 高频出场但无独立决策→tier3 |
     | 背景角色 | tier3 | 无独立故事线 | 出场≥10次但0对话+0独立行动→tier3 |
     | 地名/时间/天气/物品 | tier3 | 永远 | "大观园"=地点，"明朝"=时间 |
-
   l3_system_prompt: |
     你是小说角色冗余检测专家。严格按以下机械规则执行，不可跳过。
 
@@ -264,6 +266,14 @@ prompts:
     - 角色-隶属组织重叠 → 不降级
     - 背景组织/机构 → 若仅作场景→tier3
   l3_downgrade_rules: tier1（小说保守保留）
+  agent_domain_role: 小说角色。拥有完整的人物弧线、性格矛盾和情感驱动力。
+  intel_extra_rules: |-
+    小说领域实体分类：
+    - 归属判断：主角/核心配角→自身决策权；背景角色/配角→若仅作他人催化则归入上级
+    - 冗余检测：角色别名→合并；同名不同人→按叙事时间线判定
+    - 活性检验：是否有对话/行动/心理变化？
+    - 核心原则：小说角色为基本单位，地名/时间标记为非实体
+  strategic_context: 作为小说角色，你的行为推动情节并塑造与其他角色的关系网络。
 aliases:
   _org_members:
     欧盟: *id001
@@ -349,3 +359,20 @@ aliases:
     陈子龙:
     - 陈卧子
   _strategic_regions: []
+methodology:
+  report_conflict_kw:
+  - 背叛
+  - 死亡
+  - 决裂
+  - 复仇
+  - 决斗
+  - 阴谋
+  - 揭露
+  report_trend_kw:
+  - 重逢
+  - 成长
+  - 决意
+  - 羁绊
+  - 试探
+  - 结盟
+  - 和解

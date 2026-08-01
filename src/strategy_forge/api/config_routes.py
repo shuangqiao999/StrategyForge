@@ -82,8 +82,8 @@ async def update_embed(body: EmbedConfigUpdate):
         registry.embedding_api_key = body.embedding_api_key
     if "embedding_model_name" in updated:
         registry.embedding_model_name = body.embedding_model_name
-    if "embed_provider_slug" in updated:
-        registry.embed_provider_slug = body.embed_provider_slug
+    if "provider_slug" in updated and body.provider_slug:
+        registry.embed_provider_slug = body.provider_slug
     registry.save()
     return {"status": "ok"}
 

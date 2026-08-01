@@ -362,8 +362,9 @@ src/strategy_forge/
     └── pipeline_engine.py   算法链调度
 
 data/
-├── rule/              规则包 rules.json（8 域）+ 旧配置文件（向后兼容）
-└── domain_adapters/   统一领域适配器 YAML（12 个域）
+├── rule/              规则包 rules.json（8 域）
+├── domain_adapters/   统一领域适配器 YAML（13 个域）
+└── methodology.yaml   双模式通用方法论（角色推断/情绪/信任/反思）
 
 apps/strategy-forge/   Tauri 桌面应用（React + TypeScript + Vite）
 tests/                 测试

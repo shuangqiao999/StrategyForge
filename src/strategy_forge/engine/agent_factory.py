@@ -183,9 +183,13 @@ async def create_agents_from_graph(
     _COMPANY_TYPES = {"Company", "Enterprise", "Organization",
                       "公司", "企业", "组织", "机构"}
     def _entity_role(person: dict) -> str:
-        from strategy_forge.core.rule_templates import get_domain_prompt
+        from strategy_forge.engine.domain_adapter import get_adapter
         etype = (person.get("type") or "").strip()
-        domain_role = get_domain_prompt(domain, "agent_domain_role")
+        domain_role = ""
+        try:
+            domain_role = get_adapter(domain).prompts.agent_domain_role or ""
+        except Exception:
+            pass
         if not domain_role:
             domain_role = "独立博弈者"
         if domain_role not in getattr(_entity_role, "_logged", set()):

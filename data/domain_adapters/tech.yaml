@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 科技竞争 (tech)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: tech
@@ -55,6 +55,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -262,6 +265,14 @@ prompts:
     - 技术联盟-成员企业重叠 → 核心成员≥3已列席→降级
     - 开源项目-贡献企业重叠 → 若主贡献企业已保留→降级
   l3_downgrade_rules: tier2
+  agent_domain_role: 科技企业或研究机构。关注技术路线选择、人才储备、专利布局、开源生态、合规风险。
+  intel_extra_rules: |-
+    科技领域实体分类：
+    - 归属判断：科技企业/研究机构→自身决策权；内部实验室/部门→归入上级
+    - 冗余检测：某技术联盟→若核心成员企业已保留则排除；某开源基金会→若主要贡献企业已保留则排除
+    - 活性检验：是否发布技术/申请专利/开源项目/被制裁/被列入管制清单？
+    - 核心原则：技术标准、协议规范、开源社区为非决策实体（工具/框架），排除
+  strategic_context: 作为科技决策者，你的行动塑造技术发展方向和产业格局。
 aliases:
   _org_members:
     欧盟: *id001
@@ -289,3 +300,20 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 断供
+  - 制裁
+  - 专利战
+  - 数据泄露
+  - 召回
+  - 漏洞
+  - 封锁
+  report_trend_kw:
+  - 突破
+  - 开源
+  - 发布
+  - 融资
+  - 专利
+  - 标准
+  - 量产

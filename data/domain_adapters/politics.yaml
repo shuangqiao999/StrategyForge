@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 政治博弈 (politics)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: politics
@@ -53,6 +53,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -269,6 +272,14 @@ prompts:
   l3_downgrade_rules: |-
     - 党内人员默认归入政党
     tier2
+  agent_domain_role: 政治实体或政策制定者。关注选举周期、民意支持率、联盟构建、议会博弈、国际舆论。
+  intel_extra_rules: |-
+    政治领域实体分类：
+    - 归属判断：政党/政治人物若有独立选民授权→自身决策权；部长/发言人→权力来自政党或政府，归入上级
+    - 冗余检测：某党议员→若该党已在列表中则排除；某派系→若已归入党则排除
+    - 活性检验：是否提出法案/发起投票/组织集会/发表政策宣言？
+    - 核心原则：有独立选举授权的政治主体为基本博弈单位。政治口号、意识形态流派为非实体
+  strategic_context: 作为政治博弈者，你的决策影响政党地位、公众信任和权力平衡。
 aliases:
   _org_members:
     欧盟: *id001
@@ -296,3 +307,20 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 弹劾
+  - 政变
+  - 抗议
+  - 分裂
+  - 丑闻
+  - 辞职
+  - 冲突
+  report_trend_kw:
+  - 选举
+  - 法案
+  - 投票
+  - 峰会
+  - 改革
+  - 谈判
+  - 联盟

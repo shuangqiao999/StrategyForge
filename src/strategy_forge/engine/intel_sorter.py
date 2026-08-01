@@ -100,8 +100,12 @@ async def sort_entities(
     if not source or not entity_names:
         return []
 
-    from strategy_forge.core.rule_templates import get_domain_prompt
-    extra_rules = get_domain_prompt(domain, "intel_extra_rules")
+    extra_rules = ""
+    try:
+        from strategy_forge.engine.domain_adapter import get_adapter
+        extra_rules = get_adapter(domain).prompts.intel_extra_rules or ""
+    except Exception:
+        pass
     prompt = _INTEL_PROMPT.format(
         entity_names=", ".join(entity_names),
         source=source[:max_source_chars],

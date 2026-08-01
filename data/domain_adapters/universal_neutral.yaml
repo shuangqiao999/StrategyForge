@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 通用中立领域 (universal_neutral)
-# 未知领域默认加载，无任何领域偏见，全领域通用中立规则
+# 由 migrate_adapters.py 生成 + 人工增强。含 methodology.report_*_kw
 
 domain_meta:
   domain_id: universal_neutral
@@ -232,13 +232,20 @@ prompts:
     - 平行对等主体 → 互不冗余，分别保留
     - 不确定者 → 保守保留，不降级
   l3_downgrade_rules: tier2
+  agent_domain_role: 独立博弈者。根据原文语境决定其关注点和行动方式。
+  intel_extra_rules: |-
+    通用实体分类：
+    - 归属判断：实体若有独立行为+决策→自身决策权；若是某组的上级/下级成员→归入
+    - 冗余检测：子品牌/别名/产品线→若主体已在列表→排除
+    - 活性检验：是否有独立行动/决策/影响？
+    - 核心原则：有独立战略决策权的实体为基本博弈单位
+  strategic_context: 作为博弈参与者，你的决策影响局势走向。
 aliases:
   _org_members: {}
   _person_country: {}
   _force_keep: []
   entity_aliases: {}
   _strategic_regions: []
-
 methodology:
   role_examples: |
     消费品牌：库迪、瑞幸、蜜雪冰城
@@ -250,13 +257,27 @@ methodology:
     国际组织：联合国、欧盟、北约、WTO
     武装力量：美军、俄军、胡塞武装、塔利班
     政治力量：共和党、民主党、自民党
-
   sentiment_examples: |
     友好行动："A与B签署战略合作协议""A向B投资50亿""A与B联合发布声明"
     敌对行动："A对B发起反倾销调查""A宣布对B实施技术封锁""A公开谴责B"
     中性行动："A发布季度财报""A举行产品发布会""A进行内部人事调整"
-
   trust_action_examples: |
     敌对行动与影响：军事攻击(-5)、制裁/封锁(-4)、背叛同盟(-4)、技术封锁(-3)、价格战(-2)
     友好行动与影响：军事同盟(+5)、战略投资(+4)、贸易协定(+3)、外交访问(+2)、技术交流(+1)
     中性行动与影响：信息获取(0)、观察(0)、内部调整(0)
+  report_conflict_kw:
+  - 冲突
+  - 制裁
+  - 对抗
+  - 失败
+  - 背叛
+  - 危机
+  - 破裂
+  report_trend_kw:
+  - 合作
+  - 推进
+  - 建设
+  - 谈判
+  - 投资
+  - 发展
+  - 改革

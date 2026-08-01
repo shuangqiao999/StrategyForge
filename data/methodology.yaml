@@ -118,6 +118,11 @@ _domain_triggers:
     平台事件: [被封禁, 限流, 算法调整, 去平台化, 账号异常, 流量腰斩]
     信息武器化: [深度伪造, AI换脸, 虚假信息扩散, 认知战, 水军攻击, 人肉搜索]
   geo_strategy: {}
+  universal_neutral:
+    重大变故: [突变, 意外, 危机, 骤变, 转折, 失控, 失衡]
+    关系破裂: [决裂, 背叛, 撕毁, 解除, 终止, 对立, 敌对]
+    关键行动: [宣布, 签署, 制裁, 投资, 结盟, 开战, 收购]
+    重大成果: [突破, 达成, 完成, 推出, 超越, 领先, 获胜]
   novel:
     角色关系突变: [背叛, 告白, 决裂, 和解, 重逢, 误解消除, 反目, 冰释前嫌]
     角色命运转折: [死亡, 失踪, 被捕, 逃离, 获救, 身份暴露, 假死, 失忆]
@@ -178,7 +183,7 @@ _severity_mapping:
     light: [意外转折]
 
 # ── 反思阈值 × 领域全覆盖 ──
-# 所有值均可从 adapter.methodology.reflection_thresholds 读取
+# 运行时由 simulator._load_reflection_config 直接从本文件 _reflection_thresholds 读取
 _reflection_thresholds:
   military: {env_drift_single: 3, env_drift_cumulative: 8, no_reflect_rounds: 2, metric_alarm_mult: 1.15, self_reflect_interval: 3, pattern_warn_count: 3, max_persona_rules: 3, env_decay_rate: 0.97}
   business: {env_drift_single: 8, env_drift_cumulative: 20, no_reflect_rounds: 5, metric_alarm_mult: 1.4, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 4, env_decay_rate: 0.93}
@@ -192,3 +197,4 @@ _reflection_thresholds:
   narrative: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 5, env_decay_rate: 0.96}
   history: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 5, env_decay_rate: 0.96}
   business_narrative: {env_drift_single: 6, env_drift_cumulative: 15, no_reflect_rounds: 4, metric_alarm_mult: 0, self_reflect_interval: 5, pattern_warn_count: 5, max_persona_rules: 4, env_decay_rate: 0.94}
+  universal_neutral: {env_drift_single: 8, env_drift_cumulative: 18, no_reflect_rounds: 5, metric_alarm_mult: 0, self_reflect_interval: 6, pattern_warn_count: 5, max_persona_rules: 4, env_decay_rate: 0.96}

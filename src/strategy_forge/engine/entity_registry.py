@@ -102,36 +102,6 @@ _layer3_variance_log: list[dict] = []
 _layer3_decision_cache = _LRUCache(64)
 _layer1_normalize_cache = _LRUCache(16)
 
-# ── 旧 entity_alias.json 模块级加载（向后兼容，用于方法论块）──
-def _load_alias_json() -> dict:
-    try:
-        rule_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule"
-        path = rule_dir / "entity_alias.json"
-        if not path.exists():
-            import os
-            env_dir = os.environ.get("FORGE_RULE_DIR", "")
-            if env_dir:
-                path = Path(env_dir) / "entity_alias.json"
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return _json.load(f)
-    except Exception as e:
-        logger.warning("[EntityRegistry] 加载 entity_alias.json 失败: %s", e)
-    return {}
-
-_alias_data = _load_alias_json()
-_A_METHODOLOGY = _alias_data.get("_methodology", {})
-_A_AGENCY_METHOD = _A_METHODOLOGY.get("entity_agency", {}).get("framework", "")
-_A_ALIAS_METHOD = _A_METHODOLOGY.get("alias_detection", {}).get("framework", "")
-_A_REDUNDANCY_METHOD = _A_METHODOLOGY.get("redundancy_detection", {}).get("framework", "")
-_A_TYPE_METHOD = _A_METHODOLOGY.get("type_normalization", {}).get("framework", "")
-
-# ── 向后兼容别名（旧配置回退用，新代码优先用 DomainAdapter.aliases）──
-_ORG_MEMBERS: dict[str, frozenset[str]] = {
-    k: frozenset(v) for k, v in _alias_data.get("_builtin_org_members", {}).items()
-}
-_PERSON_COUNTRY: dict[str, str] = dict(_alias_data.get("_builtin_person_country", {}))
-
 
 # ── Data Classes ──
 
@@ -1436,10 +1406,13 @@ async def _layer3_cross_validate(
     # 方法论注入：基于 methodology_mode
     extra_method = []
     if adapter.meta.methodology_mode == "geo":
-        if _A_REDUNDANCY_METHOD:
-            extra_method.append(f"## 冗余检测方法论\n{_A_REDUNDANCY_METHOD}")
-        if _A_AGENCY_METHOD:
-            extra_method.append(f"## 实体代理力判定方法论\n{_A_AGENCY_METHOD}")
+        _geo_m = adapter.methodology or {}
+        _red = _geo_m.get("_redundancy_method", "") or ""
+        _ag = _geo_m.get("_agency_method", "") or ""
+        if _red:
+            extra_method.append(f"## 冗余检测方法论\n{_red}")
+        if _ag:
+            extra_method.append(f"## 实体代理力判定方法论\n{_ag}")
     elif adapter.meta.methodology_mode == "narrative":
         extra_method.append("""## 文学叙事冗余判断规则
 - 每个有独立行动+独立对话+独立心理描写的角色都是独立实体
@@ -1655,14 +1628,8 @@ def _resolve_hierarchy(
     else:
         custom_org_map: dict = fallback.get("org_members_map", {})
         custom_person_map: dict = fallback.get("person_country_map", {})
-        org_map = {**_ORG_MEMBERS}
-        if isinstance(custom_org_map, dict):
-            for k, v in custom_org_map.items():
-                org_map[str(k)] = frozenset(str(x) for x in (v if isinstance(v, list) else []))
-        person_map = {**_PERSON_COUNTRY}
-        if isinstance(custom_person_map, dict):
-            for k, v in custom_person_map.items():
-                person_map[str(k)] = str(v)
+        org_map = dict(custom_org_map) if isinstance(custom_org_map, dict) else {}
+        person_map = dict(custom_person_map) if isinstance(custom_person_map, dict) else {}
 
     for e in kept_entities:
         if e.name in org_map:

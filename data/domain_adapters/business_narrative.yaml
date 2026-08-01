@@ -1,23 +1,31 @@
 # StrategyForge DomainAdapter — 商业叙事 (business_narrative)
-# 适用于商业竞争、产业博弈等非虚构叙事场景
-# 与 novel.yaml 的关键区别：skip_layer3=false（需要全局冗余检测），Agent 强制 tier1 受频次保护
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: business_narrative
   display_name: 商业叙事
   detect_keywords:
-  - {keyword: 企业, weight: 3}
-  - {keyword: 竞争, weight: 2}
-  - {keyword: 市场份额, weight: 3}
-  - {keyword: 供应链, weight: 2}
-  - {keyword: 博弈, weight: 2}
-  - {keyword: 产业, weight: 2}
-  - {keyword: 存量, weight: 2}
-  - {keyword: 价格战, weight: 3}
-  - {keyword: 生态, weight: 2}
-  - {keyword: 标准, weight: 2}
+  - keyword: 企业
+    weight: 3
+  - keyword: 竞争
+    weight: 2
+  - keyword: 市场份额
+    weight: 3
+  - keyword: 供应链
+    weight: 2
+  - keyword: 博弈
+    weight: 2
+  - keyword: 产业
+    weight: 2
+  - keyword: 存量
+    weight: 2
+  - keyword: 价格战
+    weight: 3
+  - keyword: 生态
+    weight: 2
+  - keyword: 标准
+    weight: 2
   methodology_mode: narrative
-
 param_config:
   shard_threshold: 12000
   shard_size: 7500
@@ -29,18 +37,35 @@ param_config:
     tail_size: 1500
     lit_mode: true
   token:
-    l1_normalize: {base: 200, per: 150, cap: 12000}
-    l1_shard: {base: 200, per: 200, cap: 6000}
-    l1_refine: {base: 200, per: 120, cap: 8000}
-    l2_classify: {base: 200, per: 120, cap: 6000}
-    l3_cross: {base: 300, per: 60, cap: 3000}
+    l1_normalize:
+      base: 200
+      per: 150
+      cap: 12000
+    l1_shard:
+      base: 200
+      per: 200
+      cap: 6000
+    l1_refine:
+      base: 200
+      per: 120
+      cap: 8000
+    l2_classify:
+      base: 200
+      per: 120
+      cap: 6000
+    l3_cross:
+      base: 300
+      per: 60
+      cap: 3000
   cache:
     l1_enabled: true
     l1_max_entries: 16
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
-
+  fallback_thresholds:
+    person_freq_tier1: 3
+    generic_freq_tier2: 5
 base_type_mapping:
   Agent:
   - Organization
@@ -108,7 +133,6 @@ base_type_mapping:
   - 规则
   - 战略
   - 趋势
-
 tier_rule:
   force_tier1_base_types:
   - Agent
@@ -133,7 +157,6 @@ tier_rule:
     ## 频次保护
     - 出场仅1-2次且无独立决策行为的企业 → tier2（保留但不生成独立智能体）
     - 出场≥3次且有独立战略行动的企业 → tier1
-
 layer_config:
   skip_layer3: false
   min_kept_for_check: 3
@@ -148,7 +171,6 @@ layer_config:
     org_overlap_threshold: 3
     org_members_map: {}
     person_country_map: {}
-
 prompts:
   l2_entity_rules: |-
     你是商业博弈分析专家。
@@ -160,7 +182,6 @@ prompts:
     - 政策/标准/白皮书/报告/数据 → tier3（非决策者）
     - 出场仅1-2次且无独立决策行为的企业 → tier2（保留但不生成独立智能体）
     - 高频≠重要：1次关键战略决策 > 10次背景提及
-
   l2_tier_table: |-
     | 类型 | 层级 | 判定 | 易误判负例（看似tier1实为tier3） |
     |------|------|------|------------------------------|
@@ -169,7 +190,6 @@ prompts:
     | CEO/创始人 | tier2 | 决策⊆企业决策 | 即使媒体高频曝光 |
     | 品牌/产品线/部门/子公司 | tier3 | 决策空间被覆盖 | "XX品牌""XX系列" |
     | 政策/标准/数据/报告 | tier3 | 非决策者 | "白皮书""标准""趋势报告" |
-
   l3_system_prompt: |-
     你是商业博弈冗余检测专家。严格按以下机械规则检测。
 
@@ -198,7 +218,6 @@ prompts:
       "notes": "≤50字"
     }
     无冗余时数组为空。只输出 JSON。
-
   l3_redundancy_rules: |-
     ## 商业叙事域冗余检测
     - CEO-公司重叠 → 保留公司，降级CEO
@@ -206,12 +225,35 @@ prompts:
     - 低频无行动企业 → 出场≤2次且无独立决策 → 降级
     - 平行竞争者 → 互不冗余，分别保留
     - 不确定者 → 保守保留
-
   l3_downgrade_rules: tier2
-
+  agent_domain_role: 独立博弈者。根据原文语境决定其关注点和行动方式。
+  intel_extra_rules: |-
+    通用实体分类：
+    - 归属判断：实体若有独立行为+决策→自身决策权；若是某组的上级/下级成员→归入
+    - 冗余检测：子品牌/别名/产品线→若主体已在列表→排除
+    - 活性检验：是否有独立行动/决策/影响？
+    - 核心原则：有独立战略决策权的实体为基本博弈单位
+  strategic_context: 作为博弈参与者，你的决策影响局势走向。
 aliases:
   _org_members: {}
   _person_country: {}
   _force_keep: []
   entity_aliases: {}
   _strategic_regions: []
+methodology:
+  report_conflict_kw:
+  - 份额下滑
+  - 反垄断
+  - 裁员
+  - 亏损
+  - 被调查
+  - 收购
+  - 数据泄露
+  report_trend_kw:
+  - 投资
+  - 融资
+  - 新品
+  - 签约
+  - 扩产
+  - 上市
+  - 合作

@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 军事战争 (military)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: military
@@ -55,6 +55,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -272,6 +275,14 @@ prompts:
     - 军事联盟-成员国重叠 → 核心成员≥3已列席→降级
     - 独立军阀保留例外需3项独立证据
   l3_downgrade_rules: tier2
+  agent_domain_role: 军事力量或国防决策实体。关注战力对比、后勤保障、地形优势、士气、国际军事联盟。
+  intel_extra_rules: |-
+    军事领域实体分类：
+    - 归属判断：主权国家军队→自身决策权；舰队/战区/师团→权力来自国家指挥部，归入；军事领导人→若有独立指挥权（如军阀）可保留
+    - 冗余检测：某军种→若国家已保留则排除；某军事联盟→若核心成员国已保留则排除
+    - 活性检验：是否发动攻击/调动兵力/部署武器/占领阵地？
+    - 核心原则：有独立军事指挥链的实体为基本单位。武器型号、军事基地为非决策实体
+  strategic_context: 作为军事决策者，你的每项行动消耗资源并改变力量对比。
 aliases:
   _org_members:
     欧盟: *id001
@@ -299,3 +310,20 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 进攻
+  - 轰炸
+  - 冲突
+  - 战败
+  - 投降
+  - 伤亡
+  - 袭击
+  report_trend_kw:
+  - 部署
+  - 演习
+  - 研发
+  - 换装
+  - 谈判
+  - 停火
+  - 军援

@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 历史 (history)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: history
@@ -57,6 +57,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 3
+    generic_freq_tier2: 5
 base_type_mapping:
   Agent:
   - Organization
@@ -270,6 +273,14 @@ prompts:
     - 年号/庙号→ 合并到对应皇帝
     - 同名多朝代→ 均保留
   l3_downgrade_rules: tier2
+  agent_domain_role: 历史决策者。拥有领地、军队或政治势力，在特定历史时期做出影响深远的选择。
+  intel_extra_rules: |-
+    历史领域实体分类：
+    - 归属判断：历史人物若有独立政权/军队/领地→自身决策权；大臣/将领→权力来自君主，归入
+    - 冗余检测：同名不同朝代→保留；年号/庙号→合并到人物名下
+    - 活性检验：是否起兵/议和/改革/战争/修筑/迁徙？
+    - 核心原则：掌握独立政权/军事力量的历史人物为基本单位。地理区域/制度/经济指标为非实体
+  strategic_context: 作为历史人物，你的决策受限于当时的军事、经济和技术的约束。
 aliases:
   _org_members:
     欧盟: *id001
@@ -300,3 +311,20 @@ aliases:
   - 阮大铖
   entity_aliases: {}
   _strategic_regions: []
+methodology:
+  report_conflict_kw:
+  - 政变
+  - 兵变
+  - 围城
+  - 改朝换代
+  - 屠城
+  - 亡国
+  - 谋反
+  report_trend_kw:
+  - 变法
+  - 新政
+  - 改革
+  - 迁都
+  - 征税
+  - 和亲
+  - 招抚

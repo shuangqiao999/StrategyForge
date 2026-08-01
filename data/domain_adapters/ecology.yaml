@@ -1,5 +1,5 @@
 # StrategyForge DomainAdapter — 生态环境 (ecology)
-# 由 migrate_adapters.py 自动生成，来源：layer3_config.yaml + domain_prompts.json + entity_alias.json
+# 由 migrate_adapters.py 生成 + 人工增强。含 param_config.fallback_thresholds + methodology.report_*_kw
 
 domain_meta:
   domain_id: ecology
@@ -53,6 +53,9 @@ param_config:
     l3_enabled: true
     l3_max_entries: 64
     ttl_sec: 1800
+  fallback_thresholds:
+    person_freq_tier1: 5
+    generic_freq_tier2: 8
 base_type_mapping:
   Agent:
   - Organization
@@ -260,6 +263,14 @@ prompts:
     - 政府环保部门-国家重叠 → 降级
     - 企业联盟-成员企业重叠 → 核心成员≥3已列席→降级
   l3_downgrade_rules: tier2
+  agent_domain_role: 生态主体或环境利益方。关注碳排放配额、政策法规、公众环保意识、可再生能源技术。
+  intel_extra_rules: |-
+    生态领域实体分类：
+    - 归属判断：环保NGO/国际组织→自身决策权；政府环保部门→若该国政府已在列表则归入，否则可独立保留
+    - 冗余检测：某环保联盟→若核心成员组织已在列表则排除
+    - 活性检验：是否发起诉讼/组织抗议/推动立法/发布环境报告？
+    - 核心原则：地理区域（某森林、某河流）、环境指标（碳排放、温度）非决策实体，一律排除
+  strategic_context: 作为生态利益方，你的目标是在经济发展与环境保护之间寻找平衡。
 aliases:
   _org_members:
     欧盟: *id001
@@ -287,3 +298,19 @@ aliases:
   - 山东
   - 河南
   - 陕西
+methodology:
+  report_conflict_kw:
+  - 污染
+  - 泄漏
+  - 物种灭绝
+  - 森林大火
+  - 排放超标
+  - 灾害
+  report_trend_kw:
+  - 减排
+  - 修复
+  - 治理
+  - 碳汇
+  - 保护
+  - 绿色
+  - 转型
