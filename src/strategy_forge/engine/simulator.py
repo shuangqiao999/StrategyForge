@@ -677,6 +677,8 @@ class SimulationEngine:
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
                                   "opponents": list(v.get("opponents", []))}
                               for k, v in getattr(self, "_prev_rel_map", {}).items()},
+            # 融合架构：通道② 已触发的 (实体id, 事件名) 去重集合
+            "_event_trigger_fired": list(getattr(self, "_event_trigger_fired", set()) or set()),
             # 反思机制动态塑造的行为准则：暂停恢复后不丢失（P0#2）
             "_agent_extra_rules": {
                 a.entity_id: (a.system_prompt_extra or "")
@@ -698,6 +700,9 @@ class SimulationEngine:
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
+        # 融合架构：恢复通道②去重集合
+        _fired = saved.get("_event_trigger_fired", [])
+        self._event_trigger_fired = set(_fired) if isinstance(_fired, list) else set()
         # 恢复反思行为准则到 agent 对象（P0#2）
         extra_rules = saved.get("_agent_extra_rules", {}) or {}
         if extra_rules and getattr(self, "agents", None):
@@ -1085,6 +1090,85 @@ class SimulationEngine:
         self._event_history.append(event)
         if len(self._event_history) > 200:
             self._event_history = self._event_history[-200:]
+
+    def _apply_event_impacts(self, round_number: int) -> int:
+        """融合架构·通道①：本轮高优先级事件按规则包 event_impact 冲击相关实体指标。
+
+        仅量化模式（_rule_engine 非空）生效。事件只对发起者与目标实体生效，
+        一次性注入指标增量，使"制裁/并购"等事件确定性地改变局势而非仅作文字上下文。
+        返回实际应用的事件数。
+        """
+        if not self._quantified or self._rule_engine is None:
+            return 0
+        impact_map = self._rule_engine.event_impact_map()
+        if not impact_map:
+            return 0
+        applied = 0
+        ranges = self._rule_engine.ranges()
+        for evt in self._event_history:
+            if evt.get("round") != round_number:
+                continue
+            et = evt.get("event_type", "") or evt.get("action", "")
+            imp = impact_map.get(et)
+            if not imp or not isinstance(imp, dict):
+                continue
+            targets = set()
+            if evt.get("agent"):
+                targets.add(evt["agent"])
+            if evt.get("target_id"):
+                targets.add(evt["target_id"])
+            for eid in targets:
+                st = self._states.get(eid)
+                if st is None:
+                    continue
+                st.apply_deltas({k: float(v) for k, v in imp.items()},
+                                round_number, ranges)
+            applied += 1
+        return applied
+
+    def _trigger_events_from_metrics(self, round_number: int) -> int:
+        """融合架构·通道②：指标越界自动生成系统事件，进入事件流反向影响决策。
+
+        仅量化模式生效。按规则包 event_triggers 对存活实体检查阈值，
+        越界则追加系统事件（is_system_event=True），事件自带冲击映射。
+        once 触发在单次推演内去重。
+        """
+        if not self._quantified or self._rule_engine is None:
+            return 0
+        triggers = self._rule_engine.event_triggers()
+        if not triggers:
+            return 0
+        if not hasattr(self, "_event_trigger_fired"):
+            self._event_trigger_fired: set = set()
+        fired = self._event_trigger_fired
+        generated = 0
+        # 不按全局 is_alive 过滤：指标越界触发的事件往往正是"濒死预警/崩溃"本身，
+        # 触发阈值可能高于死亡阈值（如 supply_chain<30 预警），过早跳过会漏掉关键转折。
+        for eid, st in self._states.items():
+            for trig in self._rule_engine.check_event_triggers(st, fired):
+                name = trig.get("event", "")
+                if not name:
+                    continue
+                if trig.get("once"):
+                    fired.add((st.id, name))
+                content = trig.get("content") or name
+                self._append_event({
+                    "agent": st.id, "agent_name": st.name,
+                    "action": "system_trigger",
+                    "content": content,
+                    "round": round_number,
+                    "event_type": name,
+                    "target_id": "",
+                    "is_system_event": True,
+                    "impact_map": trig.get("impact") or {},
+                })
+                # 事件自带冲击映射（可选）立即结算
+                imp = trig.get("impact")
+                if isinstance(imp, dict):
+                    st.apply_deltas({k: float(v) for k, v in imp.items()},
+                                    round_number, self._rule_engine.ranges())
+                generated += 1
+        return generated
 
     async def run_round(self, round_number: int) -> SimulationRound:
         # Layer C: 首次开局精判 neutral 关系（幂等，仅一次）。
@@ -2215,6 +2299,11 @@ class SimulationEngine:
         if not alive_agents:
             return sim_round
 
+        # 融合架构·通道①：本轮高优先级事件冲击相关实体指标（在决策前结算）
+        _n_impacts = self._apply_event_impacts(round_number)
+        if _n_impacts:
+            self._log("simulation", f"事件冲击(融合): {_n_impacts} 个事件影响实体指标")
+
         ordered = list(alive_agents)
         self._rng.shuffle(ordered)
 
@@ -2375,12 +2464,15 @@ class SimulationEngine:
             items: list[str] = []
             for k in ripe[-8:]:
                 items.append(f"• [{k['round_occurred']}] {k['content_delivered']}")
-            # 补充 agent 自身相关的事件（来自 _event_history）
-            own_events = [e for e in self._event_history[-5:]
-                          if e.get("agent") == a.entity_id or a.name in e.get("content", "")]
+            # 补充 agent 自身相关的事件 + 全部系统事件（融合架构：系统事件全局可见）
+            own_events = [e for e in self._event_history[-6:]
+                          if e.get("is_system_event")
+                          or e.get("agent") == a.entity_id
+                          or a.name in e.get("content", "")]
             for e in own_events:
                 text = e.get("content", "")[:80]
-                items.append(f"• [R{e.get('round','?')}] {text}")
+                prefix = "【系统事件】" if e.get("is_system_event") else ""
+                items.append(f"• [R{e.get('round','?')}] {prefix}{text}")
             _recent_ctxs[a.entity_id] = "\n".join(items[-8:]) or "（无近期事件）"
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any] | None:
@@ -2702,10 +2794,20 @@ class SimulationEngine:
                 "agent": actor, "agent_name": nm, "action": dec["action_type"],
                 "content": content + evt_suffix,
                 "round": round_number,
+                "event_type": dec["action_type"],
+                "target_id": _primary_tid if _inters else "",
+                "is_system_event": False,
             })
 
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
+
+        # 融合架构·通道②：指标越界自动生成系统事件（在本轮结算后，进入事件流）
+        _n_triggers = self._trigger_events_from_metrics(round_number)
+        if _n_triggers:
+            self._log("simulation",
+                      f"指标触发事件(融合): {_n_triggers} 个系统事件生成")
+            self._dispatch_events(round_number)
 
         # ── 共享反思闸门（量化模式：完整 P0-P2 六维反思）──
         if not hasattr(self, "_reflection_baselines"):

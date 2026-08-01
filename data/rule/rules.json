@@ -775,7 +775,63 @@
           "active": null
         }
       }
-    }
+    },
+    "event_impact": {
+      "embargo": {
+        "supply_chain": -20,
+        "market_share": -6,
+        "cash_flow": -5,
+        "morale": -4
+      },
+      "poach_talent": {
+        "rnd": -12,
+        "morale": -6,
+        "tech_lead": -5
+      },
+      "price_war": {
+        "market_share": 8,
+        "cash_flow": -10,
+        "brand": -5
+      }
+    },
+    "event_triggers": [
+      {
+        "metric": "morale",
+        "op": "<",
+        "value": 20,
+        "event": "员工大规模离职潮",
+        "content": "员工大规模离职潮：核心团队流失，运营陷入混乱",
+        "impact": {
+          "rnd": -8,
+          "supply_chain": -5
+        },
+        "once": true
+      },
+      {
+        "metric": "cash_flow",
+        "op": "<",
+        "value": 25,
+        "event": "资金链断裂危机",
+        "content": "资金链断裂危机：融资受阻，债权人上门",
+        "impact": {
+          "morale": -10,
+          "brand": -8
+        },
+        "once": true
+      },
+      {
+        "metric": "supply_chain",
+        "op": "<",
+        "value": 30,
+        "event": "供应链中断",
+        "content": "供应链中断：核心原材料断供，产能受阻",
+        "impact": {
+          "market_share": -8,
+          "cash_flow": -6
+        },
+        "once": true
+      }
+    ]
   },
   "politics": {
     "name": "🏛️ 政治博弈",

@@ -93,7 +93,56 @@ class RuleEngine:
         p.setdefault("conditional_effects", {})
         p.setdefault("delay_effects", {})
         p.setdefault("auto_effects", {})
+        # 融合架构：事件→数值冲击 与 数值→事件触发（规则包为空则通道不激活，保持兼容）
+        p.setdefault("event_impact", {})
+        p.setdefault("event_triggers", [])
         return p
+
+    # ── 融合架构：事件/数值双向通道辅助 ──
+
+    def event_impact_map(self) -> dict:
+        """事件类型 → 指标冲击映射（通道①）。"""
+        return dict(self.pack.get("event_impact", {}) or {})
+
+    def event_triggers(self) -> list:
+        """数值越界 → 事件触发规则（通道②）。"""
+        return list(self.pack.get("event_triggers", []) or [])
+
+    @staticmethod
+    def eval_metric_op(op: str, value: float, threshold: float) -> bool:
+        """单指标阈值比较，供 event_triggers 求值。"""
+        if op in ("<", "<=", ">", ">=", "==", "!="):
+            return {
+                "<": value < threshold,
+                "<=": value <= threshold,
+                ">": value > threshold,
+                ">=": value >= threshold,
+                "==": value == threshold,
+                "!=": value != threshold,
+            }[op]
+        return False
+
+    def check_event_triggers(self, state: Any, fired: set) -> list[dict]:
+        """对单个实体评估 event_triggers，返回未触发过且条件成立的事件配置列表。
+
+        fired: 已触发的 (实体id, 事件名) 集合，用于 once 去重。
+        """
+        out = []
+        for trig in self.event_triggers():
+            if not isinstance(trig, dict):
+                continue
+            m = trig.get("metric", "")
+            op = trig.get("op", ">=")
+            val = float(trig.get("value", 0))
+            name = trig.get("event", "") or str(trig)
+            if not m or not name:
+                continue
+            if trig.get("once") and (state.id, name) in fired:
+                continue
+            mv = state.get_metric(m)
+            if self.eval_metric_op(op, mv, val):
+                out.append(trig)
+        return out
 
     # ── 访问器 ──
     def metrics(self) -> list[str]:
