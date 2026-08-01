@@ -55,6 +55,7 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
     for name in order:
         cls = _MODULE_CLASSES.get(name)
         if cls is None:
+            logger.warning("[ModuleUtils] pipeline.order 含未注册模块 '%s'，已跳过（检查 rules.json）", name)
             continue
         cfg = dict(pack_modules.get(name, {}))
 
@@ -88,14 +89,33 @@ def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
         "streak",  # FSM historical condition (not a metric)
     })
     metrics_set = set(metrics) | _VIRTUAL_METRICS
+    _OPS = frozenset({">", "<", ">=", "<=", "=="})
     for rule in cfg.get("transition_rules", []):
         condition = rule.get("condition", {})
-        for metric in condition:
+        if not isinstance(condition, dict):
+            raise ConfigValidationError(
+                f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
+                f"condition 必须是 dict（got {type(condition).__name__}）"
+            )
+        for metric, val in condition.items():
             if metric not in metrics_set:
                 raise ConfigValidationError(
                     f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
                     f"references metric '{metric}' which is not in the rule pack metrics "
                     f"{metrics}. Check rules.json transition_rules."
+                )
+            # streak 是 int 计数；其余条件必须是 (op, threshold) 二元组
+            if metric == "streak":
+                if not isinstance(val, (int, float)):
+                    raise ConfigValidationError(
+                        f"FSM streak 条件值必须是数值（got {val!r}）")
+                continue
+            if (not isinstance(val, (list, tuple)) or len(val) != 2
+                    or val[0] not in _OPS):
+                raise ConfigValidationError(
+                    f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
+                    f"metric '{metric}' 条件值必须是 [op, threshold]（如 [\">\", 50]），"
+                    f"got {val!r}"
                 )
 
 
@@ -154,10 +174,14 @@ def build_context(
     if ode_params:
         ctx.metadata.setdefault("ode_params", {})
         for metric, param_dict in ode_params.items():
-            if isinstance(param_dict, dict):
-                for key, val in param_dict.items():
-                    ctx_key = key if key.startswith("_") else f"_{key}"
-                    ctx.metadata["ode_params"][ctx_key] = float(val)
+            if not isinstance(param_dict, dict):
+                continue
+            for key, val in param_dict.items():
+                ctx_key = key if key.startswith("_") else f"_{key}"
+                if ctx_key in ctx.metadata["ode_params"] and ctx.metadata["ode_params"][ctx_key] != float(val):
+                    logger.warning("[ModuleUtils] ODE 参数 '%s' 被指标 '%s' 与先前指标覆盖冲突（每指标同名参数会互相覆盖，建议指标间避免同名 key）",
+                                   ctx_key, metric)
+                ctx.metadata["ode_params"][ctx_key] = float(val)
 
     # Inject physics explosion sources from rules.json + extractor fallback
     phys_cfg = pack.get("modules", {}).get("physics_engine", {})

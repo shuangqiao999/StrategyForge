@@ -638,15 +638,21 @@ def _parse_candidates(raw: str) -> list[dict[str, Any]]:
     raw = raw.strip()
     cleaned = re.sub(r'```(?:json)?\s*\n?', '', raw)
     cleaned = re.sub(r'\n?```', '', cleaned).strip()
-    for pat in (r'\[[\s\S]*\]', r'\{[\s\S]*\}'):
+    for pat in (r'\{[\s\S]*\}', r'\[[\s\S]*\]'):
         m = re.search(pat, cleaned)
         if m:
             try:
                 data = json.loads(m.group(0))
+                # 新 schema: {"candidates": [...]}
+                if isinstance(data, dict):
+                    cands = data.get("candidates")
+                    if isinstance(cands, list):
+                        return [c for c in cands if isinstance(c, dict) and "action" in c]
+                    if "action" in data:
+                        return [data]
+                # 兼容旧输出: 裸数组
                 if isinstance(data, list):
                     return [c for c in data if isinstance(c, dict) and "action" in c]
-                if isinstance(data, dict) and "action" in data:
-                    return [data]
             except (json.JSONDecodeError, ValueError):
                 continue
     return []

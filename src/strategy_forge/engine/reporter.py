@@ -564,8 +564,7 @@ async def generate_report(
         system = "你是叙事文学作家，撰写故事化推演叙事。只输出 JSON。"
         report_temp = 0.75
     else:
-        # 量化模式也使用弧线采样（与叙事模式一致），避免报告只引用尾轮事件
-        arc_events = _sample_arc_events(key_events, domain=report_domain)
+        # 量化模式复用已采样的 arc_events（含 <5 补齐），避免冗余重采样
         numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(arc_events)]
         prompt_str = Template(_REPORT_PROMPT).substitute(
             title=session.title or "推演会话",

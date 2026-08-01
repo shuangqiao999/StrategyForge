@@ -310,18 +310,24 @@ _JSON_SCHEMAS: dict[str, dict] = {
         "required": ["action_type"]
     },
     "strategy_candidates": {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string"},
-                "target": {"type": "string"},
-                "content": {"type": "string"},
-                "rationale": {"type": "string"},
-                "risk_level": {"type": "string"},
+        "type": "object",
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "target": {"type": "string"},
+                        "content": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "risk_level": {"type": "string"},
+                    },
+                    "required": ["action"]
+                },
             },
-            "required": ["action"]
         },
+        "required": ["candidates"],
     },
     "report_quantified": {
         "type": "object",
@@ -377,7 +383,12 @@ class DeductionLLMClient:
         _env_conn = os.getenv("FORGE_LLM_CONNECT_TIMEOUT")
         self._conn_timeout = float(_env_conn) if _env_conn else max(10.0, _reg.connect_timeout)
         _env_gen = os.getenv("FORGE_LLM_GENERATION_TIMEOUT")
-        self._gen_timeout = float(_env_gen) if _env_gen else _reg.generation_timeout
+        if _env_gen:
+            self._gen_timeout = float(_env_gen)
+        else:
+            # generation_timeout=0（不限）时回退到通用 llm_timeout，避免死配置
+            gt = _reg.generation_timeout
+            self._gen_timeout = gt if gt > 0 else float(config.deduction_llm_timeout)
         _client_registry.add(self)
 
     async def _ensure_client(self):
@@ -405,7 +416,6 @@ class DeductionLLMClient:
         self,
         messages: list[dict] | list[Message],
         system: str = "",
-        tools=None,
         max_tokens: int = 0,
         temperature: float = 1.0,
         **kwargs,
@@ -572,9 +582,6 @@ class DeductionLLMClient:
         _client_registry.discard(self)
 
 
-_client_instance: DeductionLLMClient | None = None
-
-# 追踪所有已创建但可能泄漏 httpx 连接的客户端实例，供进程退出时统一清理
 _client_registry: set[DeductionLLMClient] = set()
 
 

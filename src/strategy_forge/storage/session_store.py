@@ -112,13 +112,23 @@ class SessionStore:
         except (TypeError, ValueError):
             total_rounds = 10
         with self._get_conn() as conn:
-            conn.execute(
-                "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
-                "total_rounds, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session_id, title, source_material,
-                 json.dumps(cfg, ensure_ascii=False), total_rounds, now, now),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
+                    "total_rounds, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (session_id, title, source_material,
+                     json.dumps(cfg, ensure_ascii=False), total_rounds, now, now),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                # 会话已存在：更新而非重复插入（幂等）
+                conn.execute(
+                    "UPDATE deduction_sessions SET title=?, source_material=?, config_json=?, "
+                    "total_rounds=?, updated_at=? WHERE id=?",
+                    (title, source_material,
+                     json.dumps(cfg, ensure_ascii=False), total_rounds, now, session_id),
+                )
+                conn.commit()
         return self.get(session_id)
 
     _ALLOWED_COLUMNS = frozenset({
@@ -134,6 +144,12 @@ class SessionStore:
         invalid = set(kwargs) - self._ALLOWED_COLUMNS
         if invalid:
             raise ValueError(f"不允许的列: {', '.join(sorted(invalid))}。允许的列: {', '.join(sorted(self._ALLOWED_COLUMNS))}")
+        # JSON 列：调用方若传 dict/list 则自动序列化，避免 sqlite3 绑定报错
+        json_cols = {"config_json", "report_json", "optimization_report_json", "token_json"}
+        for k in json_cols & set(kwargs):
+            v = kwargs[k]
+            if isinstance(v, (dict, list)):
+                kwargs[k] = json.dumps(v, ensure_ascii=False)
         now = datetime.now().isoformat()
         set_parts = [f"{k} = ?" for k in kwargs]
         set_parts.append("updated_at = ?")

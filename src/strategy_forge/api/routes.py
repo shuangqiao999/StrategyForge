@@ -138,7 +138,7 @@ async def create_session(req: CreateSessionRequest, request: Request):
 @router.get("/session/{session_id}")
 async def get_session(session_id: str, request: Request):
     engine = _get_engine(request)
-    session = engine.get_session(session_id)
+    session = await asyncio.to_thread(engine.get_session, session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
     return {
@@ -154,7 +154,7 @@ async def get_session(session_id: str, request: Request):
 @router.get("/sessions")
 async def list_sessions(request: Request = None):
     engine = _get_engine(request)
-    return engine.list_sessions()
+    return await asyncio.to_thread(engine.list_sessions)
 
 
 @router.delete("/session/{session_id}")

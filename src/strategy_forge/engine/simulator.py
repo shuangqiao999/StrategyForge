@@ -2451,7 +2451,12 @@ class SimulationEngine:
             entity_ids = [a.entity_id for a in self.agents if a.entity_id in states]
             ctx = build_context(states, self._rule_engine, entity_ids, round_number,
                                 prev_spatial=getattr(self, "_spatial_state", None))
-            for mod in self._algorithm_modules:
+            # finalizer（ODE/Physics 写数组）必须最后执行，避免被后续模块读取旧值
+            ordered_mods = sorted(
+                self._algorithm_modules,
+                key=lambda m: 1 if getattr(m, "IS_FINALIZER", False) else 0,
+            )
+            for mod in ordered_mods:
                 try:
                     ctx = mod.execute(ctx)
                 except Exception as e:
