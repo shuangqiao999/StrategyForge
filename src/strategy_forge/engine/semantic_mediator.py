@@ -45,12 +45,70 @@ BASE_TYPE_TIER_DESC: dict[str, str] = {
 }
 
 
+# 领域无关的 Unknown 启发式兜底（C：解决 base_type_mapping 静态表覆盖不到的动态类型）
+# 仅当适配器映射未命中时启用；基于实体类型名的语义词，跨领域通用，无领域偏向。
+# 注意：用多字关键词避免单字误命中（如"政"会误吞"政策/政治行动"），规则按具体→宽泛排序。
+_UNKNOWN_HEURISTIC_RULES: list[tuple[str, frozenset[str]]] = [
+    # 独立决策主体（先于 Resource，使"芯片厂商/汽车企业"这类含主体词的归 Agent）
+    ("Agent", frozenset({
+        "政权", "政府", "国家", "政党", "军队", "武装", "企业", "公司",
+        "集团", "品牌", "平台", "车企", "车厂", "银行", "基金", "机构", "组织",
+        "联盟", "同盟", "协会", "商会", "国际组织", "军阀", "财团", "投行",
+        "券商", "评级机构", "监管部门", "厂商", "制造厂", "巨头", "独角兽",
+    })),
+    # 附属参与者（人物/下属）
+    ("Subordinate", frozenset({
+        "人物", "官员", "将领", "发言人", "员工", "部长", "总统", "主席",
+        "创始人", "总裁", "总监", "议员", "代表", "经理", "负责人",
+    })),
+    # 资源/工具
+    ("Resource", frozenset({
+        "产品", "型号", "武器", "装备", "工具", "物资", "原材料",
+        "芯片", "技术", "专利", "产能", "机型", "软件", "硬件", "车型",
+        "设施", "设备", "资源",
+    })),
+    # 抽象概念
+    ("Concept", frozenset({
+        "概念", "政策", "主义", "指标", "意识形态", "口号", "思潮",
+        "舆论", "规则", "制度", "战略", "模式", "理念", "份额", "数据",
+        "税收", "法规", "理论", "观念", "标准", "体系",
+    })),
+    # 事件
+    ("Event", frozenset({
+        "事件", "冲突", "战争", "战役", "项目", "会议", "选举", "活动",
+        "峰会", "谈判", "并购", "收购", "变动", "取消", "爆发", "协议",
+    })),
+    # 合约
+    ("Contract", frozenset({
+        "条约", "合同", "法案", "协定", "法令", "协议",
+    })),
+    # 地理空间（最后，避免"国家"被"区域"误判）
+    ("Geography", frozenset({
+        "地理", "地点", "区域", "城市", "海峡", "走廊", "海域", "领土",
+        "港口", "河流", "山脉", "大洲",
+    })),
+]
+
+
+def _heuristic_base_type(entity_type: str) -> str:
+    """基于类型名的领域无关启发式映射。未命中返回空串。"""
+    t = (entity_type or "").strip()
+    if not t:
+        return ""
+    for base_type, kws in _UNKNOWN_HEURISTIC_RULES:
+        for kw in kws:
+            if kw in t:
+                return base_type
+    return ""
+
+
 def map_to_base_type(entity_type: str, adapter: "DomainAdapter") -> str:
     """将领域实体类型映射到 7 大类基础类型。
 
     映射规则：
       1. 查找 adapter.base_type_mapping 中该类型属于哪个基础类型
-      2. 未匹配 → 返回 "Unknown"
+      2. 未匹配 → 领域无关启发式兜底（C）
+      3. 启发式也未命中 → 返回 "Unknown"
     """
     if not entity_type or not adapter.base_type_mapping:
         return "Unknown"
@@ -60,6 +118,10 @@ def map_to_base_type(entity_type: str, adapter: "DomainAdapter") -> str:
             continue
         if entity_type in domain_types:
             return base_type
+
+    heuristic = _heuristic_base_type(entity_type)
+    if heuristic:
+        return heuristic
 
     return "Unknown"
 

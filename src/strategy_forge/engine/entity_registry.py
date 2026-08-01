@@ -864,6 +864,7 @@ ${domain_rules}
 - 基础类型为 Agent → 默认可独立建组，最低tier1
 - 基础类型为 Subordinate → 依附上级Agent，最低tier2
 - 基础类型为 Resource/Geography/Contract/Event/Concept → tier3
+- **基础类型为 Unknown**：不预设排除，按决策主权判定——若该实体有独立决策权+独立利益诉求且不依附他者 → tier1/2；若为纯资源/地点/概念/工具或完全依附他者 → tier3。不要因 Unknown 就一律 tier3
 - 不确定时保守保留
 - 频次陷阱：高频≠重要，1次关键决策 > 10次背景提及
 - 白名单中的实体 → 无条件 tier1（但其属下的官员/子品牌仍按域规则降级）

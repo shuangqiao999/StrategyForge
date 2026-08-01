@@ -60,6 +60,7 @@ $alias_map
 4. 仅提取本文本片段中实际出现的实体和关系——不要输出白名单中在本文本内未出现的实体名
 5. 如果以上实体类型无一匹配该实体的本质特征，type 字段请填 "_UNKNOWN"
 6. 若文本体现竞争/对抗/此消彼长，优先使用 polarity=foe 的关系类型；体现协同/共赢用 polarity=ally 的关系类型；不要用中性关系弱化实际存在的利益冲突
+7. 实体归类优先使用语义桶而非字面：主权国家/政府归"国家/政权"，公司/集团/品牌/平台/车企/银行归"企业"，人物归"人物"，纯地理位置/区域归"地理区域"。不要因名称含"区域"就把国家归为地理区域
 
 ## 正确示例
 文本片段："A国商务部将X科技等多家新兴市场科技企业列入贸易限制清单"
@@ -89,11 +90,22 @@ async def build_graph(
 
     client = LLMClient()
 
+    # ── 领域无关的通用类型桶（B：治理"中国→地理区域"归类漂移）──
+    # 无论 ontology 是否生成，以下核心类型恒注入，保证高频实体能归入正确桶。
+    _UNIVERSAL_TYPE_BUCKETS = [
+        "国家", "政权", "企业", "组织", "机构", "人物",
+        "地理区域", "事件", "概念", "政策",
+    ]
+
     entity_type_names = [e.name for e in ontology.entities] if ontology else [
         "Person", "Organization", "Event", "Concept", "Location"
     ]
+    # 合并通用类型桶（去重保序）
+    for _ut in _UNIVERSAL_TYPE_BUCKETS:
+        if _ut not in entity_type_names:
+            entity_type_names.append(_ut)
     # 确保 _UNKNOWN 在所有类型列表中（graph_builder prompt 中的安全阀）
-    if "_UNKNOWN" not in entity_type_names and len(entity_type_names) < 10:
+    if "_UNKNOWN" not in entity_type_names:
         entity_type_names.append("_UNKNOWN")
     relation_type_names = [r.name for r in ontology.relations] if ontology else [
         "联盟", "对抗", "贸易", "制裁", "隶属", "合作", "竞争", "冲突",

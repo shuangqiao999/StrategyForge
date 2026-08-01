@@ -167,12 +167,51 @@ class TestStateSnapshotSig:
         assert _state_snapshot_sig(s1, ["e1"]) != _state_snapshot_sig(s3, ["e1"])
 
 
+class TestUnknownHeuristic:
+    """C: 语义中介层 Unknown 启发式兜底（领域无关，覆盖静态表外的动态类型）。"""
+
+    def _map(self, t):
+        from strategy_forge.engine.semantic_mediator import map_to_base_type
+        from strategy_forge.engine.domain_adapter import get_adapter
+
+        return map_to_base_type(t, get_adapter("narrative"))
+
+    def test_agent_terms(self):
+        for t in ("车企", "平台", "品牌", "银行", "芯片厂商", "独角兽"):
+            assert self._map(t) == "Agent", t
+
+    def test_subordinate_terms(self):
+        for t in ("人物", "官员", "创始人", "总裁"):
+            assert self._map(t) == "Subordinate", t
+
+    def test_resource_terms(self):
+        for t in ("芯片", "产品型号", "武器", "基础设施", "战略资源"):
+            assert self._map(t) == "Resource", t
+
+    def test_concept_terms(self):
+        for t in ("市场份额", "经济指标", "政策", "数据指标"):
+            assert self._map(t) == "Concept", t
+
+    def test_geography_terms(self):
+        for t in ("地理区域", "城市", "海域"):
+            assert self._map(t) == "Geography", t
+
+    def test_known_types_unchanged(self):
+        # 静态表命中优先于启发式
+        assert self._map("国家") == "Agent"
+        assert self._map("企业") == "Agent"
+
+    def test_truly_unknown(self):
+        assert self._map("未知类型XYZ") == "Unknown"
+
+
 if __name__ == "__main__":
     import traceback
 
     failed = 0
     for cls in (TestInferPolarity, TestMergePolarityMap, TestOntologyPolarity,
-                TestSimulatorClassify, TestEventVisibility, TestStateSnapshotSig):
+                TestSimulatorClassify, TestEventVisibility, TestStateSnapshotSig,
+                TestUnknownHeuristic):
         for name in dir(cls):
             if not name.startswith("test_"):
                 continue
