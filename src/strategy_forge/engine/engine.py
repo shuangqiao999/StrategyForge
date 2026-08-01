@@ -187,8 +187,14 @@ class DeductionEngine:
 
     # ── 融合架构·盲点4：外部注入的系统事件（供模拟引擎通道①消费）──
     def get_injected_events_store(self, session_id: str) -> dict:
-        """返回按会话的外部注入事件队列（按引用共享给运行中的模拟引擎）。"""
-        return self._injected_events.setdefault(session_id, {})
+        """返回按会话的外部注入事件队列（按引用共享给运行中的模拟引擎）。
+
+        保证返回的 dict 始终含 "pending" 键（空队列），便于 SimulationEngine 通道①
+        直接读取/清空，避免外部持有方检查键存在性。
+        """
+        store = self._injected_events.setdefault(session_id, {})
+        store.setdefault("pending", [])
+        return store
 
     def inject_system_event(self, session_id: str, event: dict) -> None:
         """注入一个外部系统事件（可选 event_type 匹配规则包 event_impact）。

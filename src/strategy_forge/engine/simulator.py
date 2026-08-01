@@ -2515,12 +2515,25 @@ class SimulationEngine:
             items: list[str] = []
             for k in ripe[-8:]:
                 items.append(f"• [{k['round_occurred']}] {k['content_delivered']}")
-            # 补充 agent 自身相关的事件 + 全部系统事件（融合架构：系统事件全局可见）
-            own_events = [e for e in self._event_history[-6:]
+            # 补充 agent 自身相关的事件 + 全部系统事件（融合架构：系统事件全局可见）。
+            # 噪音防御（措施1）：系统事件每轮每 agent 限幅，防止多实体同时触发时淹没自身事件。
+            # 同时按 (round, event_type) 去重，避免同一系统事件重复展示。
+            sys_seen = 0
+            _sys_limit = 2  # 每轮每个 agent 最多注入 2 条系统事件
+            own_events = [e for e in self._event_history[-8:]
                           if e.get("is_system_event")
                           or e.get("agent") == a.entity_id
                           or a.name in e.get("content", "")]
+            _shown_sys = set()
             for e in own_events:
+                if e.get("is_system_event"):
+                    _sig = (e.get("round"), e.get("event_type"))
+                    if _sig in _shown_sys:
+                        continue
+                    if sys_seen >= _sys_limit:
+                        continue
+                    _shown_sys.add(_sig)
+                    sys_seen += 1
                 text = e.get("content", "")[:80]
                 prefix = "【系统事件】" if e.get("is_system_event") else ""
                 items.append(f"• [R{e.get('round','?')}] {prefix}{text}")
