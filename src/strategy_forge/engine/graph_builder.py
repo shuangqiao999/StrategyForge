@@ -35,6 +35,9 @@ $entity_types
 ## 关系类型（仅使用以下类型）
 $relation_types
 
+## 关系类型定义（含利益极性 foe/ally/neutral，优先选用体现利益冲突或合作的关系）
+$relation_definitions
+
 ## 候选实体白名单（抽取的实体名必须是以下标准名之一）
 $candidate_entities
 
@@ -56,6 +59,7 @@ $alias_map
 3. 每个三元组需要 evidence（原文证据）
 4. 仅提取本文本片段中实际出现的实体和关系——不要输出白名单中在本文本内未出现的实体名
 5. 如果以上实体类型无一匹配该实体的本质特征，type 字段请填 "_UNKNOWN"
+6. 若文本体现竞争/对抗/此消彼长，优先使用 polarity=foe 的关系类型；体现协同/共赢用 polarity=ally 的关系类型；不要用中性关系弱化实际存在的利益冲突
 
 ## 正确示例
 文本片段："A国商务部将X科技等多家新兴市场科技企业列入贸易限制清单"
@@ -95,6 +99,8 @@ async def build_graph(
         "联盟", "对抗", "贸易", "制裁", "隶属", "合作", "竞争", "冲突",
         "投资", "供应", "外交",
     ]
+    # 关系类型定义（含利益极性），供抽取 prompt 注入，缓解关系类型单一化
+    relation_definitions = _build_relation_definitions(ontology)
 
     if preprocessor and preprocessor.result:
         result = preprocessor.result
@@ -121,6 +127,7 @@ async def build_graph(
         await _extract_from_chunks(
             client=client, chunks=result.chunks, graph=graph, log_fn=log_fn,
             entity_types=entity_type_names, relation_types=relation_type_names,
+            relation_definitions=relation_definitions,
             candidate_entities=candidate_entities, alias_map=alias_map_str,
         )
     else:
@@ -134,12 +141,26 @@ async def build_graph(
         await _extract_from_chunks(
             client=client, chunks=chunks, graph=graph, log_fn=log_fn,
             entity_types=entity_type_names, relation_types=relation_type_names,
+            relation_definitions=relation_definitions,
         )
+
+
+def _build_relation_definitions(ontology) -> str:
+    """从 ontology 构建关系类型定义字符串（含利益极性），注入抽取 prompt。"""
+    if not ontology or not ontology.relations:
+        return "(未定义)"
+    lines = []
+    for r in ontology.relations:
+        pol = getattr(r, "polarity", "neutral") or "neutral"
+        desc = (getattr(r, "description", "") or "").strip()
+        lines.append(f"- {r.name}（{pol}）：{desc}" if desc else f"- {r.name}（{pol}）")
+    return "\n".join(lines)
 
 
 async def _extract_from_chunks(
     client, chunks, graph, log_fn,
     entity_types, relation_types,
+    relation_definitions: str = "",
     candidate_entities: str = "", alias_map: str = "",
 ) -> None:
     from strategy_forge.core.config import config
@@ -166,6 +187,7 @@ async def _extract_from_chunks(
         text_overview=_overview,
         entity_types=", ".join(entity_types),
         relation_types=", ".join(relation_types),
+        relation_definitions=relation_definitions or "(未定义)",
         candidate_entities=candidate_entities,
         entity_constraint=entity_constraint,
         alias_map=alias_map,

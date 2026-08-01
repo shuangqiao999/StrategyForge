@@ -710,6 +710,7 @@ class DeductionOrchestrator:
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
             domain=getattr(self, "_domain", ""),
+            relation_polarity=self._build_relation_polarity_map(),
         )
         self._engine = engine
 
@@ -786,6 +787,33 @@ class DeductionOrchestrator:
         self.store.update(self.session.id,
                           status=SessionStatus.REPORTING.value,
                           phase=DeductionPhase.REPORT.value)
+
+    def _build_relation_polarity_map(self) -> dict[str, str]:
+        """组装关系→敌友极性映射（Layer A）：ontology 标注 + 领域适配器覆盖。"""
+        from strategy_forge.engine.domain_adapter import get_adapter
+        from strategy_forge.engine.relation_polarity import merge_polarity_map
+
+        maps: list[dict | None] = []
+        if self.session.ontology:
+            onto_map = {}
+            for r in self.session.ontology.relations:
+                if getattr(r, "polarity", "neutral") in ("foe", "ally"):
+                    onto_map[r.name] = r.polarity
+            if onto_map:
+                maps.append(onto_map)
+        try:
+            adapter = get_adapter(getattr(self, "_domain", ""))
+            adapter_map = adapter.methodology.get("relation_polarity", {}) or {}
+            if adapter_map:
+                maps.append(adapter_map)
+        except Exception:
+            pass
+        merged = merge_polarity_map(*maps)
+        if merged:
+            self._log("simulation",
+                      f"关系极性映射(Layer A): {len(merged)} 种 — "
+                      + ", ".join(f"{k}={v}" for k, v in sorted(merged.items())))
+        return merged
 
     async def _check_goal_convergence(self, rounds: list[SimulationRound]) -> tuple[bool, str]:
         """用 LLM 判定推演核心问题是否已可基于事件给出明确、可辩护的答案。

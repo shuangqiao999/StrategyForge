@@ -247,6 +247,23 @@ aliases:
   entity_aliases: {}
   _strategic_regions: []
 methodology:
+  relation_polarity:
+    对抗: foe
+    竞争: foe
+    冲突: foe
+    制裁: foe
+    封锁: foe
+    攻击: foe
+    背叛: foe
+    围堵: foe
+    打压: foe
+    合作: ally
+    结盟: ally
+    联盟: ally
+    支持: ally
+    援助: ally
+    投资: ally
+    供应: ally
   report_conflict_kw:
   - 冲突
   - 制裁

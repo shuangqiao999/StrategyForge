@@ -9,6 +9,7 @@ from string import Template
 
 from ._utils import extract_text
 from .models import EntityTypeDef, Ontology, RelationTypeDef
+from .relation_polarity import infer_polarity
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ _PROMPT = """你是一个知识本体专家。请分析以下文本，定义其�
     {"name": "实体类型名", "description": "描述该类型实体的特征", "properties": ["属性1", "属性2"]}
   ],
   "relations": [
-    {"name": "关系名", "description": "关系含义", "from_type": "源实体类型", "to_type": "目标实体类型"}
+    {"name": "关系名", "description": "关系含义", "polarity": "foe|ally|neutral", "from_type": "源实体类型", "to_type": "目标实体类型"}
   ]
 }
 ```
@@ -42,7 +43,12 @@ _PROMPT = """你是一个知识本体专家。请分析以下文本，定义其�
 1. 实体类型不超过 10 种，关系类型不超过 15 种
 2. 每种关系必须指定 from_type 和 to_type
 3. 实体类型名和关系名使用中文命名，描述应当简洁精确
-4. 只返回 JSON，不要解释
+4. **每种关系必须标注 polarity（利益极性），判定方法**：
+   - `foe`：零和/利益直接冲突/此消彼长 —— 如 竞争、制裁、抢占份额、对抗、围堵、封锁、打压
+   - `ally`：共赢/协同/利益一致 —— 如 结盟、合作、投资、供应、支持、联合
+   - `neutral`：无明确利益倾向 —— 如 隶属、位于、参与、观察、披露
+   - 判定依据是关系本身的利益极性，而非某条具体边——同一关系类型只有一种极性
+5. 只返回 JSON，不要解释
 
 ## 示例（理解抽象粒度）
 以下示例仅说明\"抽象到什么程度\"——具体类型必须根据你的文本内容来定义。
@@ -102,8 +108,18 @@ def _parse_ontology(raw: str) -> Ontology:
         for e in data.get("entities", [])[:10]
     ]
     relations = [
-        RelationTypeDef(name=r["name"], description=r.get("description", ""),
-                         from_type=r.get("from_type", ""), to_type=r.get("to_type", ""))
+        RelationTypeDef(
+            name=r["name"],
+            description=r.get("description", ""),
+            from_type=r.get("from_type", ""),
+            to_type=r.get("to_type", ""),
+            # LLM 显式 polarity 优先；缺失/非法时用关系名静态推导兜底
+            polarity=(
+                r["polarity"] if str(r.get("polarity", "")).strip().lower()
+                in ("foe", "ally", "neutral")
+                else infer_polarity(r["name"])
+            ),
+        )
         for r in data.get("relations", [])[:15]
     ]
     return Ontology(entities=entities, relations=relations) if entities else _default_ontology()
@@ -134,10 +150,10 @@ def _default_ontology() -> Ontology:
             EntityTypeDef("基础设施", "港口、管道、铁路等设施", []),
         ],
         relations=[
-            RelationTypeDef("works_for", "任职于", "Person", "Organization"),
-            RelationTypeDef("involved_in", "参与事件", "Person", "Event"),
-            RelationTypeDef("located_in", "位于", "Event", "Location"),
-            RelationTypeDef("opposes", "反对/对抗", "Person", "Person"),
-            RelationTypeDef("supports", "支持", "Person", "Person"),
+            RelationTypeDef("works_for", "任职于", "Person", "Organization", "neutral"),
+            RelationTypeDef("involved_in", "参与事件", "Person", "Event", "neutral"),
+            RelationTypeDef("located_in", "位于", "Event", "Location", "neutral"),
+            RelationTypeDef("opposes", "反对/对抗", "Person", "Person", "foe"),
+            RelationTypeDef("supports", "支持", "Person", "Person", "ally"),
         ],
     )

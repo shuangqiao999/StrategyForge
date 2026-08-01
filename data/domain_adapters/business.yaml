@@ -371,6 +371,25 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    占据市场份额: foe
+    竞争关系: foe
+    直接竞争: foe
+    市场份额争夺: foe
+    价格战: foe
+    技术对抗: foe
+    制裁: foe
+    出口管制: foe
+    封锁: foe
+    打压: foe
+    营收贡献: neutral
+    技术适配: neutral
+    生态构建: ally
+    战略合作: ally
+    合资: ally
+    投资: ally
+    供应: ally
+    采购: ally
   report_conflict_kw:
   - 市场份额下滑
   - 反垄断

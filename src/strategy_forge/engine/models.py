@@ -44,6 +44,7 @@ class RelationTypeDef:
     description: str = ""
     from_type: str = ""
     to_type: str = ""
+    polarity: str = "neutral"  # "foe" | "ally" | "neutral"
 
 
 @dataclass

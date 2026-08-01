@@ -292,6 +292,23 @@ aliases:
   entity_aliases: {}
   _strategic_regions: []
 methodology:
+  relation_polarity:
+    敌对: foe
+    对抗: foe
+    竞争: foe
+    冲突: foe
+    背叛: foe
+    追杀: foe
+    决斗: foe
+    复仇: foe
+    同盟: ally
+    结盟: ally
+    合作: ally
+    支持: ally
+    援助: ally
+    伙伴: ally
+    友谊: ally
+    师徒: ally
   report_conflict_kw:
   - 背叛
   - 死亡

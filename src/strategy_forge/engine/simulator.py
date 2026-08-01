@@ -219,13 +219,9 @@ $recent_events
 只返回 JSON，不要解释。"""
 
 
-# 关系→盟友/对手的关键词启发式（中英），用于从 Kuzu RELATES 关系反哺决策与信任。
-_REL_ALLY_KW = ("盟", "同盟", "结盟", "联盟", "支持", "合作", "友", "部下", "下属",
-                "效忠", "追随", "ally", "allied", "support", "friend", "cooperat",
-                "subordinate", "loyal")
-_REL_FOE_KW = ("敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛", "仇", "攻击",
-               "威胁", "rival", "enemy", "hostil", "oppos", "compet", "conflict",
-               "betray", "threat")
+# 关系→敌友的静态关键字表已迁移至 relation_polarity 模块（Layer B 兜底），
+# 结构化映射（Layer A）由 ontology/适配器提供并经 relation_polarity 参数注入。
+from strategy_forge.engine.relation_polarity import infer_polarity, merge_polarity_map
 
 
 class SimulationEngine:
@@ -262,6 +258,7 @@ class SimulationEngine:
         algorithm_modules: list | None = None,
         fsm_override_store: dict | None = None,
         domain: str = "",
+        relation_polarity: dict | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -294,6 +291,10 @@ class SimulationEngine:
         self._merged_triggers = self._merge_domain_triggers(domain)
         self._severity_map = self._load_severity_map(domain)
         self._spatial_state = None   # cached SpatialState, updated after each module run
+        # 关系→敌友极性：Layer A 结构化映射（ontology+适配器）；None 时仅用 Layer B 关键字兜底
+        self._relation_polarity: dict[str, str] = merge_polarity_map(relation_polarity)
+        # Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 精判的缓存（entity_id → {neighbor: polarity}）
+        self._relation_llm_overrides: dict[str, dict[str, str]] = {}
         from strategy_forge.core.config import config
         from strategy_forge.core.providers import registry as _reg
 
@@ -421,14 +422,15 @@ class SimulationEngine:
     def _max_persona_rules(self) -> int:
         return int(self._get_reflection_threshold("max_persona_rules", 3))
 
-    @staticmethod
-    def _classify_relation(relation: str) -> str:
-        r = (relation or "").lower()
-        if any(k in r for k in _REL_FOE_KW):
-            return "foe"
-        if any(k in r for k in _REL_ALLY_KW):
-            return "ally"
-        return "neutral"
+    def _classify_relation(self, relation: str) -> str:
+        # Layer A: 结构化映射（ontology + 适配器覆盖，确定性）
+        if relation in self._relation_polarity:
+            return self._relation_polarity[relation]
+        # Layer C: 单边 LLM 精判缓存（按 agent.entity_id 的邻居名索引）
+        if self._relation_llm_overrides and relation in self._relation_llm_overrides:
+            return self._relation_llm_overrides[relation]
+        # Layer B: 关键字兜底
+        return infer_polarity(relation)
 
     def _build_relationship_context(self) -> None:
         """开局一次性从 Kuzu 预取各 agent 的盟友/对手(关系静态)，缓存并播种信任矩阵。
@@ -445,6 +447,8 @@ class SimulationEngine:
             return
         self._log("simulation", f"关系反哺开始: {len(self.agents)} 个智能体, 图状态={self.graph is not None}")
         total_neighbors = 0
+        # Layer C: 收集 A/B 均 neutral 的边，供开局异步精判（按关系名聚合，保留样本）
+        layer_c_pending: dict[str, list[tuple[str, str]]] = {}
         for a in self.agents:
             allies: list[str] = []
             foes: list[str] = []
@@ -459,8 +463,15 @@ class SimulationEngine:
                 nm = nb.get("name", "")
                 if not nm or nm == a.name:
                     continue
-                kind = self._classify_relation(nb.get("relation", ""))
-                if kind == "ally" and nm not in allies:
+                rel = nb.get("relation", "")
+                kind = self._classify_relation(rel)
+                if kind == "neutral":
+                    # 记录样本用于 Layer C；仅当关系名不在结构化映射且关键字也为 neutral 时
+                    if rel and rel not in self._relation_polarity:
+                        samples = layer_c_pending.setdefault(rel, [])
+                        if len(samples) < 4:
+                            samples.append((a.name, nm))
+                elif kind == "ally" and nm not in allies:
                     allies.append(nm)
                 elif kind == "foe" and nm not in foes:
                     foes.append(nm)
@@ -480,6 +491,68 @@ class SimulationEngine:
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
+        # Layer C 待精判集合（relation → 样本对），供 _run_layer_c_judgment 消费
+        self._layer_c_pending = layer_c_pending
+
+    async def _run_layer_c_judgment(self) -> None:
+        """Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 批量精判，并重建关系上下文。
+
+        只执行一次（由 run_round 首次调用），失败静默回退（保持 A/B 结果）。
+        """
+        pending = getattr(self, "_layer_c_pending", {}) or {}
+        if not pending or getattr(self, "_layer_c_done", False):
+            return
+        self._layer_c_done = True
+        if self.graph is None:
+            return
+        # 过滤：仅精判出现 >=2 个样本的关系名，避免一次性大量 LLM 调用
+        candidates = {rel: samples for rel, samples in pending.items() if len(samples) >= 2}
+        if not candidates:
+            return
+        try:
+            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+            from strategy_forge.core.llm_client import Message
+            from strategy_forge.core.config import config
+            client = LLMClient()
+            judged: dict[str, str] = {}
+            for rel, samples in candidates.items():
+                sample_lines = "\n".join(
+                    f"- {a} → {b} 关系「{rel}」" for a, b in samples)
+                prompt = (
+                    "你是战略关系语义分析专家。判断以下实体间关系属于哪种利益极性。\n"
+                    "只输出 JSON：{\"polarity\": \"foe|ally|neutral\"}\n\n"
+                    f"{sample_lines}\n\n"
+                    "判定方法：\n"
+                    "- foe：零和/利益直接冲突/此消彼长\n"
+                    "- ally：共赢/协同/利益一致\n"
+                    "- neutral：无明确利益倾向\n"
+                    "若从样本无法判断，输出 neutral。"
+                )
+                resp = await client.chat_json(
+                    [Message(role="user", content=prompt)],
+                    system="你是战略关系语义分析专家，只输出 JSON。",
+                    schema_name="relation_polarity", temperature=0,
+                    max_tokens=min(config.deduction_intel_max_tokens, 200),
+                )
+                try:
+                    import json as _json
+                    from strategy_forge.engine._utils import extract_text as _et
+                    data = _json.loads(_et(resp))
+                    pol = str(data.get("polarity", "neutral")).strip().lower()
+                    if pol in ("foe", "ally"):
+                        judged[rel] = pol
+                except Exception:
+                    continue
+            if judged:
+                self._relation_llm_overrides.update(judged)
+                self._log("simulation",
+                          f"关系精判(Layer C): {len(judged)} 种关系升级 — "
+                          + ", ".join(f"{k}={v}" for k, v in judged.items()))
+                # 基于精判结果重建关系上下文与信任矩阵
+                self._rel_context = {}
+                self._build_relationship_context()
+        except Exception as e:
+            logger.warning("[Simulator] Layer C 关系精判失败，使用 A/B 结果: %s", e)
 
     def _seed_polarization_relations(self, graph_seeded: int) -> None:
         """对无图谱关系的 agent，按 polarization 指标自动划分敌友。
@@ -965,6 +1038,9 @@ class SimulationEngine:
             return await self._run_round_quantified(round_number)
 
         from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
+
+        # Layer C: 首次开局精判 neutral 关系（幂等，仅一次）
+        await self._run_layer_c_judgment()
 
         sim_round = SimulationRound(round_number=round_number)
         client = LLMClient()
