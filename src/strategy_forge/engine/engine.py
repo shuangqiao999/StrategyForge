@@ -41,6 +41,9 @@ class DeductionEngine:
         # 用户强制动作 override（按会话 → {agent: {action_type,intensity,target,remaining}}），
         # 由 API 写入、运行中的 SimulationEngine 按引用逐轮消费。
         self._fsm_overrides: dict[str, dict[str, dict]] = {}
+        # 融合架构·盲点4：外部注入的系统事件（按会话 → {pending: [...]}），
+        # 由 API 写入、运行中的 SimulationEngine 通道①逐轮消费。
+        self._injected_events: dict[str, dict] = {}
 
     _RUNNING_GRAPH_STATUSES = frozenset({
         "ontology_running", "graph_running", "agents_running",
@@ -182,6 +185,20 @@ class DeductionEngine:
             "target": target or "", "remaining": max(1, int(rounds)),
         }
 
+    # ── 融合架构·盲点4：外部注入的系统事件（供模拟引擎通道①消费）──
+    def get_injected_events_store(self, session_id: str) -> dict:
+        """返回按会话的外部注入事件队列（按引用共享给运行中的模拟引擎）。"""
+        return self._injected_events.setdefault(session_id, {})
+
+    def inject_system_event(self, session_id: str, event: dict) -> None:
+        """注入一个外部系统事件（可选 event_type 匹配规则包 event_impact）。
+
+        事件在下一轮模拟开始时由通道①消费，确定性冲击相关实体指标。
+        """
+        store = self.get_injected_events_store(session_id)
+        store.setdefault("pending", []).append(dict(event))
+        self.log(session_id, "intervene", f"注入系统事件: {event.get('event_type') or event.get('content')}")
+
     async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)
         if session is None:
@@ -207,6 +224,7 @@ class DeductionEngine:
             round_callback=lambda rnd, total, snap=None: self.signal_round_complete(session_id, rnd, total, snap),
             resume_start_round=resume_start_round,
             fsm_override_store=self.get_fsm_override_store(session_id),
+            injected_events_store=self.get_injected_events_store(session_id),
         )
 
         try:

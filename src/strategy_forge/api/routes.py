@@ -70,6 +70,10 @@ class InterventionRequest(BaseModel):
     content: str = Field(default="", description="用户干预内容")
     scope: str = Field(default="during", description="pre | during")
     round_number: int | None = Field(None, description="指定生效轮次")
+    # 融合架构·盲点4：可选结构化事件字段。提供 event_type 时走规则包 event_impact 通道①
+    # 确定性冲击相关实体指标；仅 content 时保持原有文字提示行为。
+    event_type: str | None = Field(None, description="事件类型（匹配规则包 event_impact）")
+    target_id: str = Field(default="", description="冲击目标实体ID/名称（可选，默认发起者自身）")
 
 
 class FsmOverrideRequest(BaseModel):
@@ -422,8 +426,20 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
             round_number=round_num,
             event_type="user_intervention", priority=1.0,
         )
-        engine.log(session_id, "intervene", f"用户干预: {req.content}")
-        return {"session_id": session_id, "injected": True, "round_number": round_num}
+        # 融合架构·盲点4：可选结构化事件 → 走规则包 event_impact 通道①确定性冲击指标
+        if req.event_type:
+            engine.inject_system_event(session_id, {
+                "event_type": req.event_type,
+                "content": req.content,
+                "target_id": req.target_id,
+                "round": round_num,
+            })
+            engine.log(session_id, "intervene",
+                       f"注入系统事件(数值冲击): {req.event_type} → {req.target_id or session_id}")
+        else:
+            engine.log(session_id, "intervene", f"用户干预: {req.content}")
+        return {"session_id": session_id, "injected": True, "round_number": round_num,
+                "event_type": req.event_type or "user_intervention"}
     except Exception as e:
         raise HTTPException(500, f"干预注入失败: {e}")
 

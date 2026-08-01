@@ -292,6 +292,7 @@ class SimulationEngine:
         fsm_override_store: dict | None = None,
         domain: str = "",
         relation_polarity: dict | None = None,
+        injected_events_store: dict | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -317,6 +318,8 @@ class SimulationEngine:
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
         self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
+        # 融合架构·盲点4：外部注入事件队列（按引用，供通道①每轮消费）
+        self._injected_events_store: dict = injected_events_store if injected_events_store is not None else {}
         # 叙事模式环境变量（仅叙事模式使用）
         self._narrative_env: dict[str, float] = self._init_narrative_env(domain)
         self._domain = domain
@@ -1096,21 +1099,45 @@ class SimulationEngine:
 
         仅量化模式（_rule_engine 非空）生效。事件只对发起者与目标实体生效，
         一次性注入指标增量，使"制裁/并购"等事件确定性地改变局势而非仅作文字上下文。
+
+        关键（缺陷2 修复）：只处理【系统事件 / 外部注入事件】，跳过 agent 主动行动——
+        agent 主动行动的效果已由 rule_engine.compute_deltas 结算，再走事件冲击会造成双重扣减。
         返回实际应用的事件数。
         """
         if not self._quantified or self._rule_engine is None:
             return 0
         impact_map = self._rule_engine.event_impact_map()
-        if not impact_map:
-            return 0
+        # 规则包内的 agent 可执行动作（其效果已由行动结算处理，事件冲击需跳过）
+        action_set = set(self._rule_engine.actions())
         applied = 0
         ranges = self._rule_engine.ranges()
+
+        # 融合架构·盲点4：消费外部注入的系统事件（注入为当前轮系统事件，随后走通道①）
+        pending = self._injected_events_store.get("pending", []) if self._injected_events_store else []
+        if pending:
+            for _ev in pending:
+                self._append_event({
+                    "agent": _ev.get("agent", "system"),
+                    "agent_name": _ev.get("agent_name", "系统"),
+                    "action": "system_injected",
+                    "content": _ev.get("content", _ev.get("event_type", "") or "外部事件"),
+                    "round": round_number,
+                    "event_type": _ev.get("event_type", ""),
+                    "target_id": _ev.get("target_id", ""),
+                    "is_system_event": True,
+                    "impact_map": _ev.get("impact") or {},
+                })
+            self._injected_events_store["pending"] = []
+
         for evt in self._event_history:
             if evt.get("round") != round_number:
                 continue
             et = evt.get("event_type", "") or evt.get("action", "")
             imp = impact_map.get(et)
             if not imp or not isinstance(imp, dict):
+                continue
+            # 跳过 agent 主动行动：避免"行动结算 + 事件冲击"双重扣减
+            if not evt.get("is_system_event") and et in action_set:
                 continue
             targets = set()
             if evt.get("agent"):
@@ -1167,6 +1194,16 @@ class SimulationEngine:
                 if isinstance(imp, dict):
                     st.apply_deltas({k: float(v) for k, v in imp.items()},
                                     round_number, self._rule_engine.ranges())
+                # 系统事件持久化到 LanceDB（缺陷1 修复）：使其可被后续轮次语义召回，
+                # 而非仅停留在内存 _event_history 的最近几条。
+                if self._persist_events and self._preprocessor is not None:
+                    try:
+                        self._preprocessor.add_event_memory(
+                            content=content, agent_id=st.id,
+                            round_number=round_number,
+                            event_type=f"system_{name}", priority=0.9)
+                    except Exception as _e:
+                        logger.debug("[Simulator] 系统事件写入 LanceDB 失败: %s", _e)
                 generated += 1
         return generated
 
@@ -2193,10 +2230,17 @@ class SimulationEngine:
             return None
 
     def _dispatch_events(self, round_number: int) -> None:
-        """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。"""
+        """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。
+
+        缺陷3 修复：事件带唯一 _eid，已分发的事件记录在 _dispatched_eids 中，
+        避免通道②二次分发时重复注入知识队列。
+        """
         from uuid import uuid4
         alive_ids = [a.entity_id for a in self.agents if a.entity_id in self._states]
         name_to_id = self._name_to_id
+        if not hasattr(self, "_dispatched_eids"):
+            self._dispatched_eids: set = set()
+        dispatched = self._dispatched_eids
         for evt in self._event_history:
             if evt.get("round") != round_number:
                 continue
@@ -2204,6 +2248,11 @@ class SimulationEngine:
             actor_name = evt.get("agent_name", "")
             content = evt.get("content", "")
             if not actor_id or not content:
+                continue
+            _eid = evt.get("_eid")
+            if _eid is None:
+                _eid = evt["_eid"] = f"eid-{uuid4().hex[:8]}"
+            if _eid in dispatched:
                 continue
             for a_id in alive_ids:
                 if a_id == actor_id:
@@ -2238,6 +2287,8 @@ class SimulationEngine:
                 queue = self._agent_knowledge[a_id]
                 if len(queue) > 500:
                     self._agent_knowledge[a_id] = queue[-500:]
+            # 事件分发完成，标记去重（缺陷3 修复）
+            dispatched.add(_eid)
 
     def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
         """交付该 agent 的已熟事件（deliver_round <= 当前轮），从队列中移除。"""

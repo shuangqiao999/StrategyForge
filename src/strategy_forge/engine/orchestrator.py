@@ -142,6 +142,7 @@ class DeductionOrchestrator:
         round_callback: Callable[[int, int], None] | None = None,
         resume_start_round: int = 0,
         fsm_override_store: dict | None = None,
+        injected_events_store: dict | None = None,
     ) -> None:
         self.session = session
         self.graph = graph
@@ -151,6 +152,8 @@ class DeductionOrchestrator:
         self._round_callback = round_callback
         self._resume_start_round = resume_start_round
         self._fsm_override_store = fsm_override_store if fsm_override_store is not None else {}
+        # 融合架构·盲点4：外部注入事件队列（按引用，供 SimulationEngine 通道①消费）
+        self._injected_events_store = injected_events_store if injected_events_store is not None else {}
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -738,6 +741,7 @@ class DeductionOrchestrator:
             seed=abs(hash(self.session.id)) % (2**31),
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
+            injected_events_store=self._injected_events_store,
             domain=getattr(self, "_domain", ""),
             relation_polarity=self._build_relation_polarity_map(),
         )
