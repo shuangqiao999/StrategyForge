@@ -52,6 +52,7 @@ class FiniteStateMachineModule(AlgorithmModule):
         self._action_map = dict(params.get("action_map", {}))
         command = params.get("command_states", ["combat"])
         self._command_states = set(command if isinstance(command, list) else [command])
+        self._polar_threshold = float(params.get("polar_threshold", 3.0))
 
     def execute(self, ctx: ModuleContext) -> ModuleContext:
         n = len(next(iter(ctx.arrays.values()))) if ctx.arrays else 0
@@ -186,8 +187,9 @@ class FiniteStateMachineModule(AlgorithmModule):
                 if polar is not None and len(polar) == n:
                     own_pol = float(polar[idx])
                     others = [j for j in range(n) if j != idx]
-                    enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0]
-                    ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= 3.0]
+                    pt = getattr(self, "_polar_threshold", 3.0)
+                    enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > pt]
+                    ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= pt]
                 else:
                     # Fallback: treat all other entities as enemies
                     enemy_ids = [j for j in range(n) if j != idx]

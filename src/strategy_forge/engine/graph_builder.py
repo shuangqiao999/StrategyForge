@@ -92,11 +92,9 @@ async def build_graph(
     if "_UNKNOWN" not in entity_type_names and len(entity_type_names) < 10:
         entity_type_names.append("_UNKNOWN")
     relation_type_names = [r.name for r in ontology.relations] if ontology else [
-        "works_for", "involved_in", "located_in", "opposes", "supports"
+        "联盟", "对抗", "贸易", "制裁", "隶属", "合作", "竞争", "冲突",
+        "投资", "供应", "外交",
     ]
-
-    total_entities = 0
-    total_relations = 0
 
     if preprocessor and preprocessor.result:
         result = preprocessor.result
@@ -126,10 +124,8 @@ async def _extract_from_chunks(
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
     from strategy_forge.core.llm_client import Message
-    system = "你是知识图谱构建专家。严格从候选白名单中抽取实体和关系三元组——禁止新增任何不在白名单中的实体名。只输出 JSON。"
+    system = "你是知识图谱构建专家。从原文中提取实体和关系三元组，只输出 JSON。"
 
-    total_entities = 0
-    total_relations = 0
     # 构建全文概览：从 chunks 多处采样
     texts = [(c if isinstance(c, str) else c.content) for c in chunks]
     _n = len(texts)
@@ -176,7 +172,6 @@ async def _extract_from_chunks(
             ent_id = _make_id(ent.get("entity", ""), ett)
             graph.upsert_entity(ent_id, ent.get("entity", ""), ett,
                                ent.get("description", ""))
-            total_entities += 1
         name_to_type = {e.get("entity", ""): e.get("type", "") for e in entities}
         for rel in relations:
             st = name_to_type.get(rel.get("source", ""), "")
@@ -185,7 +180,6 @@ async def _extract_from_chunks(
             tid = _make_id(rel.get("target", ""), tt)
             graph.upsert_relation(sid, tid, rel.get("relation", ""),
                                  evidence=rel.get("evidence", ""))
-            total_relations += 1
         _report = f"  块 {i+1}/{len(chunks)}: {len(entities)} 实体, {len(relations)} 关系"
         if relations:
             _sample = [r.get("relation","?") for r in relations[:5]]

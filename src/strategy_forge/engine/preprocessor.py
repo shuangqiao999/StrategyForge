@@ -216,7 +216,8 @@ class DeductionPreprocessor:
                 "visibility": visibility or "public",
                 "participants": participants or "",
             }])
-        except Exception:
+        except Exception as e1:
+            logger.warning("[Preprocessor] event add failed (full schema): %s, trying reduced schema", e1)
             try:
                 # Fallback for tables without visibility/participants columns
                 self._event_table.add([{
@@ -226,14 +227,18 @@ class DeductionPreprocessor:
                     "session_id": self.session_id,
                     "priority": priority, "event_type": event_type,
                 }])
-            except Exception:
-                # Fallback for old tables without priority/event_type columns
-                self._event_table.add([{
-                    "event_id": str(uuid.uuid4()),
-                    "vector": vec, "content": content,
-                    "agent_id": agent_id, "round_number": round_number,
-                    "session_id": self.session_id,
-                }])
+            except Exception as e2:
+                logger.warning("[Preprocessor] event add failed (reduced schema): %s, trying minimal schema", e2)
+                try:
+                    # Fallback for old tables without priority/event_type columns
+                    self._event_table.add([{
+                        "event_id": str(uuid.uuid4()),
+                        "vector": vec, "content": content,
+                        "agent_id": agent_id, "round_number": round_number,
+                        "session_id": self.session_id,
+                    }])
+                except Exception as e3:
+                    logger.error("[Preprocessor] event add failed (all schemas): %s — event data lost", e3)
         # 事件表已变更，标记 FTS 索引需在下次检索前重建（每轮至多一次）
         self._event_fts_dirty = True
 
@@ -401,7 +406,11 @@ class DeductionPreprocessor:
         except Exception:
             return []
         results: list[str] = []
+        min_dist = getattr(config, "deduction_similarity_threshold", 0.3)
         for r in raw:
+            dist = r.get("_distance", 0.0)
+            if dist > min_dist:
+                continue
             content = r.get("content", "")
             if not content:
                 continue
