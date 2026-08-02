@@ -422,6 +422,39 @@ class TestDefectRegression:
             "custom impact must apply"
 
 
+class TestReportNumericFilter:
+    """I. 报告数值过滤：LLM 自创的具体数字应替换为定性趋势词。"""
+
+    def _f(self, t):
+        from strategy_forge.engine.reporter import _strip_numeric_figures
+        return _strip_numeric_figures(t)
+
+    def test_percent_stripped(self):
+        assert "62%" not in self._f("华为占据62%份额且品牌上升")
+        assert "较大比例" in self._f("华为占据62%份额且品牌上升")
+
+    def test_percent_range_stripped(self):
+        out = self._f("库迪核心单品提价30%-60%以修复利润")
+        assert "30%" not in out and "60%" not in out
+        assert "显著幅度" in out
+
+    def test_number_with_trend_word(self):
+        out = self._f("现金流下降12")
+        assert "12" not in out
+        assert "下降明显" in out
+
+    def test_event_ref_preserved(self):
+        out = self._f("[事件106]中华为的invest_rnd动作 → 直接导致技术领先度持续高位")
+        assert "[事件106]" in out, "event reference must be preserved"
+
+    def test_chinese_fraction(self):
+        assert "数成" in self._f("提价3成以修复利润")
+
+    def test_round_number_stripped(self):
+        out = self._f("轮次10完成")
+        assert "显著" in out
+
+
 class TestModeBoundary:
     """F. 模式边界：叙事模式不调用融合通道（边界不被模糊）。"""
 
@@ -453,7 +486,7 @@ if __name__ == "__main__":
     total = 0
     for cls in (TestRuleEngineExt, TestChannel1, TestChannel2,
                 TestDispatchDedup, TestBlindspot4, TestNoiseDefense,
-                TestDefectRegression, TestModeBoundary):
+                TestDefectRegression, TestReportNumericFilter, TestModeBoundary):
         for name in dir(cls):
             if not name.startswith("test_"):
                 continue

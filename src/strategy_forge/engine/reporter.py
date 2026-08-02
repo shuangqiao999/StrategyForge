@@ -64,8 +64,9 @@ $turning_points
    - **硬性要求**：正文每个维度段落**必须**以 `### 维度名` 开头（如 `### 科技竞赛`、`### 区域安全`），禁止写成无标题的平铺段落。
    - 开篇（150字内）：作为全文第一个 `###` 段落之前的引入段，直接点明全局核心矛盾与主要博弈轴线。禁用"报告显示""推演表明""第X轮推演中"等废话。
    - 正文：按战略维度分段，每段以 `### ` 开头。因果句格式：`[事件N]中A的[动作] → B的[领域]发生[变化] → 迫使B[反制]`。
-   - 结尾（150字内）：总览系统级风险与胜负手临界点。
-   - 严禁输出任何具体数值/评分，不得出现 JSON、表格或项目符号列表。
+    - 结尾（150字内）：总览系统级风险与胜负手临界点。
+    - **严禁输出任何具体数值/百分比/评分/指标读数**（如"62%""30%-60%""Δ15"）。推演是方向性预估，具体数字会误导读者。表达程度只能用定性趋势词：高位/中位/偏低/低位承压/显著上升/下降/趋稳/逼近淘汰线/临界点/大幅/显著/承压。禁止编造任何现实中不存在的精确数字。
+    - 若确实需要强调某方优势或劣势，用"占据市场主导地位""份额优势明显""现金流吃紧""逼近淘汰线"等定性表述，不得附具体数字。
 
    正确正文格式示例：
    ```
@@ -351,7 +352,12 @@ def _build_quantified_summary(
             segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh}{qualifier})")
 
         parts.append(f"{name}: {'; '.join(segs) if segs else '无关键指标'}")
-    return "\n".join(parts)
+    return "\n".join(parts) + (
+        "\n\n【数值使用说明】以上为推演真实指标的趋势定性（档位/趋势/累计变化/淘汰线），"
+        "仅作你的分析依据。报告正文严禁引用任何具体数值/百分比/读数，只能使用定性词"
+        "（高位/中位/偏低/低位承压/显著上升/下降/趋稳/逼近淘汰线/临界点）。"
+        "Δ 等变化量仅用于你判断方向，不得写入报告。"
+    )
 
 
 async def generate_report(
@@ -668,6 +674,13 @@ async def generate_report(
     narrative = str(narrative_raw) if not isinstance(narrative_raw, str) else narrative_raw
     conclusion = str(conclusion_raw) if not isinstance(conclusion_raw, str) else conclusion_raw
 
+    # 方案B：数值过滤兜底——把 LLM 可能自创的百分比/具体数字替换为定性趋势词，
+    # 防止"62%份额""提价30%-60%"等幻觉数字误导读者（推演是方向性预估）。
+    narrative = _strip_numeric_figures(narrative)
+    conclusion = _strip_numeric_figures(conclusion)
+    normalized_risks = [_strip_numeric_figures(r) for r in normalized_risks]
+    normalized_recs = [_strip_numeric_figures(r) for r in normalized_recs]
+
     return DeductionReport(
         session_id=session.id,
         summary=narrative,
@@ -681,6 +694,39 @@ async def generate_report(
         conclusion=conclusion,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
+
+
+def _strip_numeric_figures(text: str) -> str:
+    """方案B：过滤报告中的具体数值/百分比，替换为定性趋势词。
+
+    推演是方向性预估，LLM 可能自创"62%份额""提价30%-60%"等幻觉数字误导读者。
+    将"数字+%"，"数字-数字%"，纯数字等模式替换为中性定性表述。
+    保留事件编号 [事件N]、轮次 [R#] 等结构性引用（它们是因果链锚点，非指标数值）。
+    """
+    import re as _re
+    if not text:
+        return text
+    # 保护 [事件N]、[轮N]、[语义召回] 等结构标记
+    _PLACEHOLDER = "\x00"
+    _protected: list[str] = []
+    def _hold(m):
+        _protected.append(m.group(0))
+        return _PLACEHOLDER
+    text = _re.sub(r'\[[^\]]*?\]', _hold, text)
+    # 百分比区间：30%-60% / 30~60% / 3成
+    text = _re.sub(r'[+-]?\d+(?:\.\d+)?\s*[%~－-]\s*[+-]?\d+(?:\.\d+)?\s*%?', '显著幅度', text)
+    # 成数量词：3成 → 数成
+    text = _re.sub(r'[+-]?\d+(?:\.\d+)?\s*成', '数成', text)
+    # 单独百分比：62% / 8.5%
+    text = _re.sub(r'[+-]?\d+(?:\.\d+)?\s*%', '较大比例', text)
+    # 单独数字（含正负）：如 "Δ15" "下降12" "提升8" —— 替换为"明显变化"
+    text = _re.sub(r'((?:Δ|变化|下降|上升|提升|降低|增加|减少|增长|下滑|上涨))[+-]?\d+(?:\.\d+)?',
+                   r'\g<1>明显', text)
+    text = _re.sub(r'[+-]?\d+(?:\.\d+)?', '显著', text)
+    # 恢复受保护标记
+    for p in _protected:
+        text = text.replace(_PLACEHOLDER, p, 1)
+    return text
 
 
 def _parse_report_json(raw: str) -> dict[str, Any]:
