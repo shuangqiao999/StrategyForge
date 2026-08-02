@@ -454,6 +454,23 @@ class TestReportNumericFilter:
         out = self._f("轮次10完成")
         assert "显著" in out
 
+    def test_date_digits_preserved(self):
+        """修复1：时间数字（年/月/日/季度）不被替换为'显著'。"""
+        out = self._f("2026年7月的商业格局")
+        assert "2026年7月" in out, f"date digits must be preserved: {out}"
+        assert "显著年" not in out, f"must not become 显著年: {out}"
+
+    def test_quarter_and_day_preserved(self):
+        out = self._f("第3季度末完成转型，15日发布新品")
+        assert "第3季度" in out and "15日" in out, f"time refs must be preserved: {out}"
+
+    def test_report_prompt_forbids_time(self):
+        """修复2：量化报告 prompt 开篇禁止时间描述。"""
+        import inspect
+        from strategy_forge.engine import reporter
+        src = inspect.getsource(reporter)
+        assert "严禁以时间开头或描述时间背景" in src, "prompt must forbid time in opening"
+
 
 class TestModeBoundary:
     """F. 模式边界：叙事模式不调用融合通道（边界不被模糊）。"""
