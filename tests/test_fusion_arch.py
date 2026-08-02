@@ -438,38 +438,36 @@ class TestReportNumericFilter:
         assert "30%" not in out and "60%" not in out
         assert "显著幅度" in out
 
-    def test_number_with_trend_word(self):
-        out = self._f("现金流下降12")
-        assert "12" not in out
-        assert "下降明显" in out
+    def test_plain_numbers_preserved(self):
+        """极简兜底：普通数字（非百分比）不再被替换。"""
+        assert "12" in self._f("现金流下降12")
+        assert "3成" in self._f("提价3成以修复利润")
 
     def test_event_ref_preserved(self):
         out = self._f("[事件106]中华为的invest_rnd动作 → 直接导致技术领先度持续高位")
         assert "[事件106]" in out, "event reference must be preserved"
 
-    def test_chinese_fraction(self):
-        assert "数成" in self._f("提价3成以修复利润")
-
-    def test_round_number_stripped(self):
-        out = self._f("轮次10完成")
-        assert "显著" in out
-
     def test_date_digits_preserved(self):
-        """修复1：时间数字（年/月/日/季度）不被替换为'显著'。"""
+        """极简兜底：日期/时间数字不被误伤为'显著'。"""
         out = self._f("2026年7月的商业格局")
-        assert "2026年7月" in out, f"date digits must be preserved: {out}"
+        assert "2026年7月" in out, f"date must be preserved untouched: {out}"
         assert "显著年" not in out, f"must not become 显著年: {out}"
 
     def test_quarter_and_day_preserved(self):
         out = self._f("第3季度末完成转型，15日发布新品")
         assert "第3季度" in out and "15日" in out, f"time refs must be preserved: {out}"
 
+    def test_round_number_preserved(self):
+        out = self._f("第10轮完成")
+        assert "第10轮" in out, "round reference must be preserved"
+
     def test_report_prompt_forbids_time(self):
-        """修复2：量化报告 prompt 开篇禁止时间描述。"""
+        """量化报告 prompt 开篇样式明确禁止时间描述。"""
         import inspect
         from strategy_forge.engine import reporter
         src = inspect.getsource(reporter)
-        assert "严禁以时间开头或描述时间背景" in src, "prompt must forbid time in opening"
+        assert "开篇样式" in src, "prompt must have opening style section"
+        assert "任何日期/时间表述" in src, "prompt must forbid time in opening"
 
 
 class TestModeBoundary:
