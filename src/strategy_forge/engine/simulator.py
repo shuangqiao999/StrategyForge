@@ -2533,16 +2533,7 @@ class SimulationEngine:
 
             lines = [_detail(a) for a in shown]
             if rest:
-                arr = np.stack([
-                    np.array([states[a.entity_id].metrics.get(m, 0.0) for m in metrics_list],
-                             dtype=np.float64) for a in rest]) if metrics_list else None
-                if arr is not None and arr.size:
-                    avgs, mins, maxs = arr.mean(0), arr.min(0), arr.max(0)
-                    stat = ", ".join(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]"
-                                     for i, m in enumerate(metrics_list))
-                    lines.append(f"其余 {len(rest)} 方（全局统计，未直接接触）: {stat}")
-                else:
-                    lines.append(f"其余 {len(rest)} 方（未直接接触）")
+                lines.append(f"其余 {len(rest)} 方（未直接接触，态势未知）")
             return "\n".join(lines) or "（无其他参与方）"
 
         def env_context() -> str:
