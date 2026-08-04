@@ -1089,7 +1089,7 @@ class SimulationEngine:
         no_reflect_rounds = self._get_reflection_threshold("no_reflect_rounds", 4)
         alarm_mult = self._get_reflection_threshold("metric_alarm_mult", 1.3)
         self_interval = self._get_reflection_threshold("self_reflect_interval", 5)
-        pattern_cnt = self._get_reflection_threshold("pattern_warn_count", 5)
+        pattern_cnt = self._get_reflection_threshold("pattern_warn_count", 8)
         # 条件1：环境累积剧变
         total_drift = 0.0
         for k in self._narrative_env:
@@ -1099,15 +1099,16 @@ class SimulationEngine:
                 return f"环境剧变({k}{delta:+.0f})"
         if total_drift > drift_cumul:
             return f"环境累计漂移({total_drift:.0f})"
-        # 条件2：关系网络变化
-        prev_rels = getattr(self, "_prev_rel_map", {})
-        curr_rels = self._rel_context.get(agent_id, {})
-        prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
-        curr_allies = set(curr_rels.get("allies", []))
-        prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
-        curr_opps = set(curr_rels.get("opponents", []))
-        if prev_allies != curr_allies or prev_opps != curr_opps:
-            return "关系网络变化"
+        # 条件2：关系网络变化（第1轮豁免——初始化过程中无真正"变化"可言）
+        if round_number > 1:
+            prev_rels = getattr(self, "_prev_rel_map", {})
+            curr_rels = self._rel_context.get(agent_id, {})
+            prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
+            curr_allies = set(curr_rels.get("allies", []))
+            prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
+            curr_opps = set(curr_rels.get("opponents", []))
+            if prev_allies != curr_allies or prev_opps != curr_opps:
+                return "关系网络变化"
         # 条件3：长期无反思保护
         if (round_number - last_r) > no_reflect_rounds:
             return "长期无反思保护"
@@ -1707,6 +1708,15 @@ class SimulationEngine:
                 return False
             text = rule_text
             old_extra = agent.system_prompt_extra
+            # 去重：新准则与已有准则相似度 > 0.7 则跳过，避免反复生成近似内容
+            if old_extra:
+                existing_rules = old_extra.split("；")
+                for old in existing_rules:
+                    if old and text:
+                        common = len(set(old) & set(text))
+                        denom = max(len(set(old)), len(set(text)), 1)
+                        if common / denom > 0.7:
+                            return False
             if old_extra and text not in old_extra:
                 parts = old_extra.split("；")
                 max_rules = self._max_persona_rules()
@@ -2292,6 +2302,15 @@ class SimulationEngine:
             if not text or "无需调整" in text or len(text) < 2:
                 return None
             old_extra = agent.system_prompt_extra
+            # 去重：新准则与已有准则相似度 > 0.7 则跳过
+            if old_extra:
+                existing_rules = old_extra.split("；")
+                for old in existing_rules:
+                    if old and text:
+                        common = len(set(old) & set(text))
+                        denom = max(len(set(old)), len(set(text)), 1)
+                        if common / denom > 0.7:
+                            return None
             if old_extra and text not in old_extra:
                 parts = old_extra.split("；")
                 max_rules = self._max_persona_rules()
