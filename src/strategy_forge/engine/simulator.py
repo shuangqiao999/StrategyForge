@@ -95,7 +95,7 @@ def _build_causal_feedback(
         if items:
             parts.append("连锁反应 — " + "，".join(items[:3]))
     # 后续反应：从同一轮 event_history 中提取他人对 actor 或 target 的回应
-    reactions = _extract_reactions(actor_name, target_name, event_history, round_number, name_to_id)
+    reactions = _extract_reactions(actor_name, target_name, event_history, round_number, name_to_id, actor_id, actor_name)
     if reactions:
         parts.append("后续反应 — " + reactions)
     if not parts:
@@ -106,12 +106,14 @@ def _build_causal_feedback(
 def _extract_reactions(
     actor_name: str, target_name: str, event_history: list[dict],
     round_number: int, name_to_id: dict[str, str],
+    observer_id: str = "", observer_name: str = "",
 ) -> str:
-    """从当前轮事件历史中提取他人对 acter/target 的回应。"""
+    """从当前轮事件历史中提取他人对 acter/target 的回应（消上帝视角L2：可见性过滤）。"""
     reacting: list[str] = []
     target_events = [e for e in event_history
                      if e.get("round") == round_number
-                     and e.get("agent_name", "") not in (actor_name, "")]
+                     and e.get("agent_name", "") not in (actor_name, "")
+                     and _is_event_visible_to(observer_id, observer_name, e)]
     for e in target_events[-6:]:
         name = e.get("agent_name", "?")
         content = (e.get("content", "") or "")[:50]
@@ -601,8 +603,29 @@ class SimulationEngine:
     def _seed_polarization_relations(self, graph_seeded: int) -> None:
         """对无图谱关系的 agent，按 polarization 指标自动划分敌友。
         
-        此方法独立于 K-Graph，即使 graph=None 也会执行。
+        消上帝视角L3：仅扫描已知邻居（共享事件 / 图谱邻居），不遍历全体 agent 的 polarization。
         """
+        # 构建已知邻居集合：图谱邻居 + 共享事件的 agent
+        known_neighbors: dict[str, set[str]] = {}
+        for a in self.agents:
+            kn = set()
+            # 图谱邻居
+            rel = self._rel_context.get(a.entity_id, {})
+            kn.update(rel.get("allies", []))
+            kn.update(rel.get("opponents", []))
+            # 共享事件的 agent（最近20条事件）
+            for evt in self._event_history[-20:]:
+                if evt.get("agent") == a.entity_id:
+                    tgt = evt.get("target", "")
+                    if tgt and tgt in {o.entity_id for o in self.agents}:
+                        kn.add(tgt)
+                parts = evt.get("participants", "") or ""
+                for p in parts.split(","):
+                    p = p.strip()
+                    if p and p in {o.entity_id for o in self.agents}:
+                        kn.add(p)
+            known_neighbors[a.entity_id] = kn
+
         for a in self.agents:
             if self._rel_context.get(a.entity_id, {}).get("summary"):
                 continue
@@ -612,9 +635,12 @@ class SimulationEngine:
             polar = state.metrics.get("polarization", 0)
             allies: list[str] = []
             foes: list[str] = []
+            kn = known_neighbors.get(a.entity_id, set())
             for other in self.agents:
                 if other.entity_id == a.entity_id:
                     continue
+                if other.entity_id not in kn:
+                    continue  # 仅扫描已知邻居
                 other_st = self._states.get(other.entity_id)
                 if other_st is None:
                     continue
@@ -818,7 +844,8 @@ class SimulationEngine:
                 logger.warning("[Simulator] 动态召回失败 %s: %s", agent.name, e)
         elif not self._persist_events:
             mem = [e for e in self._event_history[-20:]
-                   if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
+                   if (agent.name in e.get("content", "") or e.get("agent") == agent.entity_id)
+                   and _is_event_visible_to(agent.entity_id, agent.name, e)]
             if mem:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
         return static_text or "无特定背景", dynamic_text or "无近期模拟事件"
@@ -1894,6 +1921,15 @@ class SimulationEngine:
 
         total_deltas: dict[str, float] = {k: 0.0 for k in self._narrative_env}
         for action in sample:
+            # 消上帝视角L8：私有/秘密事件不应影响公众可观察的环境变量
+            action_events = [e for e in self._event_history[-50:]
+                            if e.get("agent") == action.agent_id
+                            and e.get("round") == round_number
+                            and e.get("content", "")[:30] in (action.content or "")[:30]]
+            if action_events and any(
+                (e.get("visibility", "") or "public") == "private" for e in action_events
+            ):
+                continue
             agent_name = next((a.name for a in self.agents if a.entity_id == action.agent_id), action.agent_id[:8])
             prompt = (
                 f"你是环境观察者。角色「{agent_name}」执行了「{action.action_type}」：{action.content[:80]}\n\n"
@@ -2004,14 +2040,14 @@ class SimulationEngine:
                     tgt = next((a for a in self.agents if a.entity_id == target_id), None)
                     if not tgt:
                         continue
+                    # 仅使用当前 agent 可见的目标事件（消上帝视角L1+L5）
                     tgt_events = [e for e in self._event_history[-10:]
-                                  if e.get("agent") == target_id]
+                                  if e.get("agent") == target_id
+                                  and _is_event_visible_to(agent.entity_id, agent.name, e)]
                     tgt_recent = "; ".join(e.get("content", "")[:50] for e in tgt_events[-3:]) or "无记录"
                     mirror_parts.append(
                         f"### {tgt.name}\n"
-                        f"人格: {tgt.persona[:80] if tgt.persona else '未知'}\n"
-                        f"行为准则: {tgt.system_prompt_extra or '未知'}\n"
-                        f"近三轮行动: {tgt_recent}\n"
+                        f"近三轮可见行动: {tgt_recent}\n"
                         f"→ 站在 {tgt.name} 的角度预判：如果 TA 推测到你的意图，TA 会如何反制？"
                     )
                 world["recent_events"] = context_text + "\n\n" + "\n".join(mirror_parts)
