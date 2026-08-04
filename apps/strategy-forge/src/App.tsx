@@ -3,13 +3,7 @@ import ForceGraph3D from "react-force-graph-3d";
 
 const API_BASE = import.meta.env.DEV
   ? "/api/forge"
-  : isTauri()
-    ? "http://127.0.0.1:8000/api/forge"
-    : "/api/forge";
-
-function isTauri(): boolean {
-  return !!(window as any).__TAURI_INTERNALS__;
-}
+  : "http://127.0.0.1:8000/api/forge";
 
 const lbl: React.CSSProperties = { fontSize: 13, color: "#cbd5e1", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: "0 8px", fontSize: 13 };
