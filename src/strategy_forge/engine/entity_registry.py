@@ -1865,6 +1865,11 @@ async def build_registry(
                     break
         if not kuzu_id:
             kuzu_id = alias_to_kuzu_id.get(nm) or ""
+        # 模糊匹配：带括号的别名实体如"阿里巴巴（平头哥）"尝试匹配主名部分
+        if not kuzu_id and "（" in nm:
+            main = nm.split("（")[0].strip()
+            if main in name_to_kuzu_id:
+                kuzu_id = name_to_kuzu_id[main]
         entity_list.append({
             "name": nm,
             "type": ne.get("type", "Unknown"),
@@ -1936,6 +1941,16 @@ async def build_registry(
     if log_fn and domain_rules:
         log_fn("agents", f"域 {adapter.meta.domain_id} L2 规则已加载")
 
+    # 预判：IntelMap 已知的子公司/产品线直接标记为 tier3，避免 L2 batching 遗漏
+    entity_names = {e["name"] for e in entity_list}
+    pre_l2_tier3: set[str] = set()
+    for e in entity_list:
+        parent = (e.get("parent") or "").strip()
+        if parent and parent in entity_names:
+            pre_l2_tier3.add(e["name"])
+    if pre_l2_tier3 and log_fn:
+        log_fn("agents", f"IntelMap 预判 {len(pre_l2_tier3)} 个子实体直接 tier3: {', '.join(sorted(pre_l2_tier3))}")
+
     try:
         decisions = await _layer2_classify_all(
             entity_list, source_material, batch_size=10, log_fn=log_fn,
@@ -1960,8 +1975,12 @@ async def build_registry(
         _resolve_hierarchy(registry, None, log_fn, adapter)
         return registry
 
-    # ── 8. 应用判定：优先级 基础类型硬约束 > NarrativeSorter排除 > 白名单 > LLM L2 ──
+    # ── 8. 应用判定：优先级 基础类型硬约束 > NarrativeSorter排除 > 白名单 > IntelMap预判 > LLM L2 ──
     from strategy_forge.engine.semantic_mediator import ensure_min_tier
+
+    # 8a-1. IntelMap 预判：已知子公司/产品线强制 tier3
+    for nm in pre_l2_tier3:
+        decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": "IntelMap预判(子公司/产品线→tier3)"}
 
     # 8a0. NarrativeSorter 排除：include_in_simulation=False → 强制 tier3
     n_sorter_excluded = 0
@@ -2035,7 +2054,7 @@ async def build_registry(
                 decisions[nm]["tier"] = min_t
                 decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"
                 if not decisions[nm].get("reason") or "白名单" not in str(decisions[nm].get("reason", "")):
-                    decisions[nm]["reason"] = f"基础类型兜底({bt}->tier{min_t})"
+                    decisions[nm]["reason"] = f"基础类型安全网({bt}→tier{min_t})"
 
     missing_ids: list[str] = []
     for e in entity_list:
