@@ -876,6 +876,10 @@ class DeductionOrchestrator:
         events: list[str] = []
         for r in rounds[-12:]:
             for act in r.actions:
+                # 消上帝视角F6: 收敛裁判只基于公开事件
+                if hasattr(act, "metadata") and isinstance(act.metadata, dict):
+                    if act.metadata.get("visibility", "public") == "private":
+                        continue
                 who = name_map.get(act.agent_id, act.agent_id[:8])
                 events.append(f"[轮{r.round_number}] {who}: {act.content[:80]}")
         if not events:

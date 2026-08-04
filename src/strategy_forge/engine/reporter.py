@@ -395,6 +395,10 @@ async def generate_report(
 
     for rnd in rounds:
         for action in rnd.actions:
+            # 消上帝视角F3/F4: 跳过私有事件，不暴露给报告读者
+            if hasattr(action, "metadata") and isinstance(action.metadata, dict):
+                if action.metadata.get("visibility", "public") == "private":
+                    continue
             brief = action.content[:60].split("，")[0]
             key_events.append(f"[轮{rnd.round_number}] "
                                f"{_agent_name(action.agent_id)}: "

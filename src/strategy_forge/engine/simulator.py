@@ -2087,12 +2087,14 @@ class SimulationEngine:
                 return None
 
         from datetime import datetime
+        _vis = (action_data.get("visibility") or "").strip() or "public"
         return SimulationAction(
             agent_id=agent.entity_id,
             action_type=action_data.get("action", "observe"),
             target_id=action_data.get("target", ""),
             content=action_data.get("content", f"{agent.name}观察着周围环境"),
             timestamp=datetime.now().isoformat(),
+            metadata={"visibility": _vis},
         )
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
@@ -2451,7 +2453,8 @@ class SimulationEngine:
 
         def others_ctx(self_id: str) -> str:
             # B1: 只渲染 Top-K 最相关他方(盟友/对手>最近>最危急)，其余合并为全局摘要，
-            # 把每 agent prompt 的他方块从 O(N) 降到 O(K)，消除 O(N^2) 与逐轮膨胀。
+            # 把每 agent  prompt 的他方块从 O(N) 降到 O(K)，消除 O(N^2) 与逐轮膨胀。
+            # 消上帝视角F1: 详细指标仅限"已知邻居"（盟友/对手 + 共享事件），其余仅汇总。
             from strategy_forge.core.config import config as _c
             topk = max(1, int(getattr(_c, "deduction_sim_others_topk", 10)))
             metrics_list = re_engine.metrics()
@@ -2459,6 +2462,20 @@ class SimulationEngine:
             sp = self._spatial_state
             rel = getattr(self, "_rel_context", {}).get(self_id, {}) or {}
             important = set(rel.get("allies", []) or []) | set(rel.get("opponents", []) or [])
+
+            # 构建已知邻居集合：关系上下文 + 共享事件
+            known_set: set[str] = set(important)
+            for evt in self._event_history[-30:]:
+                if evt.get("agent") == self_id:
+                    tgt = evt.get("target", "")
+                    if tgt:
+                        known_set.add(tgt)
+                parts_s = evt.get("participants", "") or ""
+                if self_id in parts_s:
+                    for p in parts_s.split(","):
+                        p = p.strip()
+                        if p:
+                            known_set.add(p)
 
             def _dist(a) -> float | None:
                 if sp is not None and idx_self is not None:
@@ -2471,18 +2488,10 @@ class SimulationEngine:
             if not others:
                 return "（无其他参与方）"
 
-            def _salience(a):
-                st = states[a.entity_id]
-                rel_pri = 0 if st.name in important else 1
-                d = _dist(a)
-                mtot = sum(st.metrics.values()) if st.metrics else 0.0
-                return (rel_pri, d if d is not None else 1e9, mtot)
-
-            ranked = sorted(others, key=_salience)
-            shown, rest = ranked[:topk], ranked[topk:]
-
             def _detail(a) -> str:
                 st = states[a.entity_id]
+                if a.entity_id not in known_set:
+                    return f"{st.name}: 信息不足（未直接接触）"
                 line = st.to_prompt_context()
                 hist = getattr(st, "history", []) or []
                 if len(hist) >= 6:
@@ -2509,6 +2518,16 @@ class SimulationEngine:
                     line += f"  距离: {d:.0f}m"
                 return line
 
+            def _salience(a):
+                st = states[a.entity_id]
+                rel_pri = 0 if a.entity_id in known_set else 2
+                d = _dist(a)
+                mtot = sum(st.metrics.values()) if st.metrics else 0.0
+                return (rel_pri, d if d is not None else 1e9, mtot)
+
+            ranked = sorted(others, key=_salience)
+            shown, rest = ranked[:topk], ranked[topk:]
+
             lines = [_detail(a) for a in shown]
             if rest:
                 arr = np.stack([
@@ -2518,9 +2537,9 @@ class SimulationEngine:
                     avgs, mins, maxs = arr.mean(0), arr.min(0), arr.max(0)
                     stat = ", ".join(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]"
                                      for i, m in enumerate(metrics_list))
-                    lines.append(f"其余 {len(rest)} 方（全局）: {stat}")
+                    lines.append(f"其余 {len(rest)} 方（全局统计，未直接接触）: {stat}")
                 else:
-                    lines.append(f"其余 {len(rest)} 方")
+                    lines.append(f"其余 {len(rest)} 方（未直接接触）")
             return "\n".join(lines) or "（无其他参与方）"
 
         def env_context() -> str:
@@ -2906,6 +2925,8 @@ class SimulationEngine:
             if alloc:
                 meta["budget"] = dec.get("budget", dec.get("intensity", 0.5))
                 meta["allocation"] = alloc
+            _vis = (dec.get("visibility") or "").strip() or "public"
+            meta["visibility"] = _vis
             sim_round.actions.append(SimulationAction(
                 agent_id=actor, action_type=dec["action_type"],
                 target_id=dec.get("target", ""), content=content,
