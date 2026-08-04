@@ -126,21 +126,24 @@ class DeductionGraphStore:
 
     def add_event(self, event_id: str, description: str, event_type: str,
                   timestamp: str, agent_id: str = "", round_number: int = 0,
-                  target_id: str = "", effect: str = "", driver: str = "") -> None:
+                  target_id: str = "", effect: str = "", driver: str = "",
+                  visibility: str = "public") -> None:
         self._check_conn()
         safe_desc = (description or "")[:500]
         safe_eff = (effect or "")[:200]
         safe_drv = (driver or "")[:16]
+        safe_vis = (visibility or "public")[:16]
         with self._lock:
             self._conn.execute(
                 f"CREATE (ev:{self.EVENT_TABLE} {{id: $id, "
                 "description: $description, event_type: $etype, "
                 "timestamp: $ts, agent_id: $aid, "
                 "round: $rnd, target_id: $tid, "
-                "effect: $eff, driver: $drv})",
+                "effect: $eff, driver: $drv, visibility: $vis})",
                 {"id": event_id, "description": safe_desc, "etype": event_type,
                  "ts": timestamp, "aid": agent_id, "rnd": int(round_number),
-                 "tid": target_id or "", "eff": safe_eff, "drv": safe_drv},
+                 "tid": target_id or "", "eff": safe_eff, "drv": safe_drv,
+                 "vis": safe_vis},
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:

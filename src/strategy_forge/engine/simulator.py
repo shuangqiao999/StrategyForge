@@ -1359,9 +1359,11 @@ class SimulationEngine:
         if self._persist_events:
             for action in sim_round.actions:
                 event_id = f"evt-{uuid.uuid4().hex[:8]}"
+                _vis = (getattr(action, "metadata", {}) or {}).get("visibility", "public")
                 self.graph.add_event(
                     event_id, action.content[:200], action.action_type,
                     action.timestamp, action.agent_id,
+                    visibility=_vis,
                 )
                 self.graph.add_acted(action.agent_id, event_id, action.action_type, action.timestamp)
 
@@ -1554,6 +1556,7 @@ class SimulationEngine:
                 {"agent": e.get("agent_name", ""), "action": e.get("action", ""),
                  "content": e.get("content", "")[:80], "round": e.get("round", 0)}
                 for e in self._event_history[-8:]
+                if (e.get("visibility", "") or "public") != "private"
             ],
         }
 
@@ -3193,9 +3196,11 @@ def _build_state_snapshot(states: dict, thresholds: dict, event_history: list,
             "count": len(data["names"]),
             "metrics": {m: round(np.mean(vals), 1) for m, vals in data["metrics"].items() if vals},
         }
-    # Recent events
+    # Recent events（消上帝视角R2：仅公开事件）
     recent = []
     for e in event_history[-3:]:
+        if (e.get("visibility", "") or "public") == "private":
+            continue
         recent.append({
             "agent": e.get("agent_name", "?"),
             "action": e.get("action", ""),
