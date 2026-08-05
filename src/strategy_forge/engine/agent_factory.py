@@ -187,6 +187,11 @@ async def create_agents_from_graph(
             freq_map = {**fm, **freq_map}
 
         max_agents = len(persons)
+        # 一致性断言：get_tier1 返回数与 registry.tier1_count 必须相等
+        ec = entity_registry.tier1_count
+        if len(tier1_entities) != ec:
+            logger.error("[AgentFactory] tier1 数量不一致！get_tier1()=%d tier1_count=%d — 存在 tier3 实体泄漏",
+                         len(tier1_entities), ec)
         log_fn("agents", f"从 {max_agents} 个注册实体中生成最多 {max_agents} 个智能体")
 
     else:
@@ -350,6 +355,10 @@ async def create_agents_from_graph(
 
         log_fn("agents", f"  [{i+1}/{max_agents}] {person_name}: {agent_profile.persona}")
 
+    # 运行时一致性校验：实际创建 Agent 数必须等于预期
+    if entity_registry is not None and len(agents) != entity_registry.tier1_count:
+        logger.error("[AgentFactory] 实体数量不一致！预期:%d(registry.tier1) 实际:%d(created) — 存在 tier3 泄漏",
+                     entity_registry.tier1_count, len(agents))
     if not agents and results:
         raise RuntimeError(
             f"全部 {len(results)} 个智能体 persona 生成失败，请检查 LLM 连接或模型配置")
