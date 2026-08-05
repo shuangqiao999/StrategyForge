@@ -54,7 +54,7 @@ class DeductionGraphStore:
                 "CREATE NODE TABLE IF NOT EXISTS Event("
                 "id STRING, description STRING, event_type STRING, "
                 "timestamp STRING, agent_id STRING, round INT64, target_id STRING, "
-                "effect STRING, driver STRING, "
+                "effect STRING, driver STRING, visibility STRING, "
                 "PRIMARY KEY(id))"
             )
             self._conn.execute(
@@ -70,6 +70,11 @@ class DeductionGraphStore:
                 "CREATE REL TABLE IF NOT EXISTS CAUSED("
                 "FROM Event TO Entity, metric STRING, amount DOUBLE)"
             )
+            # 兼容存量数据库：若 Event 表缺少 visibility 列则追加
+            try:
+                self._conn.execute("ALTER TABLE Event ADD visibility STRING DEFAULT 'public'")
+            except Exception:
+                pass
 
     def _check_conn(self) -> None:
         if self._conn is None or self._closed:
