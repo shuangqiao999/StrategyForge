@@ -468,6 +468,57 @@
         "strength": 5,
         "supply": 5
       }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "strength",
+          "fatigue",
+          "leadership"
+        ],
+        "exclude_actions": [
+          "attack",
+          "defend",
+          "siege",
+          "maneuver",
+          "electronic_warfare"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      }
     }
   },
   "business": {
@@ -959,6 +1010,54 @@
         "cash_flow": 3,
         "market_share": 8
       }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "supply_chain"
+        ],
+        "exclude_actions": [
+          "price_war",
+          "embargo",
+          "expand",
+          "ipo"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      }
     }
   },
   "politics": {
@@ -1366,6 +1465,52 @@
         "support_rate": 10,
         "unity": 10
       }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "legislative_power"
+        ],
+        "exclude_actions": [
+          "legislate",
+          "campaign"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      }
     }
   },
   "ecology": {
@@ -1708,6 +1853,49 @@
       "hard_core": {
         "biodiversity": 5,
         "population": 8
+      }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [],
+        "exclude_actions": [
+          "exploit"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
       }
     }
   },
@@ -2061,6 +2249,54 @@
         "finance": 5,
         "employment": 10
       }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "infrastructure",
+          "finance"
+        ],
+        "exclude_actions": [
+          "build_infra",
+          "develop_industry",
+          "regulate"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      }
     }
   },
   "tech": {
@@ -2356,6 +2592,53 @@
       "hard_core": {
         "tech_lead": 5,
         "talent_pool": 8
+      }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "patent_barrier",
+          "chip_stock"
+        ],
+        "exclude_actions": [
+          "export_control",
+          "standards_battle"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
       }
     }
   },
@@ -2653,6 +2936,50 @@
       "hard_core": {
         "narrative_dominance": 8,
         "public_trust": 8
+      }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [],
+        "exclude_actions": [
+          "framing_battle",
+          "propaganda"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
       }
     }
   },
@@ -3364,6 +3691,62 @@
       },
       "trade_blockade_with_talent_war": {
         "description": "贸易封锁+高端人才争夺"
+      }
+    },
+    "entity_capabilities": {
+      "Agent": {
+        "metrics": "all",
+        "actions": "all"
+      },
+      "Subordinate": {
+        "metrics": "all",
+        "exclude_metrics": [
+          "strength",
+          "fatigue",
+          "leadership",
+          "supply",
+          "morale",
+          "energy_resource",
+          "grain_resource",
+          "chip_stock"
+        ],
+        "exclude_actions": [
+          "military_offensive",
+          "defensive_buildup",
+          "trade_warfare",
+          "military_deterrence_with_diplomacy",
+          "trade_blockade_with_talent_war"
+        ]
+      },
+      "Geography": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Concept": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Resource": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Contract": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
+      },
+      "Event": {
+        "metrics": [],
+        "actions": [
+          "observe"
+        ]
       }
     }
   }
