@@ -444,42 +444,45 @@ class StrategicReasoner:
         if self._enable_multi_action:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
-                '{"budget": 0.0到1.0, "actions": ['
+                '{"budget": 0.0到1.0, "visibility": "public", "actions": ['
                 '{"action_type": "上面之一", "weight": 0.0到1.0, '
                 '"target": "目标方名称(进攻/竞争/外交时填，否则留空)"}], '
                 '"rationale": "20-50字理由"}\n'
                 f"- 最多 {self._max_actions} 个动作，可同时分配资源（如同时进攻与防守，或对不同对手施压）\n"
                 "- budget：本轮总投入力度，0.1=保守，0.5=常规，1.0=倾尽全力\n"
                 "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0\n"
+                '- visibility：事件可见性，默认"public"（全图可见）。秘密行动填"private"（仅参与方可见），盟友间共享填"alliance"（盟友可见）。间谍/卧底/秘密交易/保密研发必须标记为"private"\n'
                 '## 正确示例\n'
-                '{"budget": 0.7, "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
+                '{"budget": 0.7, "visibility": "public", "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
                 '{"action_type": "defend", "weight": 0.4, "target": ""}], '
                 '"rationale": "主力进攻，预留防守余力防止被反制"}\n'
                 '## 错误示例\n'
                 '{"budget": 0.8, "actions": [{"action_type": "attack", "weight": 0.5, "target": "敌方A"}], '
-                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短'
+                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短；秘密行动缺失visibility字段'
             )
         else:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
                 '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
-                '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
+                '"intensity": 0.0到1.0, "visibility": "public", "rationale": "20-50字理由"}\n'
                 "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力\n"
+                '- visibility：事件可见性，默认"public"（全图可见）。秘密行动填"private"（仅参与方可见），盟友间共享填"alliance"（盟友可见）。间谍/卧底/秘密交易/保密研发必须标记为"private"\n'
                 '## 正确示例\n'
-                '{"action_type": "attack", "target": "敌方A", "intensity": 0.7, "rationale": "敌方军力削弱过半，抓住战机全力出击以扩大战果"}\n'
+                '{"action_type": "attack", "target": "敌方A", "intensity": 0.7, "visibility": "public", "rationale": "敌方军力削弱过半，抓住战机全力出击以扩大战果"}\n'
                 '## 错误示例\n'
                 '{"action_type": "observe", "target": "", "intensity": 0.3, "rationale": "看看情况"}\n'
-                '← 若核心目标未达成，observe往往不是最优选择；rationale应说明策略依据而非模糊表态'
+                '← 若核心目标未达成，observe往往不是最优选择；rationale应说明策略依据而非模糊表态；秘密行动缺失visibility字段'
             )
             if multi_candidate:
                 output_spec += (
                     '\n\n## 多候选模式（输出3个不同的候选策略）\n'
                     '{"candidates": ['
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由1"},'
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由2"},'
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由3"}'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由1"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由2"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由3"}'
                     ']}\n'
-                    "- 3个候选应包含不同策略方向（如进攻/防守/外交），不是同一方向的微调"
+                    "- 3个候选应包含不同策略方向（如进攻/防守/外交），不是同一方向的微调\n"
+                    "- 若某候选为秘密行动，将 visibility 设为 private"
                 )
 
         # ── 共享前缀（同轮所有 agent 一致，利于云端前缀缓存）──
@@ -532,7 +535,7 @@ class StrategicReasoner:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
-        system = "你是量化推演中的战略决策者，只输出 JSON。"
+        system = "你是量化推演中的战略决策者，只输出 JSON。必须严格遵守 visibility 字段标记秘密行动，不得在 rationale 中泄露其他实体的私密信息。"
         llm = client if client is not None else LLMClient()
         try:
             if self._chat_fn is not None:

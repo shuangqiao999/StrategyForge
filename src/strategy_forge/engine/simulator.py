@@ -169,13 +169,20 @@ def _distort_event_content(content_raw: str, distortion: float) -> str:
     return result
 
 
+# 受限可见性：这些级别的事件仅对参与者+发起者可见，不会全局广播
+_RESTRICTED_VIS = frozenset({"private", "alliance"})
+
+
 def _is_event_visible_to(entity_id: str, entity_name: str, evt: dict) -> bool:
-    """事件可见性判定：私密事件仅参与者/发起者可见，其余对所有人可见。
+    """事件可见性判定：public 全图可见，private/alliance 仅参与者/发起者可见。
 
     供 _agent_decide 可见历史与 _dispatch_events 知识队列分发两处复用，
     保证私密事件不会经任何途径泄漏给非参与者。
+    alliance 级别与 private 相同过滤逻辑——发起方创建事件时
+    将盟友名写入 participants 字段，即可实现盟友间情报共享。
     """
-    if (evt.get("visibility", "") or "public") != "private":
+    vis = (evt.get("visibility", "") or "public").strip()
+    if vis not in _RESTRICTED_VIS:
         return True
     parts = evt.get("participants", "") or ""
     if entity_name in parts or entity_id in parts:
@@ -235,6 +242,8 @@ $recent_events
 - 不得重复近期动态事件中你已做过的相同行动（如果有）
 - observe 仅在没有明确威胁且局势不明时才使用——如核心目标未达成，应选择低风险主动行动而非观察
 - 行动内容必须是该角色在现实中可能采取的具体措施（30-100字）
+- 秘密行动（间谍/卧底/密谈/潜入/暗中交易等）必须在 metadata.visibility 标记为 "private"
+- 禁止在行动描述中透露其他角色不应知晓的私密信息（如他方的秘密计划/内部数据/私下布署）
 
 ## 正确示例
 {"action": "compete", "target": "竞品X", "content": "A公司宣布旗舰产品全系降价8%，同时开放核心设施给第三方合作伙伴，以价格优势和生态扩张挤压对手利润空间——这一举动与其'成本控制优先'的策略一脉相承。"}
@@ -1557,7 +1566,7 @@ class SimulationEngine:
                 {"agent": e.get("agent_name", ""), "action": e.get("action", ""),
                  "content": e.get("content", "")[:80], "round": e.get("round", 0)}
                 for e in self._event_history[-8:]
-                if (e.get("visibility", "") or "public") != "private"
+                if (e.get("visibility", "") or "public") not in _RESTRICTED_VIS
             ],
         }
 
@@ -1940,7 +1949,7 @@ class SimulationEngine:
                             and e.get("round") == round_number
                             and e.get("content", "")[:30] in (action.content or "")[:30]]
             if action_events and any(
-                (e.get("visibility", "") or "public") == "private" for e in action_events
+                (e.get("visibility", "") or "public") in _RESTRICTED_VIS for e in action_events
             ):
                 continue
             agent_name = next((a.name for a in self.agents if a.entity_id == action.agent_id), action.agent_id[:8])
@@ -2642,8 +2651,9 @@ class SimulationEngine:
             _sys_limit = 2  # 每轮每个 agent 最多注入 2 条系统事件
             own_events = [e for e in self._event_history[-8:]
                           if e.get("is_system_event")
-                          or e.get("agent") == a.entity_id
-                          or a.name in e.get("content", "")]
+                          or (_is_event_visible_to(a.entity_id, a.name, e) and
+                              (e.get("agent") == a.entity_id
+                               or a.name in e.get("content", "")))]
             _shown_sys = set()
             for e in own_events:
                 if e.get("is_system_event"):
@@ -2939,7 +2949,16 @@ class SimulationEngine:
                 meta["budget"] = dec.get("budget", dec.get("intensity", 0.5))
                 meta["allocation"] = alloc
             _vis = (dec.get("visibility") or "").strip() or "public"
+            # 关键词兜底：若 LLM 未输出 visibility，检查行动类型/理由是否暗示秘密行动
+            if _vis == "public":
+                from .narrative_actions import is_secret_action
+                _rationale = dec.get("rationale", "")
+                _act_type = dec.get("action_type", "")
+                if is_secret_action(_act_type, _rationale):
+                    _vis = "private"
             meta["visibility"] = _vis
+            # 参与者：发起方 + 目标方，供 _is_event_visible_to 使用
+            _participants = "|".join(filter(None, [nm, actor, str(dec.get("target", ""))]))
             sim_round.actions.append(SimulationAction(
                 agent_id=actor, action_type=dec["action_type"],
                 target_id=dec.get("target", ""), content=content,
@@ -2955,7 +2974,8 @@ class SimulationEngine:
                     self._preprocessor.add_event_memory(
                         content=content, agent_id=actor,
                         round_number=round_number,
-                        event_type=dec["action_type"], priority=0.5)
+                        event_type=dec["action_type"], priority=0.5,
+                        visibility=_vis, participants=_participants)
                 except Exception as e:
                     logger.debug("[Simulator] 量化事件写入 LanceDB 失败: %s", e)
             # B+因果链: 量化轮写 Event 节点 + ACTED 边 + TARGETS/CAUSED(确定性数值归因)
@@ -2983,6 +3003,8 @@ class SimulationEngine:
                 "event_type": dec["action_type"],
                 "target_id": _primary_tid if _inters else "",
                 "is_system_event": False,
+                "visibility": _vis,
+                "participants": _participants,
             })
 
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
@@ -3209,7 +3231,7 @@ def _build_state_snapshot(states: dict, thresholds: dict, event_history: list,
     # Recent events（消上帝视角R2：仅公开事件）
     recent = []
     for e in event_history[-3:]:
-        if (e.get("visibility", "") or "public") == "private":
+        if (e.get("visibility", "") or "public") in _RESTRICTED_VIS:
             continue
         recent.append({
             "agent": e.get("agent_name", "?"),

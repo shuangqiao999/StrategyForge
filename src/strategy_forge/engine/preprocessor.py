@@ -392,7 +392,7 @@ class DeductionPreprocessor:
             if r.get("event_type", "") in self._EVENT_EXCLUDED_TYPES:
                 continue
             # 可见性过滤：私密事件只有参与者可见（信息差是博弈资源）
-            if observer and (r.get("visibility", "") or "public") == "private":
+            if observer and (r.get("visibility", "") or "public") in ("private", "alliance"):
                 parts = r.get("participants", "") or ""
                 if observer not in parts and observer != (r.get("agent_id", "") or ""):
                     continue
