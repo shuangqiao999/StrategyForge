@@ -74,6 +74,16 @@ $trust_summary
 ## 关系网络（来自知识图谱：盟友 / 对手）
 $relationship_context
 
+## 候选多样性要求（强制执行）
+- $candidate_count 个候选必须代表根本不同的策略方向，禁止仅是力度微调的变体；
+- 必须同时包含：至少一个保守稳妥的选择、至少一个高风险高回报的激进选择；
+- 如果角色存在信息盲区或认知偏差，至少一个候选应体现"角色基于不完整信息做出的误判"——该候选在当前角色视角是合理的，但客观上风险被低估或关键信息被遗漏。
+
+## 角色视角约束（铁律）
+- 写 content 和 rationale 时必须严格站在 $agent_name 本人的视角：写角色自己看到的信息、自己相信的判断，不必是客观事实；
+- 如果某个风险是角色意识不到的盲区，不要在 rationale 中提及——只写角色认为存在的风险；
+- 同一个事件，不同角色可以而且应该有不同的解读和反应，不要做全知叙述者。
+
 ## 现实性约束（硬性规则）
 - 行动手段必须限于你当前身份在现实中可用的手段（职权、人脉、资金、信息），禁止超现实桥段：黑客奇迹、凭空巨额资金、一夜掌控他人系统等。
 - 行动只能表达"你做了什么"，不能宣称单方面完成需要多方配合的结果（如接管、罢免、收购需经程序，只能"推动/发起"）。
@@ -92,9 +102,9 @@ $sentiment_methodology
 - 无事可做时的最优策略不是"观察"——而是"主动制造事件获取信息"或"巩固盟友确保安全"
 
 ## 行动示例
-正确（具体、有因果逻辑、与人格相关）：
-  {"action": "compete", "target": "竞品Y", "content": "X企业宣布开源核心训练框架，同步将商用API价格下调60%——以开源+降价双重施压对手客户迁移", "rationale": "利用对手服务稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium"}
-错误（模糊、模板化）：
+正确（具体、有因果逻辑、与人格相关，且包含盲区分析）：
+  {"action": "compete", "target": "竞品Y", "content": "X企业宣布开源核心训练框架，同步将商用API价格下调60%——以开源+降价双重施压对手客户迁移", "rationale": "利用对手服务稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium", "blind_spots": "降价可能引发全行业价格战，竞品可能联合反制或向监管投诉倾销"}
+错误（模糊、模板化，缺失字段）：
   {"action": "compete", "target": "对手", "content": "继续加大研发投入，推出新产品，提升核心竞争力", "rationale": "为了发展", "risk_level": "low"}
 
 ## 输出 — 纯 JSON 数组
@@ -104,7 +114,8 @@ $sentiment_methodology
     "target": "目标实体名或留空",
     "content": "行动描述 (30-100字)",
     "rationale": "行动理由 (20-60字)",
-    "risk_level": "low|medium|high"
+    "risk_level": "low|medium|high",
+    "blind_spots": "本角色未察觉的潜在风险（必填，至少10字，写客观存在的隐患，不是写'无'或'未知'）"
   }
 ]
 
@@ -302,7 +313,7 @@ class StrategicReasoner:
         recent_own = self._recent_actions.get(agent.entity_id, [])
         recent_own_text = ("\n".join(f"- {a}" for a in recent_own)
                            if recent_own else "（无——这是你的首轮行动）")
-        system = "你是战略顾问，只输出 JSON 数组。"
+        system = "你是战略顾问，只输出 JSON 数组。每个候选必须包含 blind_spots 字段，写清楚角色未察觉的潜在风险，禁止填'无'或'未知'。"
         llm = client if client is not None else LLMClient()
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,
@@ -394,6 +405,17 @@ class StrategicReasoner:
         candidates.sort(key=lambda c: c.get("_score", 0), reverse=True)
         selected = candidates[0]
         selected["action"] = self._normalize_action(selected.get("action", "observe"))
+        
+        # 兜底：若 LLM 未输出 blind_spots（小模型常见），根据 risk_level 推断一个占位值
+        for c in candidates:
+            if not c.get("blind_spots"):
+                risk = c.get("risk_level", "medium")
+                if risk == "high":
+                    c["blind_spots"] = "风险未充分评估（可能低估连锁反应）"
+                elif risk == "low":
+                    c["blind_spots"] = "过于保守可能错失战略窗口"
+                else:
+                    c["blind_spots"] = "信息不完整，可能存在未认知的第三方干预"
 
         # 记录本轮选中行动，供后续轮次去重（每 agent 保留最近 5 条）
         hist = self._recent_actions[agent.entity_id]

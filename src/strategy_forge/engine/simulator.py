@@ -2076,6 +2076,7 @@ class SimulationEngine:
                         f"→ 站在 {tgt.name} 的角度预判：如果 TA 推测到你的意图，TA 会如何反制？"
                     )
                 world["recent_events"] = context_text + "\n\n" + "\n".join(mirror_parts)
+        decision = None
         try:
             decision = await self.reasoner.reason(agent, world, round_number, client=client)
             sel = decision.get("selected", {})
@@ -2113,13 +2114,31 @@ class SimulationEngine:
 
         from datetime import datetime
         _vis = (action_data.get("visibility") or "").strip() or "public"
+        # 存储落选候选方案（供反思日志和报告复盘使用）
+        meta = {"visibility": _vis}
+        if decision and decision.get("candidates"):
+            all_cands = decision["candidates"]
+            rejected = []
+            for c in all_cands:
+                if c.get("content") != action_data.get("content"):
+                    rejected.append({
+                        "action": c.get("action", ""),
+                        "target": c.get("target", ""),
+                        "content": c.get("content", "")[:120],
+                        "rationale": c.get("rationale", "")[:80],
+                        "risk_level": c.get("risk_level", ""),
+                        "score": c.get("_score", 0),
+                        "blind_spots": c.get("blind_spots", ""),
+                    })
+            if rejected:
+                meta["_rejected_candidates"] = rejected
         return SimulationAction(
             agent_id=agent.entity_id,
             action_type=action_data.get("action", "observe"),
             target_id=action_data.get("target", ""),
             content=action_data.get("content", f"{agent.name}观察着周围环境"),
             timestamp=datetime.now().isoformat(),
-            metadata={"visibility": _vis},
+            metadata=meta,
         )
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
