@@ -88,7 +88,7 @@
         "_intel_exposed": 1
       },
       "attack": {
-        "strength": -20,
+        "strength": -15,
         "morale": -12,
         "supply": -8
       },
@@ -129,14 +129,14 @@
           "morale": -8
         }
       },
-      "desperate_defense": {
+      "defend_desperate_defense": {
         "condition": "strength < 30",
         "self_effects": {
           "morale": 8,
           "strength": -2
         }
       },
-      "blitzkrieg_fatigue": {
+      "attack_blitzkrieg_fatigue": {
         "condition": "strength > 80 and fatigue < 20",
         "self_effects": {
           "fatigue": 5
@@ -588,7 +588,7 @@
         "supply_chain": -3
       },
       "embargo": {
-        "supply_chain": -25,
+        "supply_chain": -15,
         "market_share": -8,
         "cash_flow": -4,
         "morale": -3
@@ -627,18 +627,6 @@
           "cash_flow": -3
         }
       },
-      "rnd_diminishing": {
-        "condition": "rnd > 70",
-        "self_effects": {
-          "rnd": 3
-        }
-      },
-      "rnd_capped": {
-        "condition": "rnd > 85",
-        "self_effects": {
-          "rnd": 1
-        }
-      },
       "partner_synergy": {
         "condition": "cash_flow < 25",
         "self_effects": {
@@ -646,14 +634,26 @@
           "morale": 2
         }
       },
-      "distress_protection": {
+      "invest_rnd_diminishing": {
+        "condition": "rnd > 70",
+        "self_effects": {
+          "rnd": 3
+        }
+      },
+      "invest_rnd_capped": {
+        "condition": "rnd > 85",
+        "self_effects": {
+          "rnd": 1
+        }
+      },
+      "partner_distress_protection": {
         "condition": "cash_flow < 12 and market_share > 25",
         "self_effects": {
           "cash_flow": 3,
           "morale": -4
         }
       },
-      "bankruptcy_protection": {
+      "auto_bankruptcy_protection": {
         "condition": "cash_flow < 8 and brand > 60",
         "self_effects": {
           "cash_flow": 2,
@@ -710,7 +710,7 @@
       "ipo_overflow": {
         "delay": 2,
         "effects": {
-          "cash_flow": 40
+          "cash_flow": 20
         }
       }
     },
@@ -952,7 +952,7 @@
         "market_share": 0.2,
         "brand": 0.15,
         "morale": 0.15,
-        "talent_pool": 0.2
+        "rnd": 0.2
       },
       "threshold_score": 25.0,
       "hard_core": {
@@ -1083,23 +1083,23 @@
           "support_rate": -5
         }
       },
-      "attack_justified": {
-        "condition": "intl_relations < 30 or support_rate > 70",
-        "self_effects": {
-          "support_rate": 6
-        }
-      },
-      "attack_unjustified": {
-        "condition": "intl_relations > 70 and support_rate < 40",
-        "self_effects": {
-          "support_rate": -4
-        }
-      },
       "diplomacy_overreach": {
         "condition": "intl_relations > 80",
         "self_effects": {
           "support_rate": -3,
           "unity": -2
+        }
+      },
+      "attack_opponent_justified": {
+        "condition": "intl_relations < 30 or support_rate > 70",
+        "self_effects": {
+          "support_rate": 6
+        }
+      },
+      "attack_opponent_unjustified": {
+        "condition": "intl_relations > 70 and support_rate < 40",
+        "self_effects": {
+          "support_rate": -4
         }
       }
     },
@@ -1127,13 +1127,13 @@
     },
     "auto_effects": {
       "unity_drift": {
-        "condition": "unity < 30",
+        "condition": "unity < 40",
         "effects": {
-          "unity": -2
+          "unity": -1
         }
       },
       "internal_crisis": {
-        "condition": "unity < 30",
+        "condition": "unity < 20",
         "effects": {
           "support_rate": -2,
           "legislative_power": -1
@@ -1356,10 +1356,9 @@
     "elimination": {
       "mode": "weighted_score",
       "weights": {
-        "support_rate": 0.3,
+        "support_rate": 0.44999999999999996,
         "legislative_power": 0.2,
         "unity": 0.2,
-        "morale": 0.15,
         "intl_relations": 0.15
       },
       "threshold_score": 25.0,
@@ -1460,7 +1459,7 @@
           "biodiversity": -5
         }
       },
-      "conservation_emergency": {
+      "conserve_emergency": {
         "condition": "biodiversity < 30",
         "self_effects": {
           "resources": -5,
@@ -1796,7 +1795,7 @@
           "infrastructure": 5
         }
       },
-      "talent_shortage": {
+      "attract_talent_shortage": {
         "condition": "employment > 80",
         "self_effects": {
           "satisfaction": -4,
@@ -2126,7 +2125,7 @@
     },
     "target_effects": {
       "export_control": {
-        "chip_stock": -25,
+        "chip_stock": -15,
         "tech_lead": -10,
         "commercialization": -5
       },
@@ -2148,7 +2147,7 @@
           "tech_lead": 8
         }
       },
-      "forced_innovation": {
+      "invest_rd_forced_innovation": {
         "condition": "tech_lead < 20 and chip_stock < 20",
         "self_effects": {
           "tech_lead": 5,
@@ -2199,7 +2198,7 @@
         }
       },
       "rnd_saturation": {
-        "condition": "tech_lead > 70",
+        "condition": "tech_lead > 80",
         "effects": {
           "talent_pool": -1,
           "patent_barrier": -1
@@ -2212,7 +2211,7 @@
         }
       },
       "research_diminishing_returns": {
-        "condition": "tech_lead > 70",
+        "condition": "tech_lead > 90",
         "effects": {
           "tech_lead": -1
         }
@@ -2348,10 +2347,10 @@
       "mode": "weighted_score",
       "weights": {
         "tech_lead": 0.25,
-        "rnd": 0.2,
         "talent_pool": 0.25,
         "chip_stock": 0.15,
-        "patent_count": 0.15
+        "commercialization": 0.2,
+        "patent_barrier": 0.15
       },
       "threshold_score": 25.0,
       "hard_core": {
@@ -2448,7 +2447,7 @@
           "public_trust": 5
         }
       },
-      "echo_chamber": {
+      "propaganda_echo_chamber": {
         "condition": "polarization > 75",
         "self_effects": {
           "public_trust": -3,
@@ -2646,10 +2645,9 @@
       "mode": "weighted_score",
       "weights": {
         "narrative_dominance": 0.3,
-        "public_trust": 0.25,
+        "public_trust": 0.35,
         "polarization": 0.2,
-        "morale": 0.15,
-        "intl_relations": 0.1
+        "media_reach": 0.15
       },
       "threshold_score": 25.0,
       "hard_core": {
@@ -2839,7 +2837,7 @@
     },
     "target_effects": {
       "military_offensive": {
-        "strength": -20,
+        "strength": -15,
         "morale": -12,
         "supply": -8,
         "supply_chain": -10,
@@ -2848,7 +2846,7 @@
         "public_trust": -4
       },
       "trade_warfare": {
-        "supply_chain": -25,
+        "supply_chain": -15,
         "cash_flow": -12,
         "support_rate": -6,
         "intl_relations": -8,
@@ -2893,49 +2891,49 @@
       }
     },
     "conditional_effects": {
-      "tech_catchup_bonus": {
+      "tech_investment_catchup_bonus": {
         "condition": "tech_lead < 50",
         "self_effects": {
           "tech_lead": 6,
           "strength": 2
         }
       },
-      "tech_overreach_penalty": {
+      "tech_investment_overreach_penalty": {
         "condition": "tech_lead > 85",
         "self_effects": {
           "polarization": 4,
           "public_trust": -3
         }
       },
-      "economic_resilience": {
+      "economic_mobilization_resilience": {
         "condition": "cash_flow < 15 and supply_chain > 70",
         "self_effects": {
           "cash_flow": 4,
           "support_rate": 2
         }
       },
-      "offensive_weariness": {
+      "military_offensive_weariness": {
         "condition": "fatigue > 65",
         "self_effects": {
           "morale": -5,
           "support_rate": -4
         }
       },
-      "war_economy_boom": {
+      "economic_mobilization_boom": {
         "condition": "support_rate > 70 and cash_flow > 60",
         "self_effects": {
           "supply_chain": 5,
           "morale": 3
         }
       },
-      "propaganda_backfire": {
+      "domestic_propaganda_backfire": {
         "condition": "public_trust < 30",
         "self_effects": {
           "support_rate": -8,
           "polarization": 5
         }
       },
-      "diplomatic_isolation": {
+      "diplomatic_engagement_isolation": {
         "condition": "intl_relations < 25",
         "self_effects": {
           "cash_flow": -6,
@@ -2943,7 +2941,7 @@
           "support_rate": -3
         }
       },
-      "rally_around_flag": {
+      "defensive_buildup_rally": {
         "condition": "strength < 30 and support_rate > 50",
         "self_effects": {
           "morale": 10,
