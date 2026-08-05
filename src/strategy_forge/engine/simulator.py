@@ -2031,8 +2031,14 @@ class SimulationEngine:
         env_lines = [f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()]
         env_text = "当前社会环境：\n" + "\n".join(env_lines) if not self._quantified else ""
         action_list = get_narrative_actions(agent.entity_type) if not self._quantified else []
-        action_catalog_text = ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
-                               if action_list and not self._quantified else "")
+        # 附加 base_type 能力提示
+        bt = getattr(agent, "base_type", "Agent") or "Agent"
+        if bt != "Agent" and not self._quantified:
+            action_catalog_text = f"\n## 你的角色类型\n你是 {bt} 类型实体，决策范围受限于你的身份和资源。\n"
+        else:
+            action_catalog_text = ""
+        action_catalog_text += ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
+                                if action_list and not self._quantified else "")
 
         # ── 共享双路 LanceDB 召回 ──
         static_text, dynamic_text = await self._shared_dual_recall(agent)

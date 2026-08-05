@@ -168,11 +168,11 @@ class StrategicReasoner:
         self._intervention_cache = ""
         return ""
 
-    def _cached_action_catalog(self, rule_engine: Any) -> str:
+    def _cached_action_catalog(self, rule_engine: Any, base_type: str = "Agent") -> str:
         domain = getattr(rule_engine, "domain", "default")
-        key = f"{domain}_{self._enable_multi_action}_{self._max_actions}"
+        key = f"{domain}_{self._enable_multi_action}_{self._max_actions}_{base_type}"
         if key not in self._action_catalog_cache:
-            self._action_catalog_cache[key] = rule_engine.action_catalog()
+            self._action_catalog_cache[key] = rule_engine.action_catalog(base_type)
         return self._action_catalog_cache[key]
 
     def record_interaction(
@@ -508,10 +508,16 @@ class StrategicReasoner:
                 )
 
         # ── 共享前缀（同轮所有 agent 一致，利于云端前缀缓存）──
+        bt = getattr(agent, "base_type", "Agent") or "Agent"
         prefix_parts: list[str] = []
         if imm != "无":
             prefix_parts.append(f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n")
-        prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine)}\n")
+        prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine, bt)}\n")
+        # 非 Agent 实体能力说明
+        if bt != "Agent":
+            cap = rule_engine.get_capability(bt)
+            prefix_parts.append(f"## 角色限制\n你是 {bt} 类型实体，仅能执行上述可选行动列表中的动作。"
+                                f"禁止选择列表外的任何动作。\n")
         # 合作目标约束：partner 必须从关系网络中的已知合作方或同行业实体中选择
         if relationship_context and "（无" not in relationship_context:
             prefix_parts.append(f"## 合作目标约束\npartner 动作的目标必须从你的关系网络中选择已知合作方，"

@@ -188,21 +188,31 @@ class RuleEngine:
     def actions(self) -> list[str]:
         return [_normalize_action(a) for a in self.pack["actions"]]
 
-    def action_catalog(self) -> str:
-        """供决策 prompt 使用的可选动作说明。"""
+    def action_catalog(self, base_type: str = "Agent") -> str:
+        """供决策 prompt 使用的可选动作说明。按 base_type 过滤。
+        
+        Agent：全量动作
+        Subordinate：排除军事/战略动作
+        其余类型：仅 observe
+        """
         _TARGET_HINTS: dict[str, str] = {
             "partner": "提示：partner 应选择同行业或已知供应链/战略投资关系的实体，不应跨行业随机结盟",
             "diplomacy": "提示：diplomacy 应选择利益相关的可对话方（对手、盟国、冲突方），而非无关第三方",
         }
+        allowed = self.get_allowed_actions(base_type)
         lines = []
         for a in self.pack["actions"]:
             a = _normalize_action(a)
+            if a not in allowed:
+                continue
             eff = self.pack["self_effects"].get(a, {})
             desc = ", ".join(f"{k}{v:+.0f}" for k, v in eff.items()) or "无直接消耗"
             line = f"- {a}（自身效应: {desc}）"
             if a in _TARGET_HINTS:
                 line += f"\n  {_TARGET_HINTS[a]}"
             lines.append(line)
+        if not lines:
+            lines.append("- observe（无动作权限，仅观察）")
         return "\n".join(lines)
 
     # ── 状态初始化 ──
@@ -297,9 +307,14 @@ class RuleEngine:
                 "==": mv == val, "!=": mv != val}[op]
 
     def compute_deltas(self, action: str, intensity: float,
-                       env: dict[str, str] | None = None,
-                       state: Any = None) -> tuple[dict, dict]:
+                        env: dict[str, str] | None = None,
+                        state: Any = None,
+                        allowed_actions: list[str] | None = None) -> tuple[dict, dict]:
         intensity = max(0.0, min(1.0, float(intensity)))
+        # 越权回退：若动作不在允许列表中，回退为 observe
+        if allowed_actions is not None and action not in allowed_actions:
+            logger.debug("[RuleEngine] action '%s' not allowed, fallback to observe", action)
+            action = "observe"
         self_d = {k: v * intensity for k, v in self.pack["self_effects"].get(action, {}).items()}
         tgt_d = {k: v * intensity for k, v in self.pack["target_effects"].get(action, {}).items()}
         # 状态依赖条件效应
