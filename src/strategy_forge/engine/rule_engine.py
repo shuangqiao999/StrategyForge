@@ -28,6 +28,7 @@ from .models import EntityState
 logger = logging.getLogger(__name__)
 
 _CONDITION_RE = re.compile(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*')
+_NOT_RE = re.compile(r'^\s*not\s+')
 
 
 def _normalize_action(a: Any) -> str:
@@ -56,14 +57,29 @@ class RuleEngine:
 
     @staticmethod
     def _parse_condition(condition: str) -> list[list[tuple[str, str, float]]]:
-        """Pre-parse 'a<5 and b>2 or c==1' → [[(a,<,5),(b,>,2)], [(c,==,1)]]."""
+        """Pre-parse condition string into structured form.
+
+        'a<5 and b>2 or c==1' → [[(a,<,5),(b,>,2)], [(c,==,1)]]
+        Each atom is (metric, op, value). Negated atoms prefixed with 'not '
+        are parsed as (metric, op, value) with op containing '!' marker
+        for later evaluation.
+        """
         result: list[list[tuple[str, str, float]]] = []
         for or_part in condition.split(" or "):
             atoms: list[tuple[str, str, float]] = []
             for and_part in or_part.strip().split(" and "):
-                m = _CONDITION_RE.match(and_part.strip())
+                stripped = and_part.strip()
+                negated = bool(_NOT_RE.match(stripped))
+                if negated:
+                    stripped = _NOT_RE.sub('', stripped).strip()
+                m = _CONDITION_RE.match(stripped)
                 if m:
-                    atoms.append((m.group(1), m.group(2), float(m.group(3))))
+                    metric, op, val = m.group(1), m.group(2), float(m.group(3))
+                    if negated:
+                        op = '!' + op  # marker for eval
+                    atoms.append((metric, op, val))
+                else:
+                    logger.debug("[RuleEngine] condition atom failed to parse: '%s'", stripped)
             if atoms:
                 result.append(atoms)
         return result
@@ -191,29 +207,34 @@ class RuleEngine:
                 return True
         return False
 
-    @staticmethod
-    def _eval_cond_cached(parsed: list[list[tuple[str, str, float]]], state: Any) -> bool:
-        """Evaluate a pre-parsed condition against entity state — no string ops."""
+    def _eval_cond_cached(self, parsed: list[list[tuple[str, str, float]]], state: Any) -> bool:
+        """Evaluate a pre-parsed condition against entity state — no string ops.
+
+        Supports 'not' negated atoms (op prefixed with '!').
+        Logs unknown metrics at debug level to help catch config errors.
+        """
+        known_metrics = set(self.pack.get("metrics", []))
         for and_group in parsed:
             ok = True
             for metric, op, val in and_group:
+                negated = op.startswith('!')
+                real_op = op[1:] if negated else op
                 mv = state.get_metric(metric)
-                if op == "<" and not (mv < val):
-                    ok = False
-                    break
-                if op == ">" and not (mv > val):
-                    ok = False
-                    break
-                if op == "<=" and not (mv <= val):
-                    ok = False
-                    break
-                if op == ">=" and not (mv >= val):
-                    ok = False
-                    break
-                if op == "==" and not (mv == val):
-                    ok = False
-                    break
-                if op == "!=" and not (mv != val):
+                # Debug: flag condition references to non-standard metrics
+                if metric not in known_metrics and metric not in ('_intel_exposed',):
+                    logger.debug("[RuleEngine] condition references unknown metric '%s' (resolves to 0.0)", metric)
+                # Evaluate comparison
+                cmp = (
+                    (real_op == "<" and mv < val) or
+                    (real_op == ">" and mv > val) or
+                    (real_op == "<=" and mv <= val) or
+                    (real_op == ">=" and mv >= val) or
+                    (real_op == "==" and mv == val) or
+                    (real_op == "!=" and mv != val)
+                )
+                if negated:
+                    cmp = not cmp
+                if not cmp:
                     ok = False
                     break
             if ok:
@@ -364,6 +385,17 @@ class RuleEngine:
 
     # ── 存亡 ──
     def is_alive(self, state: EntityState) -> bool:
+        """存亡判定。支持两种模式：
+
+        weighted_score（需 rules.json 配置 elimination）：
+          综合评分 = Σ(metrics[m] × weights[m])
+          淘汰条件：score < threshold_score 或 任一 hard_core 指标 ≤ 保底值
+          适用：大国博弈等需要多维度综合评估的场景
+
+        threshold（默认，无需配置）：
+          任一指标 ≤ thresholds[m] → 死亡
+          适用：军事/商业等单维崩盘即淘汰的场景
+        """
         elim = self.pack.get("elimination")
         if elim and elim.get("mode") == "weighted_score":
             weights = elim.get("weights", {})
