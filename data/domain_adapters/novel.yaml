@@ -158,6 +158,7 @@ tier_rule:
     - 地名/时间/天气/物品 = tier3
 layer_config:
   skip_layer3: true
+  quantified_supported: false
   min_kept_for_check: 3
   warn_threshold: 8
   desc_truncate: 80
@@ -360,6 +361,28 @@ aliases:
     - 陈卧子
   _strategic_regions: []
 methodology:
+  relation_polarity:
+    敌对: foe
+    背叛: foe
+    追杀: foe
+    决斗: foe
+    复仇: foe
+    挑战: foe
+    陷害: foe
+    诽谤: foe
+    打压: foe
+    同盟: ally
+    结盟: ally
+    合作: ally
+    支持: ally
+    援助: ally
+    伙伴: ally
+    友谊: ally
+    师徒: ally
+    爱慕: ally
+    投靠: neutral
+    归附: neutral
+    旁观: neutral
   report_conflict_kw:
   - 背叛
   - 死亡

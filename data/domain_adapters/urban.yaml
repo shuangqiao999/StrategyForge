@@ -300,6 +300,23 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    恶性竞争: foe
+    虹吸效应: foe
+    产业冲突: foe
+    资源争夺: foe
+    环境转嫁: foe
+    人口争夺: foe
+    区域协同: ally
+    同城化: ally
+    产业链互补: ally
+    基础设施共享: ally
+    联合规划: ally
+    对口支援: ally
+    辐射带动: neutral
+    通勤: neutral
+    功能互补: neutral
+    对标学习: neutral
   report_conflict_kw:
   - 拆迁冲突
   - 安全事故

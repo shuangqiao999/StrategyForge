@@ -103,6 +103,7 @@ class FallbackRules:
 @dataclass
 class LayerConfig:
     skip_layer3: bool = False
+    quantified_supported: bool = True
     min_kept_for_check: int = 3
     warn_threshold: int = 8
     desc_truncate: int = 80
@@ -298,6 +299,7 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
 
     layer = LayerConfig(
         skip_layer3=bool(raw_layer.get("skip_layer3", False)),
+        quantified_supported=bool(raw_layer.get("quantified_supported", True)),
         min_kept_for_check=int(raw_layer.get("min_kept_for_check", 3)),
         warn_threshold=int(raw_layer.get("warn_threshold", 8)),
         desc_truncate=int(raw_layer.get("desc_truncate", 80)),

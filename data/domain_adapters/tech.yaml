@@ -301,6 +301,27 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    专利诉讼: foe
+    技术封锁: foe
+    标准之争: foe
+    人才挖角: foe
+    断供: foe
+    抄袭: foe
+    恶意收购: foe
+    价格战: foe
+    联合研发: ally
+    交叉授权: ally
+    开源共建: ally
+    标准联盟: ally
+    技术转让: ally
+    投资: ally
+    战略合作: ally
+    技术交流: neutral
+    技术引进: neutral
+    技术借鉴: neutral
+    学术合作: neutral
+    兼容适配: neutral
   report_conflict_kw:
   - 断供
   - 制裁

@@ -20,7 +20,7 @@ class ConfigValidationError(ValueError):
     """Raised when rules.json configuration is invalid (fail-fast before deduction starts)."""
 
 
-# ── Module class registry (maps config keys to concrete classes) ──
+# 模块注册表 — 与 __init__.py::MODULE_REGISTRY 保持同步
 _MODULE_CLASSES: dict[str, type[AlgorithmModule]] = {
     "ode_engine": ODEModule,
     "physics_engine": PhysicsModule,
@@ -45,7 +45,12 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
         "fatigue": "fatigue_recovery", "supply": "supply_consumption",
         "pollution": "pollution_spread", "resources": "resource_depletion",
         "population": "logistic", "economy": "logistic",
-        "market_share": "logistic", "cash_flow": "decay", "brand": "logistic",
+        "market_share": "logistic", "cash_flow": "cash_flow_dynamics",
+        "brand": "logistic", "morale": "logistic", "stability": "logistic",
+        "satisfaction": "logistic", "support_rate": "logistic",
+        "unity": "logistic", "public_trust": "logistic",
+        "polarization": "logistic", "employment": "logistic",
+        "infrastructure": "logistic", "supply_chain": "logistic",
     }
 
     engine = PipelineEngine()
@@ -120,17 +125,11 @@ def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
 
 
 def build_module_chain(rule_engine: Any) -> list[AlgorithmModule]:
-    """Backward-compat: returns module list from build_pipeline."""
+    """Returns the configured module list from build_pipeline (backward compat)."""
     engine = build_pipeline(rule_engine)
-    result: list[AlgorithmModule] = []
-    # Get order from pipeline config
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
     order = pack.get("modules", {}).get("pipeline", {}).get("order", ["ode_engine", "physics_engine"])
-    for name in order:
-        mod = engine.get(name)
-        if mod is not None:
-            result.append(mod)
-    return result
+    return [m for name in order if (m := engine.get(name)) is not None]
 
 
 def build_context(

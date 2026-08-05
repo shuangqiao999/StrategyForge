@@ -311,6 +311,32 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    进攻: foe
+    攻击: foe
+    入侵: foe
+    交战: foe
+    对峙: foe
+    轰炸: foe
+    突袭: foe
+    围困: foe
+    封锁: foe
+    摩擦: foe
+    叛乱: foe
+    叛变: foe
+    协防: ally
+    联合作战: ally
+    军事同盟: ally
+    情报共享: ally
+    联合演习: ally
+    支援: ally
+    后勤补给: ally
+    部署协调: ally
+    巡逻: neutral
+    换防: neutral
+    调防: neutral
+    侦察: neutral
+    威慑: neutral
   report_conflict_kw:
   - 进攻
   - 轰炸

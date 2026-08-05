@@ -155,6 +155,7 @@ tier_rule:
     - 地名/场景/物品/氛围描写 = tier3
 layer_config:
   skip_layer3: true
+  quantified_supported: false
   min_kept_for_check: 3
   warn_threshold: 8
   desc_truncate: 80

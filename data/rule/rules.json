@@ -56,7 +56,8 @@
         "supply": -10,
         "strength": 5,
         "morale": 3,
-        "fatigue": -2
+        "fatigue": -2,
+        "leadership": 3
       },
       "maneuver": {
         "supply": -8,
@@ -65,7 +66,8 @@
       },
       "diplomacy": {
         "morale": 2,
-        "supply": -1
+        "supply": -1,
+        "leadership": 2
       },
       "siege": {
         "supply": -10,
@@ -752,7 +754,7 @@
           "brand",
           "morale"
         ],
-        "epsilon": 0.2,
+        "epsilon": 0.12,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -1432,14 +1434,16 @@
         "population": "ode",
         "resources": "ode",
         "pollution": "ode",
-        "biodiversity": "ode"
+        "biodiversity": "ode",
+        "stability": "ode"
       },
       "ode_engine": {
         "equations": {
           "population": "competitive_logistic",
           "resources": "resource_depletion",
           "pollution": "pollution_spread",
-          "biodiversity": "competitive_logistic"
+          "biodiversity": "competitive_logistic",
+          "stability": "logistic"
         },
         "params": {
           "population": {
@@ -1747,14 +1751,16 @@
         "population": "ode",
         "finance": "ode",
         "employment": "ode",
-        "infrastructure": "ode"
+        "infrastructure": "ode",
+        "satisfaction": "ode"
       },
       "ode_engine": {
         "equations": {
           "population": "logistic",
           "finance": "logistic",
           "employment": "competitive_logistic",
-          "infrastructure": "logistic"
+          "infrastructure": "logistic",
+          "satisfaction": "logistic"
         },
         "params": {
           "population": {
@@ -1784,7 +1790,7 @@
         "target_metrics": [
           "satisfaction"
         ],
-        "epsilon": 0.25,
+        "epsilon": 0.12,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -2073,7 +2079,7 @@
         "target_metrics": [
           "tech_lead"
         ],
-        "epsilon": 0.2,
+        "epsilon": 0.12,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -2341,7 +2347,7 @@
           "public_trust",
           "narrative_dominance"
         ],
-        "epsilon": 0.15,
+        "epsilon": 0.12,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -2470,7 +2476,8 @@
       "grain_resource",
       "global_reputation",
       "alliance_trust",
-      "rnd"
+      "rnd",
+      "talent_pool"
     ],
     "initial_metrics": {
       "strength": 100,
@@ -2489,7 +2496,8 @@
       "grain_resource": 65,
       "global_reputation": 60,
       "alliance_trust": 50,
-      "rnd": 45
+      "rnd": 45,
+      "talent_pool": 50
     },
     "thresholds": {
       "strength": 15,
@@ -2505,7 +2513,8 @@
       "grain_resource": 10,
       "global_reputation": 15,
       "alliance_trust": 10,
-      "rnd": 10
+      "rnd": 10,
+      "talent_pool": 10
     },
     "actions": [
       "military_offensive",
@@ -2727,21 +2736,27 @@
     },
     "delay_effects": {
       "military_offensive": {
-        "supply_chain": -5,
-        "fatigue": 8,
-        "global_reputation": -5,
-        "delay_rounds": 2
+        "delay": 2,
+        "effects": {
+          "supply_chain": -5,
+          "fatigue": 8,
+          "global_reputation": -5
+        }
       },
       "trade_warfare": {
-        "cash_flow": -8,
-        "intl_relations": -5,
-        "supply_chain": -4,
-        "delay_rounds": 3
+        "delay": 3,
+        "effects": {
+          "cash_flow": -8,
+          "intl_relations": -5,
+          "supply_chain": -4
+        }
       },
       "economic_mobilization": {
-        "global_reputation": -3,
-        "alliance_trust": -2,
-        "delay_rounds": 2
+        "delay": 2,
+        "effects": {
+          "global_reputation": -3,
+          "alliance_trust": -2
+        }
       }
     },
     "auto_effects": {
@@ -2873,7 +2888,7 @@
           "morale",
           "support_rate"
         ],
-        "epsilon": 0.07,
+        "epsilon": 0.1,
         "graph_type": "complete",
         "weighted": true,
         "norm_range": [
@@ -3007,13 +3022,6 @@
         "unity": 30
       }
     },
-    "inherited_from": [
-      "military",
-      "business",
-      "politics",
-      "tech",
-      "info_war"
-    ],
     "event_impact": {
       "全面贸易封锁": {
         "supply_chain": -20,

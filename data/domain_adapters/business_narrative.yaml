@@ -241,6 +241,24 @@ aliases:
   entity_aliases: {}
   _strategic_regions: []
 methodology:
+  relation_polarity:
+    市场份额争夺: foe
+    价格战: foe
+    恶意收购: foe
+    技术窃取: foe
+    挖角: foe
+    诽谤: foe
+    背叛: foe
+    排挤: foe
+    战略合作: ally
+    合资: ally
+    投资: ally
+    供应: ally
+    联盟: ally
+    孵化: ally
+    业务往来: neutral
+    交叉持股: neutral
+    渠道共享: neutral
   report_conflict_kw:
   - 份额下滑
   - 反垄断

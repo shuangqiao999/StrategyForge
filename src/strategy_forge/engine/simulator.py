@@ -172,6 +172,9 @@ def _distort_event_content(content_raw: str, distortion: float) -> str:
 # 受限可见性：这些级别的事件仅对参与者+发起者可见，不会全局广播
 _RESTRICTED_VIS = frozenset({"private", "alliance"})
 
+# 谍报暴露标记：rules.json 中 target_effects 使用此 key 表示情报获取成功
+_INTEL_EXPOSED_KEY = "_intel_exposed"
+
 
 def _is_event_visible_to(entity_id: str, entity_name: str, evt: dict) -> bool:
     """事件可见性判定：public 全图可见，private/alliance 仅参与者/发起者可见。
@@ -2868,7 +2871,7 @@ class SimulationEngine:
                 inter = next((it for it in inter_by_actor.get(actor, [])
                               if it.get("target") == tgt), None)
                 if inter and any(
-                    "_intel_exposed" in d or "intel" in k.lower()
+                    _INTEL_EXPOSED_KEY in d or _INTEL_EXPOSED_KEY in k.lower()
                     for k, d in inter.get("deltas", {}).items()
                     if isinstance(d, dict)
                 ):
@@ -2876,13 +2879,15 @@ class SimulationEngine:
                     pass
                 if inter:
                     for k in inter.get("deltas", {}):
-                        if "_intel_exposed" in str(k).lower() or "intel" in str(k).lower():
+                        if _INTEL_EXPOSED_KEY in str(k).lower():
                             bonus = self._intel_bonuses.setdefault(actor, {}).get(tgt, 0.0)
                             self._intel_bonuses.setdefault(actor, {})[tgt] = min(5.0, bonus + 2.0)
                             self._log("simulation", f"[谍报] {actor} 对 {tgt} 获得信息优势 (+2.0, 总和={bonus+2.0:.1f})")
                             break
 
         # ── Algorithm module chain (ODE + Physics) ──
+        # 模块顺序已由 build_pipeline() 内置排序（IS_FINALIZER 自动置末），
+        # 此处直接遍历，未来可迁移至 PipelineEngine.run() 以启用条件执行与信号验证。
         if self._algorithm_modules and self._rule_engine is not None:
             from strategy_forge.algorithms.module_utils import (
                 apply_context_results,
@@ -2891,12 +2896,7 @@ class SimulationEngine:
             entity_ids = [a.entity_id for a in self.agents if a.entity_id in states]
             ctx = build_context(states, self._rule_engine, entity_ids, round_number,
                                 prev_spatial=getattr(self, "_spatial_state", None))
-            # finalizer（ODE/Physics 写数组）必须最后执行，避免被后续模块读取旧值
-            ordered_mods = sorted(
-                self._algorithm_modules,
-                key=lambda m: 1 if getattr(m, "IS_FINALIZER", False) else 0,
-            )
-            for mod in ordered_mods:
+            for mod in self._algorithm_modules:
                 try:
                     ctx = mod.execute(ctx)
                 except Exception as e:

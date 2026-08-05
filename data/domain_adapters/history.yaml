@@ -162,6 +162,7 @@ tier_rule:
     - 地理区域/制度/赋税/民变/天灾 = tier3
 layer_config:
   skip_layer3: true
+  quantified_supported: false
   min_kept_for_check: 3
   warn_threshold: 8
   desc_truncate: 80
@@ -312,6 +313,31 @@ aliases:
   entity_aliases: {}
   _strategic_regions: []
 methodology:
+  relation_polarity:
+    征伐: foe
+    交战: foe
+    围城: foe
+    讨伐: foe
+    兵变: foe
+    谋反: foe
+    反叛: foe
+    屠杀: foe
+    囚禁: foe
+    流放: foe
+    联姻: ally
+    和亲: ally
+    勤王: ally
+    共谋: ally
+    归顺: ally
+    羁縻: ally
+    册封: ally
+    封赏: ally
+    通商: neutral
+    互市: neutral
+    修好: neutral
+    出使: neutral
+    称臣: neutral
+    朝贺: neutral
   report_conflict_kw:
   - 政变
   - 兵变

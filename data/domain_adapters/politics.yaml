@@ -308,6 +308,29 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    弹劾: foe
+    政变: foe
+    颠覆: foe
+    抵制: foe
+    指控: foe
+    调查: foe
+    决裂: foe
+    分裂: foe
+    倒阁: foe
+    结盟: ally
+    组阁: ally
+    政治支持: ally
+    联合提案: ally
+    共识: ally
+    背书: ally
+    政治献金: ally
+    联合执政: ally
+    磋商: neutral
+    谈判: neutral
+    外交照会: neutral
+    访问: neutral
+    观望: neutral
   report_conflict_kw:
   - 弹劾
   - 政变

@@ -11,7 +11,7 @@ from .physics_module import PhysicsModule
 from .pipeline_engine import PipelineEngine
 from .module_utils import apply_context_results, build_context, build_pipeline
 
-# Module registry: {module_name: module_class}
+# 模块注册表 — 新增模块时需与 module_utils.py::_MODULE_CLASSES 同步
 MODULE_REGISTRY: dict[str, type[AlgorithmModule]] = {
     "ode_engine": ODEModule,
     "physics_engine": PhysicsModule,

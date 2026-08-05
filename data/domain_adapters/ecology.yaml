@@ -299,6 +299,23 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    入侵: foe
+    栖息地破坏: foe
+    污染排放: foe
+    过度捕捞: foe
+    偷猎: foe
+    滥伐: foe
+    争夺: foe
+    掠食: foe
+    共生: ally
+    互利: ally
+    生态修复: ally
+    联合保育: ally
+    物种保护: ally
+    迁徙: neutral
+    共存: neutral
+    适者生存: neutral
   report_conflict_kw:
   - 污染
   - 泄漏

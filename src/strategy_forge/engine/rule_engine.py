@@ -239,7 +239,7 @@ class RuleEngine:
         # 状态依赖条件效应
         if state is not None:
             for key, cfg in self.pack.get("conditional_effects", {}).items():
-                if not key.startswith(action):
+                if not key.startswith(action + "_"):
                     continue
                 cond = cfg.get("condition", "")
                 parsed = self._parsed_conditions.get(cond)

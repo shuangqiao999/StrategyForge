@@ -302,6 +302,25 @@ aliases:
   - 河南
   - 陕西
 methodology:
+  relation_polarity:
+    舆论攻击: foe
+    虚假信息: foe
+    认知战: foe
+    网络攻击: foe
+    数据窃取: foe
+    渗透: foe
+    策反: foe
+    黑客入侵: foe
+    水军: foe
+    抹黑: foe
+    信息共享: ally
+    联合反制: ally
+    协同辟谣: ally
+    网络安全合作: ally
+    联合演习: ally
+    情报搜集: neutral
+    信号监控: neutral
+    舆情分析: neutral
   report_conflict_kw:
   - 舆论反转
   - 丑闻

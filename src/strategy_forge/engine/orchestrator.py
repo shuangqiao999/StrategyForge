@@ -428,6 +428,19 @@ class DeductionOrchestrator:
         domain = (cfg.get("domain") or "narrative").strip()
         self._domain = domain
         custom = cfg.get("custom_rules")
+
+        # 检查域是否支持量化模式（通过 domain adapter flag）
+        if domain not in ("", "narrative"):
+            try:
+                from strategy_forge.engine.domain_adapter import get_adapter
+                ad = get_adapter(domain)
+                if not ad.layer.quantified_supported:
+                    self._log("quantify", f"域 '{domain}' 不支持量化推演（仅叙事模式），已自动切换")
+                    self._rule_engine = None
+                    return
+            except Exception:
+                pass  # adapter 加载失败时，继续尝试加载规则包
+
         if domain in ("", "narrative"):
             self._rule_engine = None
             return
