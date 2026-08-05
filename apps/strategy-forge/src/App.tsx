@@ -821,15 +821,15 @@ export default function App() {
             }
             <option value="narrative">📖 纯叙事（不量化）</option>
           </select>
-          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 80 }}>图谱补全</span>
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 52 }}>图谱补全</span>
             <input
               type="range" min={0} max={3} value={graphMinNeighbors}
               onChange={e => setGraphMinNeighbors(Number(e.target.value))}
-              style={{ flex: 1, accentColor: "#22c55e" }}
+              style={{ flex: 1, accentColor: "#22c55e", marginRight: 4 }}
               title="孤立实体最小邻居数：0=不补全 1=极保守(推荐) 3=最激进"
             />
-            <span style={{ fontSize: 12, color: "#e2e8f0", minWidth: 24, textAlign: "center" }}>{graphMinNeighbors}</span>
+            <span style={{ fontSize: 12, color: "#e2e8f0", width: 16, textAlign: "center" }}>{graphMinNeighbors}</span>
           </div>
           {domain !== "narrative" && (
             <div style={{ marginBottom: 6 }}>
