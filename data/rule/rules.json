@@ -41,8 +41,8 @@
         "leadership": 3
       },
       "attack": {
-        "strength": -15,
-        "supply": -12,
+        "strength": -10,
+        "supply": -10,
         "fatigue": 10,
         "morale": -5
       },
@@ -150,6 +150,13 @@
           "strength": 8,
           "morale": 3,
           "leadership": 2
+        }
+      },
+      "attack_overflow": {
+        "delay": 2,
+        "effects": {
+          "strength": -5,
+          "supply": -2
         }
       }
     },
@@ -446,7 +453,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "strength": 0.3,
+        "morale": 0.2,
+        "supply": 0.25,
+        "fatigue": 0.1,
+        "leadership": 0.15
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "strength": 5,
+        "supply": 5
+      }
+    }
   },
   "business": {
     "name": "📊 商业竞争",
@@ -495,13 +517,13 @@
         "morale": 1
       },
       "price_war": {
-        "cash_flow": -12,
+        "cash_flow": -10,
         "market_share": 10,
         "brand": -6,
         "morale": -2
       },
       "invest_rnd": {
-        "cash_flow": -15,
+        "cash_flow": -10,
         "rnd": 10,
         "morale": 2,
         "brand": 1
@@ -513,21 +535,21 @@
         "morale": 1
       },
       "expand": {
-        "cash_flow": -15,
+        "cash_flow": -10,
         "market_share": 8,
         "morale": -4,
         "supply_chain": -4,
         "brand": 2
       },
       "partner": {
-        "cash_flow": 15,
+        "cash_flow": 10,
         "brand": 5,
         "supply_chain": 8,
         "morale": 3,
         "rnd": 2
       },
       "ipo": {
-        "cash_flow": 50,
+        "cash_flow": 10,
         "morale": -10,
         "brand": -5,
         "supply_chain": -3,
@@ -659,6 +681,36 @@
         "effects": {
           "market_share": 3,
           "cash_flow": -2
+        }
+      },
+      "price_war_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -2
+        }
+      },
+      "invest_rnd_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -5
+        }
+      },
+      "expand_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -5
+        }
+      },
+      "partner_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": 5
+        }
+      },
+      "ipo_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": 40
         }
       }
     },
@@ -892,7 +944,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "cash_flow": 0.3,
+        "market_share": 0.2,
+        "brand": 0.15,
+        "morale": 0.15,
+        "talent_pool": 0.2
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "cash_flow": 3,
+        "market_share": 8
+      }
+    }
   },
   "politics": {
     "name": "🏛️ 政治博弈",
@@ -948,7 +1015,7 @@
         "support_rate": 1
       },
       "reform": {
-        "economy": -12,
+        "economy": -10,
         "support_rate": -10,
         "unity": -8,
         "legislative_power": -5
@@ -1049,6 +1116,12 @@
         "delay": 1,
         "effects": {
           "support_rate": 2
+        }
+      },
+      "reform_overflow": {
+        "delay": 2,
+        "effects": {
+          "economy": -2
         }
       }
     },
@@ -1279,7 +1352,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "support_rate": 0.3,
+        "legislative_power": 0.2,
+        "unity": 0.2,
+        "morale": 0.15,
+        "intl_relations": 0.15
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "support_rate": 10,
+        "unity": 10
+      }
+    }
   },
   "ecology": {
     "name": "🌿 生态环境",
@@ -1316,9 +1404,9 @@
     ],
     "self_effects": {
       "exploit": {
-        "resources": -20,
+        "resources": -10,
         "population": 10,
-        "pollution": 15,
+        "pollution": 10,
         "biodiversity": -8
       },
       "conserve": {
@@ -1328,14 +1416,14 @@
         "stability": 2
       },
       "pollute_control": {
-        "pollution": -20,
-        "resources": -12,
+        "pollution": -10,
+        "resources": -10,
         "stability": 8,
         "population": -2
       },
       "expand_habitat": {
-        "population": 12,
-        "resources": -15,
+        "population": 10,
+        "resources": -10,
         "biodiversity": -5
       },
       "compete": {
@@ -1387,6 +1475,27 @@
           "biodiversity": 5,
           "stability": 3,
           "pollution": -3
+        }
+      },
+      "exploit_overflow": {
+        "delay": 2,
+        "effects": {
+          "resources": -10,
+          "pollution": 5
+        }
+      },
+      "pollute_control_overflow": {
+        "delay": 2,
+        "effects": {
+          "pollution": -10,
+          "resources": -2
+        }
+      },
+      "expand_habitat_overflow": {
+        "delay": 2,
+        "effects": {
+          "population": 2,
+          "resources": -5
         }
       }
     },
@@ -1586,7 +1695,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "biodiversity": 0.3,
+        "population": 0.2,
+        "resources": 0.2,
+        "stability": 0.15,
+        "pollution": 0.15
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "biodiversity": 5,
+        "population": 8
+      }
+    }
   },
   "urban": {
     "name": "🏙️ 城市规划",
@@ -1622,20 +1746,20 @@
     ],
     "self_effects": {
       "build_infra": {
-        "finance": -18,
-        "infrastructure": 15,
+        "finance": -10,
+        "infrastructure": 10,
         "satisfaction": 4,
         "employment": 2
       },
       "develop_industry": {
-        "finance": -12,
-        "employment": 12,
+        "finance": -10,
+        "employment": 10,
         "population": 6,
         "satisfaction": -4
       },
       "welfare": {
-        "finance": -15,
-        "satisfaction": 15,
+        "finance": -10,
+        "satisfaction": 10,
         "employment": -2
       },
       "attract_talent": {
@@ -1694,6 +1818,27 @@
         "effects": {
           "satisfaction": 6,
           "population": 2
+        }
+      },
+      "build_infra_overflow": {
+        "delay": 2,
+        "effects": {
+          "finance": -8,
+          "infrastructure": 5
+        }
+      },
+      "develop_industry_overflow": {
+        "delay": 2,
+        "effects": {
+          "finance": -2,
+          "employment": 2
+        }
+      },
+      "welfare_overflow": {
+        "delay": 2,
+        "effects": {
+          "finance": -5,
+          "satisfaction": 5
         }
       }
     },
@@ -1902,7 +2047,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "finance": 0.2,
+        "employment": 0.25,
+        "infrastructure": 0.2,
+        "satisfaction": 0.2,
+        "population": 0.15
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "finance": 5,
+        "employment": 10
+      }
+    }
   },
   "tech": {
     "name": "🔬 科技竞赛",
@@ -1943,8 +2103,8 @@
         "talent_pool": 1
       },
       "invest_rd": {
-        "chip_stock": -15,
-        "tech_lead": 12,
+        "chip_stock": -10,
+        "tech_lead": 10,
         "talent_pool": 2,
         "patent_barrier": 3
       },
@@ -2009,6 +2169,13 @@
         "delay": 1,
         "effects": {
           "talent_pool": 5
+        }
+      },
+      "invest_rd_overflow": {
+        "delay": 2,
+        "effects": {
+          "chip_stock": -5,
+          "tech_lead": 2
         }
       }
     },
@@ -2176,7 +2343,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "tech_lead": 0.25,
+        "rnd": 0.2,
+        "talent_pool": 0.25,
+        "chip_stock": 0.15,
+        "patent_count": 0.15
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "tech_lead": 5,
+        "talent_pool": 8
+      }
+    }
   },
   "info_war": {
     "name": "📰 舆论信息战",
@@ -2224,7 +2406,7 @@
       },
       "leak_info": {
         "narrative_dominance": -8,
-        "polarization": 12,
+        "polarization": 10,
         "public_trust": -10
       },
       "framing_battle": {
@@ -2287,6 +2469,12 @@
         "delay": 1,
         "effects": {
           "media_reach": 6
+        }
+      },
+      "leak_info_overflow": {
+        "delay": 2,
+        "effects": {
+          "polarization": 2
         }
       }
     },
@@ -2453,7 +2641,22 @@
         },
         "once": true
       }
-    ]
+    ],
+    "elimination": {
+      "mode": "weighted_score",
+      "weights": {
+        "narrative_dominance": 0.3,
+        "public_trust": 0.25,
+        "polarization": 0.2,
+        "morale": 0.15,
+        "intl_relations": 0.1
+      },
+      "threshold_score": 25.0,
+      "hard_core": {
+        "narrative_dominance": 8,
+        "public_trust": 8
+      }
+    }
   },
   "geo_strategy": {
     "name": "🌐 大国博弈（跨域联动）",
@@ -2526,59 +2729,47 @@
       "defensive_buildup",
       "observe",
       "intel_gather",
-      {
-        "name": "tech_sanctions_with_narrative",
-        "description": "技术封锁+国际舆论污名化"
-      },
-      {
-        "name": "military_deterrence_with_diplomacy",
-        "description": "军事威慑+外交斡旋对冲"
-      },
-      {
-        "name": "energy_hostage_diplomacy",
-        "description": "能源供应+技术置换+外交捆绑"
-      },
-      {
-        "name": "trade_blockade_with_talent_war",
-        "description": "贸易封锁+高端人才争夺"
-      }
+      "tech_sanctions_with_narrative",
+      "military_deterrence_with_diplomacy",
+      "energy_hostage_diplomacy",
+      "trade_blockade_with_talent_war"
     ],
     "self_effects": {
       "intel_gather": {
-        "cash_flow": -12,
+        "cash_flow": -10,
         "supply": -6,
         "fatigue": 4,
         "tech_lead": 2
       },
       "military_offensive": {
-        "strength": -15,
-        "supply": -12,
+        "strength": -10,
+        "supply": -10,
         "fatigue": 10,
         "morale": -5,
-        "cash_flow": -12,
+        "cash_flow": -10,
         "supply_chain": -5,
         "support_rate": 5,
-        "intl_relations": -12,
+        "intl_relations": -10,
         "unity": 4
       },
       "economic_mobilization": {
-        "cash_flow": -12,
-        "supply_chain": 12,
+        "cash_flow": -10,
+        "supply_chain": 10,
         "strength": 5,
         "morale": 3,
         "support_rate": -2,
         "unity": -1
       },
       "diplomatic_engagement": {
-        "intl_relations": 12,
+        "intl_relations": 10,
         "cash_flow": 3,
         "fatigue": 6,
         "support_rate": -2,
         "public_trust": -1
       },
       "tech_investment": {
-        "cash_flow": -20,
-        "tech_lead": 12,
+        "cash_flow": -10,
+        "tech_lead": 10,
         "strength": 5,
         "supply_chain": 3
       },
@@ -2594,7 +2785,7 @@
         "cash_flow": -8,
         "supply_chain": 10,
         "support_rate": 6,
-        "intl_relations": -12,
+        "intl_relations": -10,
         "public_trust": -4,
         "polarization": 4
       },
@@ -2617,7 +2808,7 @@
         "talent_pool": 6,
         "cash_flow": -6,
         "public_trust": 5,
-        "intl_relations": -12,
+        "intl_relations": -10,
         "global_reputation": -8,
         "supply_chain": -4
       },
@@ -2630,7 +2821,7 @@
         "fatigue": 3
       },
       "energy_hostage_diplomacy": {
-        "energy_resource": 12,
+        "energy_resource": 10,
         "cash_flow": 10,
         "intl_relations": 8,
         "global_reputation": -5,
@@ -2672,6 +2863,33 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
+      },
+      "tech_sanctions_with_narrative": {
+        "tech_lead": -5,
+        "talent_pool": -4,
+        "cash_flow": -3,
+        "global_reputation": -4,
+        "rnd": -3
+      },
+      "military_deterrence_with_diplomacy": {
+        "morale": -5,
+        "supply": -4,
+        "intl_relations": -3,
+        "alliance_trust": -3,
+        "strength": -2
+      },
+      "energy_hostage_diplomacy": {
+        "energy_resource": -6,
+        "supply_chain": -4,
+        "cash_flow": -4,
+        "strength": -2
+      },
+      "trade_blockade_with_talent_war": {
+        "supply_chain": -5,
+        "cash_flow": -4,
+        "talent_pool": -4,
+        "rnd": -3,
+        "strength": -2
       }
     },
     "conditional_effects": {
@@ -2757,14 +2975,67 @@
           "global_reputation": -3,
           "alliance_trust": -2
         }
+      },
+      "intel_gather_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -2
+        }
+      },
+      "military_offensive_overflow": {
+        "delay": 2,
+        "effects": {
+          "strength": -5,
+          "supply": -2,
+          "cash_flow": -2,
+          "intl_relations": -2
+        }
+      },
+      "economic_mobilization_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -2,
+          "supply_chain": 2
+        }
+      },
+      "diplomatic_engagement_overflow": {
+        "delay": 2,
+        "effects": {
+          "intl_relations": 2
+        }
+      },
+      "tech_investment_overflow": {
+        "delay": 2,
+        "effects": {
+          "cash_flow": -10,
+          "tech_lead": 2
+        }
+      },
+      "trade_warfare_overflow": {
+        "delay": 2,
+        "effects": {
+          "intl_relations": -2
+        }
+      },
+      "tech_sanctions_with_narrative_overflow": {
+        "delay": 2,
+        "effects": {
+          "intl_relations": -2
+        }
+      },
+      "energy_hostage_diplomacy_overflow": {
+        "delay": 2,
+        "effects": {
+          "energy_resource": 2
+        }
       }
     },
     "auto_effects": {
       "war_exhaustion": {
         "condition": "fatigue > 60 and strength > 40",
         "effects": {
-          "support_rate": -2,
-          "morale": -3,
+          "support_rate": -1,
+          "morale": -2,
           "unity": -1
         }
       },
@@ -2816,8 +3087,8 @@
       "collapse_spiral": {
         "condition": "unity < 20 and support_rate < 25",
         "effects": {
-          "cash_flow": -8,
-          "strength": -8,
+          "cash_flow": -4,
+          "strength": -4,
           "intl_relations": -5,
           "public_trust": -5
         }
@@ -3082,6 +3353,20 @@
         },
         "once": true
       }
-    ]
+    ],
+    "action_meta": {
+      "tech_sanctions_with_narrative": {
+        "description": "技术封锁+国际舆论污名化"
+      },
+      "military_deterrence_with_diplomacy": {
+        "description": "军事威慑+外交斡旋对冲"
+      },
+      "energy_hostage_diplomacy": {
+        "description": "能源供应+技术置换+外交捆绑"
+      },
+      "trade_blockade_with_talent_war": {
+        "description": "贸易封锁+高端人才争夺"
+      }
+    }
   }
 }
