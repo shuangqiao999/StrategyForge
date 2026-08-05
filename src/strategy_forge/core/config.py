@@ -114,6 +114,8 @@ class DeductionConfig:
         # LLM 审核开关：代码规则定基线后，LLM 审核边缘实体（默认启用）
         self.deduction_llm_review = os.getenv("FORGE_LLM_REVIEW", "1") == "1"
         self.deduction_chunk_size = _env_int("FORGE_CHUNK_SIZE", 1000)
+        # 图谱补全：孤立实体最少邻居数阈值。默认 1（极保守），最大 3
+        self.deduction_graph_min_neighbors = min(3, max(0, _env_int("FORGE_GRAPH_MIN_NEIGHBORS", 1)))
 
     def __getattr__(self, name: str):
         raise AttributeError(

@@ -139,6 +139,7 @@ export default function App() {
   const [rounds, setRounds] = useState(10);
   const [roundMode, setRoundMode] = useState<"preset" | "custom">("preset");
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
+  const [graphMinNeighbors, setGraphMinNeighbors] = useState(1);
 
   // ── 策略优化器 ──
   const [optEnabled, setOptEnabled] = useState(false);
@@ -456,7 +457,7 @@ export default function App() {
       const r = await fetch(`${API_BASE}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, total_rounds: rounds } }),
+        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, total_rounds: rounds, graph_min_neighbors: graphMinNeighbors } }),
       });
       if (r.ok) {
         const data = await r.json();
@@ -820,6 +821,16 @@ export default function App() {
             }
             <option value="narrative">📖 纯叙事（不量化）</option>
           </select>
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 80 }}>图谱补全</span>
+            <input
+              type="range" min={0} max={3} value={graphMinNeighbors}
+              onChange={e => setGraphMinNeighbors(Number(e.target.value))}
+              style={{ flex: 1, accentColor: "#22c55e" }}
+              title="孤立实体最小邻居数：0=不补全 1=极保守(推荐) 3=最激进"
+            />
+            <span style={{ fontSize: 12, color: "#e2e8f0", minWidth: 24, textAlign: "center" }}>{graphMinNeighbors}</span>
+          </div>
           {domain !== "narrative" && (
             <div style={{ marginBottom: 6 }}>
               <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {

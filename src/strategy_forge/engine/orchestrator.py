@@ -624,9 +624,17 @@ class DeductionOrchestrator:
                         break
 
         # ── 图谱补全：为孤立实体自动添加中性/互补关系边 ──
-        added_edges = self.graph.ensure_min_edges(min_neighbors=3)
-        if added_edges:
-            self._log("graph", f"图谱补全: 新增 {added_edges} 条合成关系边")
+        from strategy_forge.core.config import config as _cfg
+        # 优先从会话配置读取，其次用环境变量，默认 1
+        data = self.store.get(self.session.id) or {}
+        user_cfg = (data.get("config_json", {}) or {})
+        min_nb = int(user_cfg.get("graph_min_neighbors",
+                    getattr(_cfg, "deduction_graph_min_neighbors", 1)))
+        min_nb = max(0, min(3, min_nb))
+        if min_nb > 0:
+            added_edges = self.graph.ensure_min_edges(min_neighbors=min_nb)
+            if added_edges:
+                self._log("graph", f"图谱补全: 新增 {added_edges} 条合成关系边 (阈值={min_nb})")
 
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")
