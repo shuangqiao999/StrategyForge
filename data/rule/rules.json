@@ -32,7 +32,12 @@
       "siege",
       "electronic_warfare",
       "observe",
-      "intel_gather"
+      "intel_gather",
+      "logistics_support",
+      "intel_sharing",
+      "strategic_retreat",
+      "fortification",
+      "negotiated_ceasefire"
     ],
     "self_effects": {
       "intel_gather": {
@@ -81,6 +86,30 @@
       "observe": {
         "fatigue": -5,
         "morale": 1
+      },
+      "logistics_support": {
+        "supply": 5,
+        "morale": 3,
+        "fatigue": -2
+      },
+      "intel_sharing": {
+        "leadership": 3,
+        "supply": 2
+      },
+      "strategic_retreat": {
+        "strength": -3,
+        "supply": -5,
+        "fatigue": -3
+      },
+      "fortification": {
+        "strength": 4,
+        "supply": -4,
+        "fatigue": 3
+      },
+      "negotiated_ceasefire": {
+        "morale": 3,
+        "fatigue": -4,
+        "supply": 2
       }
     },
     "target_effects": {
@@ -105,6 +134,18 @@
       "electronic_warfare": {
         "leadership": -8,
         "morale": -10
+      },
+      "logistics_support": {
+        "morale": 2,
+        "supply": 3
+      },
+      "intel_sharing": {
+        "leadership": 2,
+        "morale": 2
+      },
+      "fortification": {
+        "strength": -3,
+        "fatigue": 2
       }
     },
     "conditional_effects": {
@@ -472,7 +513,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -487,7 +529,8 @@
           "siege",
           "maneuver",
           "electronic_warfare"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -559,7 +602,11 @@
       "embargo",
       "poach_talent",
       "observe",
-      "intel_gather"
+      "intel_gather",
+      "strategic_alliance",
+      "innovation_pivot",
+      "cost_optimization",
+      "market_exit"
     ],
     "self_effects": {
       "intel_gather": {
@@ -621,6 +668,26 @@
       "observe": {
         "cash_flow": -1,
         "morale": 1
+      },
+      "strategic_alliance": {
+        "cash_flow": 4,
+        "brand": 3,
+        "market_share": 2
+      },
+      "innovation_pivot": {
+        "rnd": 5,
+        "tech_lead": 3,
+        "cash_flow": -4
+      },
+      "cost_optimization": {
+        "cash_flow": 6,
+        "morale": -2,
+        "supply_chain": -2
+      },
+      "market_exit": {
+        "market_share": -5,
+        "cash_flow": 8,
+        "brand": -3
       }
     },
     "target_effects": {
@@ -655,7 +722,15 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      }
+      },
+      "strategic_alliance": {
+        "market_share": -2
+      },
+      "innovation_pivot": {
+        "tech_lead": -2
+      },
+      "cost_optimization": {},
+      "market_exit": {}
     },
     "conditional_effects": {
       "price_war_diminishing": {
@@ -1014,7 +1089,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -1026,7 +1102,8 @@
           "embargo",
           "expand",
           "ipo"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -1091,7 +1168,11 @@
       "propaganda",
       "fact_check",
       "observe",
-      "intel_gather"
+      "intel_gather",
+      "coalition_form",
+      "policy_innovation",
+      "strategic_compromise",
+      "crisis_reshuffle"
     ],
     "self_effects": {
       "intel_gather": {
@@ -1136,6 +1217,26 @@
       "observe": {
         "unity": 1,
         "legislative_power": 0.5
+      },
+      "coalition_form": {
+        "support_rate": 4,
+        "legislative_power": 3,
+        "intl_relations": 3
+      },
+      "policy_innovation": {
+        "economy": 4,
+        "unity": 3,
+        "legislative_power": 2
+      },
+      "strategic_compromise": {
+        "intl_relations": 5,
+        "support_rate": -2,
+        "unity": -2
+      },
+      "crisis_reshuffle": {
+        "unity": -4,
+        "support_rate": 3,
+        "legislative_power": 2
       }
     },
     "target_effects": {
@@ -1160,7 +1261,15 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      }
+      },
+      "coalition_form": {
+        "support_rate": -2
+      },
+      "policy_innovation": {},
+      "strategic_compromise": {
+        "intl_relations": 3
+      },
+      "crisis_reshuffle": {}
     },
     "conditional_effects": {
       "campaign_boom": {
@@ -1469,7 +1578,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -1479,7 +1589,8 @@
         "exclude_actions": [
           "legislate",
           "campaign"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -1544,7 +1655,10 @@
       "expand_habitat",
       "compete",
       "restoration",
-      "observe"
+      "observe",
+      "eco_restoration",
+      "sustainable_harvest",
+      "pollution_transfer"
     ],
     "self_effects": {
       "exploit": {
@@ -1583,6 +1697,20 @@
       },
       "observe": {
         "stability": 1
+      },
+      "eco_restoration": {
+        "biodiversity": 5,
+        "stability": 3,
+        "resources": -3
+      },
+      "sustainable_harvest": {
+        "resources": 4,
+        "population": 2,
+        "stability": 2
+      },
+      "pollution_transfer": {
+        "pollution": -5,
+        "stability": -3
       }
     },
     "target_effects": {
@@ -1594,6 +1722,11 @@
       "exploit": {
         "resources": -8,
         "biodiversity": -3
+      },
+      "eco_restoration": {},
+      "sustainable_harvest": {},
+      "pollution_transfer": {
+        "pollution": 4
       }
     },
     "conditional_effects": {
@@ -1858,14 +1991,16 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
         "exclude_metrics": [],
         "exclude_actions": [
           "exploit"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -1929,7 +2064,10 @@
       "welfare",
       "attract_talent",
       "regulate",
-      "observe"
+      "observe",
+      "smart_city_upgrade",
+      "talent_import",
+      "green_transformation"
     ],
     "self_effects": {
       "build_infra": {
@@ -1963,6 +2101,21 @@
       },
       "observe": {
         "finance": 1
+      },
+      "smart_city_upgrade": {
+        "infrastructure": 5,
+        "satisfaction": 3,
+        "finance": -4
+      },
+      "talent_import": {
+        "employment": 4,
+        "population": 3,
+        "finance": -3
+      },
+      "green_transformation": {
+        "satisfaction": 4,
+        "infrastructure": 3,
+        "finance": -3
       }
     },
     "target_effects": {
@@ -1973,7 +2126,12 @@
       "develop_industry": {
         "population": -5,
         "satisfaction": -3
-      }
+      },
+      "smart_city_upgrade": {},
+      "talent_import": {
+        "employment": -2
+      },
+      "green_transformation": {}
     },
     "conditional_effects": {
       "build_infra_strained": {
@@ -2253,7 +2411,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -2265,7 +2424,8 @@
           "build_infra",
           "develop_industry",
           "regulate"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -2329,7 +2489,10 @@
       "talent_war",
       "standards_battle",
       "observe",
-      "intel_gather"
+      "intel_gather",
+      "open_source_release",
+      "patent_blockade",
+      "talent_aquisition"
     ],
     "self_effects": {
       "intel_gather": {
@@ -2357,6 +2520,21 @@
       },
       "observe": {
         "tech_lead": 1
+      },
+      "open_source_release": {
+        "tech_lead": -3,
+        "commercialization": 5,
+        "talent_pool": 3
+      },
+      "patent_blockade": {
+        "patent_barrier": 5,
+        "chip_stock": 3,
+        "commercialization": -2
+      },
+      "talent_aquisition": {
+        "talent_pool": 5,
+        "tech_lead": 2,
+        "cash_flow": -3
       }
     },
     "target_effects": {
@@ -2374,6 +2552,15 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
+      },
+      "open_source_release": {
+        "tech_lead": -4
+      },
+      "patent_blockade": {
+        "patent_barrier": -3
+      },
+      "talent_aquisition": {
+        "talent_pool": -3
       }
     },
     "conditional_effects": {
@@ -2597,7 +2784,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -2608,7 +2796,8 @@
         "exclude_actions": [
           "export_control",
           "standards_battle"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -2668,7 +2857,10 @@
       "leak_info",
       "framing_battle",
       "observe",
-      "intel_gather"
+      "intel_gather",
+      "narrative_reset",
+      "facts_dump",
+      "echo_chamber_break"
     ],
     "self_effects": {
       "intel_gather": {
@@ -2698,6 +2890,21 @@
       },
       "observe": {
         "media_reach": 2
+      },
+      "narrative_reset": {
+        "public_trust": 5,
+        "polarization": -4,
+        "narrative_dominance": -2
+      },
+      "facts_dump": {
+        "public_trust": 4,
+        "narrative_dominance": 3,
+        "polarization": -3
+      },
+      "echo_chamber_break": {
+        "polarization": -5,
+        "public_trust": 4,
+        "media_reach": 2
       }
     },
     "target_effects": {
@@ -2714,6 +2921,13 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
+      },
+      "narrative_reset": {},
+      "facts_dump": {
+        "narrative_dominance": -3
+      },
+      "echo_chamber_break": {
+        "polarization": -3
       }
     },
     "conditional_effects": {
@@ -2941,7 +3155,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -2949,7 +3164,8 @@
         "exclude_actions": [
           "framing_battle",
           "propaganda"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],
@@ -3057,7 +3273,12 @@
       "tech_sanctions_with_narrative",
       "military_deterrence_with_diplomacy",
       "energy_hostage_diplomacy",
-      "trade_blockade_with_talent_war"
+      "trade_blockade_with_talent_war",
+      "coalition_building",
+      "resource_exchange",
+      "decupling",
+      "tech_breakthrough",
+      "interest_swap"
     ],
     "self_effects": {
       "intel_gather": {
@@ -3160,6 +3381,32 @@
         "tech_lead": 6,
         "intl_relations": -8,
         "global_reputation": -6
+      },
+      "coalition_building": {
+        "alliance_trust": 5,
+        "intl_relations": 4,
+        "global_reputation": 3
+      },
+      "resource_exchange": {
+        "energy_resource": 4,
+        "grain_resource": 4,
+        "cash_flow": 3
+      },
+      "decupling": {
+        "supply_chain": -6,
+        "cash_flow": -4,
+        "strength": 3
+      },
+      "tech_breakthrough": {
+        "tech_lead": 6,
+        "rnd": 4,
+        "talent_pool": 3,
+        "cash_flow": -5
+      },
+      "interest_swap": {
+        "support_rate": 3,
+        "intl_relations": 4,
+        "public_trust": 2
       }
     },
     "target_effects": {
@@ -3215,6 +3462,26 @@
         "talent_pool": -4,
         "rnd": -3,
         "strength": -2
+      },
+      "coalition_building": {
+        "intl_relations": -3,
+        "alliance_trust": -2
+      },
+      "resource_exchange": {
+        "supply_chain": 3,
+        "cash_flow": 2
+      },
+      "decupling": {
+        "supply_chain": -5,
+        "cash_flow": -4
+      },
+      "tech_breakthrough": {
+        "tech_lead": -3,
+        "talent_pool": -2
+      },
+      "interest_swap": {
+        "public_trust": 2,
+        "intl_relations": 2
       }
     },
     "conditional_effects": {
@@ -3696,7 +3963,8 @@
     "entity_capabilities": {
       "Agent": {
         "metrics": "all",
-        "actions": "all"
+        "actions": "all",
+        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
       },
       "Subordinate": {
         "metrics": "all",
@@ -3716,7 +3984,8 @@
           "trade_warfare",
           "military_deterrence_with_diplomacy",
           "trade_blockade_with_talent_war"
-        ]
+        ],
+        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
       "Geography": {
         "metrics": [],

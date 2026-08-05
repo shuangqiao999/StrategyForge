@@ -623,6 +623,11 @@ class DeductionOrchestrator:
                         e["aliases"] = aliases
                         break
 
+        # ── 图谱补全：为孤立实体自动添加中性/互补关系边 ──
+        added_edges = self.graph.ensure_min_edges(min_neighbors=3)
+        if added_edges:
+            self._log("graph", f"图谱补全: 新增 {added_edges} 条合成关系边")
+
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")
         self._check_cancel()

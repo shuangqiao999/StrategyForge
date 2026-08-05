@@ -423,6 +423,79 @@ class DeductionGraphStore:
 
         return {"nodes": nodes, "links": links}
 
+    def ensure_min_edges(self, min_neighbors: int = 3, base_weight: float = 0.3) -> int:
+        """图谱补全：为邻居不足的实体自动添加中性/互补关系边。
+
+        使用规则启发式（无 LLM 调用），为孤立实体补全博弈空间：
+        - 同类型实体之间添加中性"共存"关系
+        - 上下游供应链实体添加"依存"关系
+        - 同地域实体添加"联动"关系
+        返回新添加的边数。
+        """
+        self._check_conn()
+        # 获取所有实体及其邻居计数
+        result = self._conn.execute(
+            f"MATCH (e:{self.NODE_TABLE}) "
+            "OPTIONAL MATCH (e)-[r:RELATES]-() "
+            "RETURN e.id as id, e.name as name, COUNT(r) as degree, e.type as type"
+        )
+        entities = []
+        while result.has_next():
+            r = result.get_next()
+            eid, name, deg, etype = r[0], r[1], int(r[2]), r[3]
+            if deg < min_neighbors:
+                entities.append({"id": eid, "name": name, "type": etype, "degree": deg})
+
+        if not entities:
+            return 0
+
+        added = 0
+        # 策略1：同类型实体间补全"共存/博弈"中性边
+        by_type: dict[str, list[dict]] = {}
+        for e in entities:
+            by_type.setdefault(e["type"], []).append(e)
+
+        for etype, group in by_type.items():
+            for i, a in enumerate(group):
+                for b in group[i + 1:]:
+                    rel = "共存博弈" if etype in ("国家", "Country", "政权", "Regime", "Company", "企业") else "联动"
+                    self._add_relation(a["id"], b["id"], rel, base_weight)
+                    added += 1
+
+        # 策略2：实体类型互补配对（国家→组织、组织→企业）
+        complementary_pairs = [
+            ("国家", "组织", "影响"), ("Country", "Organization", "influence"),
+            ("组织", "企业", "协作"), ("Organization", "Company", "collaboration"),
+            ("企业", "企业", "竞争"), ("Company", "Company", "competition"),
+        ]
+        for t1, t2, rel in complementary_pairs:
+            g1 = by_type.get(t1, [])
+            g2 = by_type.get(t2, [])
+            pairs = min(len(g1), len(g2), 3)
+            for i in range(pairs):
+                self._add_relation(g1[i]["id"], g2[i]["id"], rel, base_weight)
+                added += 1
+
+        logger.info("[DeductionGraph] ensure_min_edges: added %d synthetic edges", added)
+        return added
+
+    def _add_relation(self, id_a: str, id_b: str, relation: str, weight: float) -> None:
+        """安全添加关系边（幂等：已存在则跳过）。"""
+        import uuid
+        # 检查边是否已存在
+        result = self._conn.execute(
+            f"MATCH (a:{self.NODE_TABLE} {{id: $ida}})-[r:RELATES]-(b:{self.NODE_TABLE} {{id: $idb}}) "
+            "RETURN count(r)", {"ida": id_a, "idb": id_b}
+        )
+        if result.get_next()[0] > 0:
+            return
+        self._conn.execute(
+            f"MATCH (a:{self.NODE_TABLE} {{id: $ida}}), (b:{self.NODE_TABLE} {{id: $idb}}) "
+            "CREATE (a)-[:RELATES {relation: $rel, weight: $w, evidence: $ev}]->(b)",
+            {"ida": id_a, "idb": id_b, "rel": relation, "w": weight,
+             "ev": "auto-completed|heuristic"},
+        )
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
