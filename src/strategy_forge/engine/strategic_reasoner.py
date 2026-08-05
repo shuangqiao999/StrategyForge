@@ -53,6 +53,9 @@ _CANDIDATE_PROMPT = """你是一个战略顾问。为 $agent_name 生成 $candid
 ## 不可变目标（最高优先级，贯穿整个模拟）
 $immutable_goals
 
+## 你的层级定位
+$tier_constraint
+
 ## 外部指令（最高优先级，必须影响每个候选）
 $user_intervention
 
@@ -314,11 +317,18 @@ class StrategicReasoner:
         recent_own_text = ("\n".join(f"- {a}" for a in recent_own)
                            if recent_own else "（无——这是你的首轮行动）")
         system = "你是战略顾问，只输出 JSON 数组。每个候选必须包含 blind_spots 字段，写清楚角色未察觉的潜在风险，禁止填'无'或'未知'。"
+        bt = getattr(agent, "base_type", "Agent") or "Agent"
+        tier_map = {
+            "Agent": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量行动。",
+            "Subordinate": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。禁止选择主权级战略/军事动作。",
+        }
+        tier_constraint = tier_map.get(bt, "根据你的身份自主选择行动。")
         llm = client if client is not None else LLMClient()
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,
             agent_name=agent.name,
             immutable_goals=goals_block,
+            tier_constraint=tier_constraint,
             user_intervention=user_cmd,
             persona=self._persona_with_evolution(agent),
             background=agent.background,
@@ -535,6 +545,11 @@ class StrategicReasoner:
             f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
             f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n",
         ]
+        # 层级指引：从 entity_capabilities 读取 tier_hint
+        cap = rule_engine.get_capability(bt)
+        tier_hint_text = cap.get("tier_hint", "")
+        if tier_hint_text:
+            agent_parts.append(f"## 层级指引\n{tier_hint_text}\n")
         if causal_feedback:
             agent_parts.append(f"{causal_feedback}\n")
         agent_parts.extend([
