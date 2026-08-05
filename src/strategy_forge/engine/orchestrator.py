@@ -375,6 +375,7 @@ class DeductionOrchestrator:
                 st = self._rule_engine.init_state(
                     raw.get("id", eid),
                     raw.get("name", eid),
+                    base_type=raw.get("base_type", "Agent"),
                 )
                 st.metrics = dict(raw.get("metrics", {}))
                 st.history = list(raw.get("history", []))
@@ -715,14 +716,15 @@ class DeductionOrchestrator:
                     self._log("simulation", f"种子数据提取失败，使用规则包默认值: {e}")
 
             for a in self._agents:
-                init = dict(re_engine.pack["initial_metrics"])
+                bt = getattr(a, "base_type", "Agent") or "Agent"
+                st = re_engine.init_state(a.entity_id, a.name, base_type=bt)
+                # Apply seed overrides if any
                 overrides = seed_metrics.get(a.name, {})
-                for m, v in overrides.items():
-                    if m in init:
-                        init[m] = float(v)
-                states[a.entity_id] = EntityState(
-                    id=a.entity_id, name=a.name, domain=re_engine.domain,
-                    metrics=init, history=[])
+                if overrides:
+                    for m, v in overrides.items():
+                        if m in st.metrics:
+                            st.metrics[m] = float(v)
+                states[a.entity_id] = st
             self._states = states
             self._log("simulation",
                       f"阶段4: 量化并行模拟开始 ({total_rounds} 轮, {len(states)} 个量化实体, "

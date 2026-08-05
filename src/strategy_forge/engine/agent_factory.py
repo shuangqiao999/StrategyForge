@@ -164,7 +164,8 @@ async def create_agents_from_graph(
 
         # 构建统一的 persons 列表（仅 tier1）
         persons: list[dict] = [
-            {"id": e.id, "name": e.name, "type": e.type, "description": ""}
+            {"id": e.id, "name": e.name, "type": e.type, "description": "",
+             "base_type": getattr(e, "base_type", "Agent")}
             for e in tier1_entities
         ]
         # 构建 persona 用的 intel_map
@@ -336,6 +337,7 @@ async def create_agents_from_graph(
             background=profile_data.get("background", ""),
             goals=profile_data.get("goals", []),
             entity_type=person.get("type", ""),
+            base_type=person.get("base_type", "Agent"),
         )
         agents.append(agent_profile)
 

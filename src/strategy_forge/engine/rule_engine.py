@@ -112,6 +112,21 @@ class RuleEngine:
         # 融合架构：事件→数值冲击 与 数值→事件触发（规则包为空则通道不激活，保持兼容）
         p.setdefault("event_impact", {})
         p.setdefault("event_triggers", [])
+        # 实体能力分级：按 SemanticMediator 基础类型限制指标/动作权限
+        # Agent=全权限，Subordinate=无军力指标，其余=仅观察
+        p.setdefault("entity_capabilities", {
+            "Agent": {"metrics": "all", "actions": "all"},
+            "Subordinate": {"metrics": "all",
+                "exclude_metrics": ["strength", "fatigue", "leadership", "supply",
+                                    "morale", "energy_resource", "grain_resource", "chip_stock"],
+                "exclude_actions": ["attack", "defend", "siege", "maneuver", "military_offensive",
+                                    "defensive_buildup", "electronic_warfare"]},
+            "Geography": {"metrics": [], "actions": ["observe"]},
+            "Concept": {"metrics": [], "actions": ["observe"]},
+            "Resource": {"metrics": [], "actions": ["observe"]},
+            "Contract": {"metrics": [], "actions": ["observe"]},
+            "Event": {"metrics": [], "actions": ["observe"]},
+        })
         return p
 
     # ── 融合架构：事件/数值双向通道辅助 ──
@@ -191,9 +206,39 @@ class RuleEngine:
         return "\n".join(lines)
 
     # ── 状态初始化 ──
-    def init_state(self, entity_id: str, name: str) -> EntityState:
-        return EntityState(id=entity_id, name=name, domain=self.domain,
-                           metrics={k: float(v) for k, v in self.pack["initial_metrics"].items()})
+    def get_capability(self, base_type: str) -> dict:
+        """返回指定 base_type 的实体能力配置（指标+动作限制）。"""
+        caps = self.pack.get("entity_capabilities", {})
+        return caps.get(base_type, caps.get("Agent", {"metrics": "all", "actions": "all"}))
+
+    def get_allowed_actions(self, base_type: str) -> list[str]:
+        """返回指定 base_type 可用的动作列表（过滤掉禁止动作）。
+        
+        - "actions": "all" → 全动作减 exclude_actions
+        - "actions": ["observe"] → 仅这些动作
+        """
+        cap = self.get_capability(base_type)
+        allowed = cap.get("actions", "all")
+        if isinstance(allowed, list):
+            all_actions = self.actions()
+            return [a for a in all_actions if a in allowed]
+        all_actions = self.actions()
+        exclude = set(cap.get("exclude_actions", []))
+        return [a for a in all_actions if a not in exclude]
+
+    def init_state(self, entity_id: str, name: str, base_type: str = "Agent") -> EntityState:
+        """创建实体初始状态。按 base_type 的能力配置过滤指标。"""
+        cap = self.get_capability(base_type)
+        if cap.get("metrics") == "all":
+            exclude = set(cap.get("exclude_metrics", []))
+            metrics = {k: float(v) for k, v in self.pack["initial_metrics"].items()
+                       if k not in exclude}
+        elif isinstance(cap.get("metrics"), list):
+            metrics = {k: float(self.pack["initial_metrics"].get(k, 50.0))
+                       for k in cap["metrics"] if k in self.pack["metrics"]}
+        else:
+            metrics = {}
+        return EntityState(id=entity_id, name=name, domain=self.domain, metrics=metrics)
 
     # ── 单决策 → 增量 ──
     @staticmethod

@@ -81,6 +81,7 @@ class DeductionAgentProfile:
     relationships: dict[str, str] = field(default_factory=dict)
     system_prompt_extra: str = ""
     entity_type: str = ""
+    base_type: str = "Agent"  # SemanticMediator 基础类型：Agent/Subordinate/Geography/...
 
 
 @dataclass

@@ -186,7 +186,9 @@ class StrategyOptimizer:
                     rule_engine = RuleEngine.from_domain(domain)
             if rule_engine is not None:
                 for a in agents:
-                    base_states[a.entity_id] = rule_engine.init_state(a.entity_id, a.name)
+                    base_states[a.entity_id] = rule_engine.init_state(
+                        a.entity_id, a.name,
+                        base_type=getattr(a, "base_type", "Agent"))
                 olog(f"量化模式: 领域={rule_engine.domain}，{len(base_states)} 个量化实体，胜负由数值阈值判定")
         except Exception as e:
             logger.warning("[Optimizer] 量化初始化失败，回退 LLM 评估: %s", e)

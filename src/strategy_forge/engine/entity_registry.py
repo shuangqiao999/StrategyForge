@@ -117,6 +117,7 @@ class RegisteredEntity:
     tier: int = 0           # 1=核心博弈者 2=次级参与者 3=纯背景 0=未判定
     tier_evidence: str = "" # 分级证据（原文引用）
     group: str = ""         # L2 归属分组（所属国家/组织）
+    base_type: str = "Unknown"  # SemanticMediator 基础类型
 
 
 @dataclass
@@ -1924,7 +1925,8 @@ async def build_registry(
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
-            ))
+                base_type=e.get("base_type", "Unknown"),
+            )) # no-LLM
         for re in reg_entities:
             registry.entities[re.name] = re
         _fallback_classify(registry, reg_entities, log_fn, adapter)
@@ -1967,7 +1969,8 @@ async def build_registry(
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
-            ))
+                base_type=e.get("base_type", "Unknown"),
+            )) # fallback
         for re in reg_entities:
             registry.entities[re.name] = re
         _fallback_classify(registry, reg_entities, log_fn, adapter)
@@ -2072,6 +2075,7 @@ async def build_registry(
             rich_description=e["description"],
             tier=tier, tier_evidence=d.get("reason", "")[:80],
             group=d.get("group", ""),
+            base_type=e.get("base_type", "Unknown"),
         )
         registry.entities[e["name"]] = re
         if tier in (1, 2):
