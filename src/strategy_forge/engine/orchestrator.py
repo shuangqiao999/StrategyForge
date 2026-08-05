@@ -634,7 +634,6 @@ class DeductionOrchestrator:
             log_fn=self._log,
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
-        self._log("agents", f"  排除明细: {' | '.join(f'{k}:{v}' for k,v in sorted(entity_registry.discard_reasons.items()))}")
 
         agents = await create_agents_from_graph(
             graph=self.graph,

@@ -1353,16 +1353,6 @@ async def _layer3_cross_validate(
                        f"合并 {len(cached.get('merges',[]))})")
             return
 
-    # 代码别名词典预合并
-    alias_dict = _load_alias_dict(adapter)
-    merged_count = 0
-    if alias_dict:
-        merged_count = _pre_merge_aliases(registry, alias_dict)
-        if merged_count and log_fn:
-            log_fn("agents", f"Layer3 代码预合并: {merged_count} 个实体 (减少LLM负担)")
-        kept = registry.get_kept()
-        total_kept = len(kept)
-
     # 构建实体表格
     entity_lines = []
     for i, e in enumerate(kept, 1):
@@ -1772,6 +1762,15 @@ async def build_registry(
                 if a:
                     alias_to_std[a] = canon
 
+    # 额外注入 YAML 别名词典 (entity_aliases)，补全 preprocessor/intel_list 遗漏的别名
+    if adapter and adapter.aliases.entity_aliases:
+        for main_name, aliases in adapter.aliases.entity_aliases.items():
+            alias_to_std[main_name] = main_name
+            for a in aliases:
+                a = str(a).strip()
+                if a:
+                    alias_to_std[a] = main_name
+
     for name, std in alias_to_std.items():
         if name != std and name in freq_map and std not in freq_map:
             freq_map[std] = max(freq_map.get(std, 0), freq_map[name])
@@ -2006,7 +2005,27 @@ async def build_registry(
     if hard_constrained and log_fn:
         log_fn("agents", f"基础类型硬约束: {hard_constrained} 个实体强制 tier=3")
 
-    # 8b. 白名单强制一级（仅对 Agent/Subordinate 生效，不覆盖基础类型硬约束）
+    # 8b. 基础类型最低保证（仅升级：Agent≥tier1, Subordinate≥tier2）
+    # 叙事域特殊保护：低频 Agent（出场≤2次且无归属组）允许 tier2，防止背景企业误升级
+    for e in entity_list:
+        nm = e["name"]
+        bt = e.get("base_type", "Unknown")
+        if nm in decisions:
+            llm_tier = int(decisions[nm].get("tier", 3))
+            min_t = ensure_min_tier(llm_tier, bt, adapter)
+            # 叙事方法论：Agent 的频次保护
+            if adapter.meta.methodology_mode == "narrative" and bt == "Agent" and llm_tier >= 2:
+                e_freq = e.get("freq", 0)
+                e_group = decisions[nm].get("group", "")
+                if e_freq <= 2 and not e_group:
+                    min_t = max(2, llm_tier)
+            if min_t != llm_tier:
+                decisions[nm]["tier"] = min_t
+                decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"
+                if not decisions[nm].get("reason") or "白名单" not in str(decisions[nm].get("reason", "")):
+                    decisions[nm]["reason"] = f"基础类型安全网({bt}→tier{min_t})"
+
+    # 8c. 白名单强制一级（在 ensure_min_tier 之后执行，白名单有最终决定权）
     force_keep_set = adapter.aliases.force_keep
     ent_alias_map: dict[str, set[str]] = {}
     for e in entity_list:
@@ -2035,26 +2054,6 @@ async def build_registry(
                 overridden += 1
         if overridden and log_fn:
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
-
-    # 8c. 基础类型最低保证（仅升级：Agent≥tier1, Subordinate≥tier2）
-    # 叙事域特殊保护：低频 Agent（出场≤2次且无归属组）允许 tier2，防止背景企业误升级
-    for e in entity_list:
-        nm = e["name"]
-        bt = e.get("base_type", "Unknown")
-        if nm in decisions:
-            llm_tier = int(decisions[nm].get("tier", 3))
-            min_t = ensure_min_tier(llm_tier, bt, adapter)
-            # 叙事方法论：Agent 的频次保护
-            if adapter.meta.methodology_mode == "narrative" and bt == "Agent" and llm_tier >= 2:
-                e_freq = e.get("freq", 0)
-                e_group = decisions[nm].get("group", "")
-                if e_freq <= 2 and not e_group:
-                    min_t = max(2, llm_tier)
-            if min_t != llm_tier:
-                decisions[nm]["tier"] = min_t
-                decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"
-                if not decisions[nm].get("reason") or "白名单" not in str(decisions[nm].get("reason", "")):
-                    decisions[nm]["reason"] = f"基础类型安全网({bt}→tier{min_t})"
 
     missing_ids: list[str] = []
     for e in entity_list:
@@ -2098,6 +2097,13 @@ async def build_registry(
         if log_fn:
             log_fn("agents", f"⚠ 实体注册中 {len(missing_ids)} 个实体缺失 Kuzu ID (关系反哺将跳过): "
                    + ", ".join(missing_ids[:8]))
+
+    # ── 9a. 代码别名词典预合并（必须在 Layer3 之前执行，不依赖 skip_layer3）
+    alias_dict = _load_alias_dict(adapter)
+    if alias_dict:
+        merged_count = _pre_merge_aliases(registry, alias_dict)
+        if merged_count and log_fn:
+            log_fn("agents", f"别名预合并: {merged_count} 个实体 (代码别名)")
 
     # ── 9. Layer 3: 交叉裁决 ──
     await _layer3_cross_validate(registry, source_material, log_fn, adapter)

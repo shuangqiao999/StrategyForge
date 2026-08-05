@@ -683,6 +683,7 @@ async def generate_report(
     # 方案B：数值过滤兜底——把 LLM 可能自创的百分比/具体数字替换为定性趋势词，
     # 防止"62%份额""提价30%-60%"等幻觉数字误导读者（推演是方向性预估）。
     narrative = _strip_numeric_figures(narrative)
+    narrative = _dedup_paragraphs(narrative)
     conclusion = _strip_numeric_figures(conclusion)
     normalized_risks = [_strip_numeric_figures(r) for r in normalized_risks]
     normalized_recs = [_strip_numeric_figures(r) for r in normalized_recs]
@@ -745,3 +746,42 @@ def _parse_report_json(raw: str) -> dict[str, Any]:
                        type(data).__name__, (raw or "")[:200])
         return {}
     return data
+
+
+def _dedup_paragraphs(text: str) -> str:
+    """按段落（\\n\\n）分割，相邻段 trigram Jaccard > 0.7 视为重复，只保留第一段。
+
+    语言无关（中文/英文/混合均适用），解决 LLM 输出循环重复段落的顽疾。
+    """
+    if not text or len(text) < 50:
+        return text
+    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paras) < 2:
+        return text
+
+    def _trigrams(s: str) -> set[str]:
+        return {s[i:i + 3] for i in range(len(s) - 2)}
+
+    result: list[str] = [paras[0]]
+    for i in range(1, len(paras)):
+        prev = result[-1]
+        curr = paras[i]
+        # 极短段落不过滤（可能是有意义的过渡句）
+        if len(curr) < 20:
+            result.append(curr)
+            continue
+        ps = _trigrams(prev)
+        cs = _trigrams(curr)
+        if not ps or not cs:
+            result.append(curr)
+            continue
+        union = len(ps | cs)
+        if union == 0:
+            result.append(curr)
+            continue
+        jaccard = len(ps & cs) / union
+        if jaccard > 0.7:
+            continue
+        result.append(curr)
+
+    return "\n\n".join(result)

@@ -19,6 +19,19 @@ from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
 
+# 集体决策实体关键词（中英文通用）：政权/组织/国家等不应以个人视角描述
+_COLLECTIVE_ENTITY_KW = {
+    "国家", "政权", "朝廷", "帝国", "王国", "共和国", "联邦",
+    "组织", "机构", "党派", "政党", "团体", "联盟", "协会",
+    "公司", "企业", "集团", "财团", "商会",
+    "军队", "军团", "舰队", "武装", "部队",
+    "country", "nation", "state", "regime", "empire", "kingdom",
+    "organization", "company", "enterprise", "corporation", "alliance",
+    "army", "military", "fleet", "force", "party", "faction",
+}
+
+_COLLECTIVE_PERSPECTIVE = "4. 你是一个集体决策实体（政权/组织/国家/军队），不是个人。禁止以某个统治者或领导人的私人视角描述自己，必须体现该机构的集体利益和制度逻辑。"
+
 
 def _load_methodology() -> dict:
     try:
@@ -44,6 +57,7 @@ _PERSONA_PROMPT = """你是一个客观中立的角色档案生成专家。基�
    C. 自利逻辑 — 该实体行为的底层利益动机
 2. 不赋予任何实体道德高下标签 — 所有参与者都在追逐自身利益
 3. 不使用意识形态化形容词 — 用行为描述代替价值判断
+$entity_perspective
 
 ## 来自用户的特殊期望
 $user_expectations
@@ -89,6 +103,7 @@ _PERSONA_PROMPT_FALLBACK = """你是客观中立的角色档案生成专家。�
 ## 铁律
 1. 每个 persona 必须同时包含：A.优势/能力 B.矛盾/制约 C.自利逻辑
 2. 不赋予道德高下标签，用行为描述代替价值判断
+$entity_perspective
 
 ## 来自用户的特殊期望
 $user_expectations
@@ -240,6 +255,11 @@ async def create_agents_from_graph(
         role_inference = _METHODOLOGY.get("_role_inference", "") or ""
         role_examples = _METHODOLOGY.get("_entity_role_examples", "") or ""
         domain_principles = _METHODOLOGY.get("_domain_action_principles", "") or ""
+        # 检测集体决策实体 → 注入机构视角指令
+        etype = (person.get("type") or "").strip()
+        ep = ""
+        if any(k in etype for k in _COLLECTIVE_ENTITY_KW):
+            ep = _COLLECTIVE_PERSPECTIVE
         if fragments:
             from strategy_forge.core.tokenizer import compress_to_keywords
             full_context = "\n---\n".join(fragments)
@@ -254,7 +274,8 @@ async def create_agents_from_graph(
                 entity_stats=entity_stats,
                 role_inference=role_inference,
                 role_examples=role_examples,
-                domain_principles=domain_principles)
+                domain_principles=domain_principles,
+                entity_perspective=ep)
         return Template(_PERSONA_PROMPT_FALLBACK).substitute(
             name=person_name, type=person.get("type", "Person"),
             description=person.get("description", ""), role=role,
@@ -263,7 +284,8 @@ async def create_agents_from_graph(
             entity_stats=entity_stats,
             role_inference=role_inference,
             role_examples=role_examples,
-            domain_principles=domain_principles)
+            domain_principles=domain_principles,
+            entity_perspective=ep)
 
     async def gen_one(i: int, person: dict) -> dict:
         person_name = person.get("name", f"Agent-{i}")

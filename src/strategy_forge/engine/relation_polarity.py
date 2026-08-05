@@ -16,6 +16,7 @@ REL_FOE_KW = (
     "敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛", "仇", "攻击", "威胁",
     "抢占", "争夺", "蚕食", "围堵", "打压", "制裁", "封锁", "围剿", "遏制",
     "挤压", "吞并", "淘汰", "压制", "排斥", "瓦解", "颠覆", "报复", "反制",
+    "利用", "盘剥",
     "rival", "enemy", "hostil", "oppos", "compet", "conflict", "betray",
     "threat", "sanction", "blockade",
 )
@@ -24,6 +25,12 @@ REL_ALLY_KW = (
     "资助", "援助", "协作", "共建", "联合", "协同", "磋商", "伙伴", "入股",
     "ally", "allied", "support", "friend", "cooperat", "partner", "invest",
     "alliance", "supply",
+)
+# 中立关系关键字：单向从属/怀柔/朝贡等不应自动归为敌对或盟友
+# 优先级高于 foe/ally 关键字匹配，防止"招抚"误判为 foe
+REL_NEUTRAL_KW = (
+    "招抚", "招安", "绥靖", "依赖", "隶属", "依附", "朝贡",
+    "互害",  # 互相伤害 = 无明确利益倾向
 )
 
 VALID_POLARITIES = ("foe", "ally", "neutral")
@@ -38,8 +45,17 @@ def normalize_polarity(value: str | None) -> str:
 
 
 def infer_polarity(relation_name: str) -> str:
-    """关键字兜底推导。仅在 ontology/适配器未显式标注时使用。"""
+    """关键字兜底推导。仅在 ontology/适配器未显式标注时使用。
+
+    三层匹配（命中即返回）：
+      1. REL_NEUTRAL_KW 优先 — 明确不应判定为 foe/ally 的关系
+      2. REL_FOE_KW — 零和/冲突关系
+      3. REL_ALLY_KW — 共赢/协同关系
+      未命中 → neutral
+    """
     r = (relation_name or "").lower()
+    if any(k in r for k in REL_NEUTRAL_KW):
+        return "neutral"
     if any(k in r for k in REL_FOE_KW):
         return "foe"
     if any(k in r for k in REL_ALLY_KW):
