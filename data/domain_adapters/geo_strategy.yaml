@@ -82,8 +82,6 @@ base_type_mapping:
   - 武装组织
   - NGO
   - 非政府组织
-  - 军事组织
-  - MilitaryUnit
   Subordinate:
   - Person
   - 人物
@@ -99,6 +97,8 @@ base_type_mapping:
   - 议员
   - 代表
   - 政治党派
+  - 军事组织
+  - MilitaryUnit
   Resource:
   - 武器
   - 资源

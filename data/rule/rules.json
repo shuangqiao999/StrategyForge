@@ -3979,11 +3979,14 @@
           "chip_stock"
         ],
         "exclude_actions": [
-          "military_offensive",
-          "defensive_buildup",
-          "trade_warfare",
+          "trade_blockade_with_talent_war",
+          "resource_exchange",
+          "interest_swap",
           "military_deterrence_with_diplomacy",
-          "trade_blockade_with_talent_war"
+          "trade_warfare",
+          "defensive_buildup",
+          "military_offensive",
+          "coalition_building"
         ],
         "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
       },
