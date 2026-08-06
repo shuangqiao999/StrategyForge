@@ -134,6 +134,8 @@ class Aliases:
     force_keep: set[str] = field(default_factory=set)
     entity_aliases: dict[str, set[str]] = field(default_factory=dict)
     strategic_regions: set[str] = field(default_factory=set)
+    # 机构名子串模式：实体名含任意子串且对应主权实体存在 → 强制 tier3
+    force_tier3_substrings: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -350,12 +352,18 @@ def _parse_adapter(domain_id: str, raw: dict) -> DomainAdapter:
     if isinstance(raw_sr, list):
         strategic_regions = {str(x) for x in raw_sr}
 
+    raw_ft3s = raw_aliases.get("_force_tier3_substrings", raw_aliases.get("force_tier3_substrings", []))
+    force_tier3_substrings: set[str] = set()
+    if isinstance(raw_ft3s, list):
+        force_tier3_substrings = {str(x).strip() for x in raw_ft3s if str(x).strip()}
+
     aliases = Aliases(
         org_members=org_members,
         person_country=person_country,
         force_keep=force_keep,
         entity_aliases=entity_aliases,
         strategic_regions=strategic_regions,
+        force_tier3_substrings=force_tier3_substrings,
     )
 
     methodology = raw.get("methodology", {}) or {}

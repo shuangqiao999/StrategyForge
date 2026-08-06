@@ -1982,54 +1982,48 @@ async def build_registry(
     for nm in pre_l2_tier3:
         decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": "IntelMap预判(子公司/产品线→tier3)"}
 
-    # 8a-1b. 政府/军事机构名模式硬约束：名称匹配且对应主权实体存在 → 强制 tier3
-    # 解决 SemanticMediator 误将 MilitaryUnit/军事组织归入 Agent 导致机构非法 Agent 化
-    _AGENCY_PATTERNS = [
-        "国防部", "国防", "外交部", "财政部", "贸易代表", "最高法院", "司法部",
-        "国务院", "商务部", "能源部", "交通部", "农业部", "劳工部", "国土安全部",
-        "联邦", "参议院", "众议院", "白宫", "国会", "海岸警卫队",
-        "军", "舰队", "司令部", "战区", "军团", "师团",
-    ]
-    # 提取实体列表中已知的主权国家/大组织名称（用最简名匹配）
-    sovereign_names: set[str] = set()
-    for e in entity_list:
-        bt = e.get("base_type", "")
-        if bt in ("Agent",) and e["name"] not in pre_l2_tier3:
-            sovereign_names.add(e["name"])
-    agency_forced = 0
-    for nm in list(decisions.keys()):
-        if decisions[nm].get("tier", 3) == 3:
-            continue  # 已经 tier3 的不重复处理
-        # 检查 nm 是否匹配政府/军事机构模式，且不是主权实体本身
-        if nm in sovereign_names:
-            continue
-        matched_pattern = None
-        for p in _AGENCY_PATTERNS:
-            if p in nm:
-                matched_pattern = p
-                break
-        if not matched_pattern:
-            continue
-        # 检查是否有对应的主权实体（如 "美国国防部" → "美国"）
-        has_sovereign_parent = False
-        for sn in sovereign_names:
-            if nm.startswith(sn) or sn.startswith(nm[:2]):
-                has_sovereign_parent = True
-                break
-        if has_sovereign_parent:
-            decisions[nm] = {"decision": "DISCARD", "tier": 3,
-                             "reason": f"名模式硬约束(机构→tier3:{matched_pattern})"}
-            agency_forced += 1
-            continue
-        # 宽松匹配：首字重叠 + 机构模式（如 "美军" vs "美国", "俄军" vs "俄罗斯"）
-        for sn in sovereign_names:
-            if len(nm) >= 1 and len(sn) >= 1 and nm[0] == sn[0]:
+    # 8a-1b. 机构名模式硬约束：实体名含 force_tier3_substrings 中模式且对应主权实体存在 → 强制 tier3
+    # 模式列表由 domain_adapter.aliases.force_tier3_substrings 配置（中英文双份），零硬编码
+    _AGENCY_PATTERNS = adapter.aliases.force_tier3_substrings if adapter else set()
+    if _AGENCY_PATTERNS:
+        sovereign_names: set[str] = set()
+        for e in entity_list:
+            bt = e.get("base_type", "")
+            if bt in ("Agent",) and e["name"] not in pre_l2_tier3:
+                sovereign_names.add(e["name"])
+        agency_forced = 0
+        for nm in list(decisions.keys()):
+            if decisions[nm].get("tier", 3) == 3:
+                continue
+            if nm in sovereign_names:
+                continue
+            matched_pattern = None
+            for p in _AGENCY_PATTERNS:
+                if p in nm:
+                    matched_pattern = p
+                    break
+            if not matched_pattern:
+                continue
+            # 精确前缀匹配（如 "美国国防部" → "美国"）
+            has_parent = False
+            for sn in sovereign_names:
+                if nm.startswith(sn) or sn.startswith(nm[:2]):
+                    has_parent = True
+                    break
+            if has_parent:
                 decisions[nm] = {"decision": "DISCARD", "tier": 3,
-                                 "reason": f"名模式首字匹配(机构→tier3:{matched_pattern})"}
+                                 "reason": f"名模式硬约束(机构→tier3:{matched_pattern})"}
                 agency_forced += 1
-                break
-    if agency_forced and log_fn:
-        log_fn("agents", f"机构名模式拦截: {agency_forced} 个实体强制 tier=3")
+                continue
+            # 宽松首字匹配（如 "美军" ← "美国"）
+            for sn in sovereign_names:
+                if len(nm) >= 1 and len(sn) >= 1 and nm[0] == sn[0]:
+                    decisions[nm] = {"decision": "DISCARD", "tier": 3,
+                                     "reason": f"名模式首字匹配(机构→tier3:{matched_pattern})"}
+                    agency_forced += 1
+                    break
+        if agency_forced and log_fn:
+            log_fn("agents", f"机构名模式拦截: {agency_forced} 个实体强制 tier=3")
 
     # 8a0. NarrativeSorter 排除：include_in_simulation=False → 强制 tier3
     n_sorter_excluded = 0

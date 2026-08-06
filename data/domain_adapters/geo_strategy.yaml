@@ -234,6 +234,23 @@ prompts:
     - 国际组织 = 若核心成员国已列席≥3→降级
     - 地缘区域/海峡/走廊 = 争夺舞台→tier2
     - 武器/条约/数据指标 = 非决策实体
+
+    ## 机构识别方法论（强制执行）
+    当遇到以下名称模式时，自动判定为 tier3（该逻辑在 L3 代码层也会硬性拦截）：
+    ### 政府行政机构
+    - 名称含"部/委/局/署/厅/院/处/办/署/司"→ 行政机关 → 降级至所属国家
+    - 名称含"政府/联邦/白宫/国会/参议院/众议院"→ 国家机器组成部分
+    - 英文：含"Department of/Ministry of/Administration/Agency/Bureau"→ 同上级
+    ### 军事下属机构
+    - 名称以"军/军队/部队/武装/兵团/师/旅/团/营/连"结尾→ 国家武装下属 → 降级
+    - 名称含"舰队/司令部/战区/基地/指挥部"→ 军事指挥链节点 → 降级
+    - 英文：含"Fleet/Command/Corps/Division/Brigade/Battalion/Base"→ 同上级
+    ### 司法/立法机构
+    - 名称含"法院/法庭/检察院"→ 司法机构 → 降级至所属国家
+    - 英文：含"Supreme Court/Court/Judicial/Congress/Senate"→ 同上级
+    ### 判定铁律
+    - 以上模式仅当该机构的上级主权实体也在实体列表中才启动降级
+    - 若无法确认上级主权实体是否存在 → 保留不降级（宁可多留，不误杀）
   l2_tier_table: |-
     | 类型 | 层级 | 判定 | 易误判负例（看似tier1实为tier3） |
     |------|------|------|------------------------------|
@@ -453,6 +470,54 @@ aliases:
   - 山东
   - 河南
   - 陕西
+  force_tier3_substrings:
+  # 中文 — 政府/军事/司法/立法机构子串模式
+  - 国防部
+  - 外交部
+  - 财政部
+  - 贸易代表
+  - 最高法院
+  - 司法部
+  - 国务院
+  - 商务部
+  - 能源部
+  - 交通部
+  - 农业部
+  - 劳工部
+  - 国土安全部
+  - 参议院
+  - 众议院
+  - 白宫
+  - 国会
+  - 海岸警卫队
+  - 舰队
+  - 司令部
+  - 战区
+  - 军团
+  - 师团
+  - 外长
+  - 国防
+  - 联邦
+  - 政府
+  - 军
+  # 英文 — Government / Military / Judicial / Legislative substring patterns
+  - Department of
+  - Ministry of
+  - Supreme Court
+  - Senate
+  - Congress
+  - White House
+  - Fleet
+  - Command
+  - Corps
+  - Division
+  - Brigade
+  - Foreign Minister
+  - Secretary of
+  - Federal
+  - Administration
+  - Coast Guard
+  - Armed Forces
 methodology:
   _agency_method: |-
     - 活性检验法：在原文中，该名称是否【独立】执行了至少一项以下行为？发起攻击/签署协议/发布决策/施加制裁/进行谈判/组织动员/发布声明/被制裁并做出回应。若一个名称仅作为其它主体的目标、工具、背景、数据而被提及→无活性→DISCARD。
