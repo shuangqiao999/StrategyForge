@@ -162,7 +162,11 @@ async def create_agents_from_graph(
             log_fn("agents", f"  二级实体保留但不生成智能体: {', '.join(e.name for e in tier2_entities[:20])}")
         log_fn("agents", entity_registry.summary()[:200])
 
-        # 构建统一的 persons 列表（仅 tier1）
+        # 构建统一的 persons 列表（仅 tier1 + 最高层决策实体）
+        tier1_entities = [e for e in tier1_entities if getattr(e, "is_decision_agent", False)]
+        if not tier1_entities:
+            log_fn("agents", "[决策权过滤] 无最高层决策实体，仅保留 tier1 实体作为兜底")
+            tier1_entities = entity_registry.get_tier1()
         persons: list[dict] = [
             {"id": e.id, "name": e.name, "type": e.type, "description": "",
              "base_type": getattr(e, "base_type", "Agent")}
@@ -204,7 +208,8 @@ async def create_agents_from_graph(
                 if nm and nm not in seen:
                     seen.add(nm)
                     persons.append({"id": e.get("id", ""), "name": nm,
-                                    "type": e.get("type", "Person"), "description": ""})
+                                    "type": e.get("type", "Person"), "description": "",
+                                    "base_type": "Agent", "is_decision_agent": True})
         intel_map = {}
         if intel_list:
             for e in intel_list:

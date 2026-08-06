@@ -118,6 +118,7 @@ class RegisteredEntity:
     tier_evidence: str = "" # 分级证据（原文引用）
     group: str = ""         # L2 归属分组（所属国家/组织）
     base_type: str = "Unknown"  # SemanticMediator 基础类型
+    is_decision_agent: bool = False  # 是否具备最终战略决策权（最高层实体）
 
 
 @dataclass
@@ -1924,6 +1925,7 @@ async def build_registry(
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
                 base_type=e.get("base_type", "Unknown"),
+                is_decision_agent=False,
             )) # no-LLM
         for re in reg_entities:
             registry.entities[re.name] = re
@@ -1968,6 +1970,7 @@ async def build_registry(
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
                 base_type=e.get("base_type", "Unknown"),
+                is_decision_agent=False,
             )) # fallback
         for re in reg_entities:
             registry.entities[re.name] = re
@@ -2100,6 +2103,11 @@ async def build_registry(
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
 
     missing_ids: list[str] = []
+    # ── 决策权判定：仅有最高层实体允许发起战略行动 ──
+    force_t3_sub_pats = adapter.aliases.force_tier3_substrings if adapter else set()
+    sovereign_names_set = {e["name"] for e in entity_list
+                          if e.get("base_type", "") == "Agent"
+                          and e["name"] not in pre_l2_tier3}
     for e in entity_list:
         d = decisions.get(e["name"], {"decision": "DISCARD", "tier": 3, "reason": "未判定"})
         tier = int(d.get("tier", 3))
@@ -2108,6 +2116,22 @@ async def build_registry(
         kuzu_id = e.get("id", "").strip()
         if not kuzu_id and tier in (1, 2):
             missing_ids.append(e["name"])
+        # 决策权判定：tier1 + Agent + 未被机构名模式命中 → 最高层决策实体
+        bt = e.get("base_type", "Unknown")
+        is_agent = (
+            tier == 1 and bt == "Agent"
+            and e["name"] not in pre_l2_tier3
+        )
+        if is_agent and force_t3_sub_pats:
+            nm = e["name"]
+            if nm not in sovereign_names_set:
+                for pat in force_t3_sub_pats:
+                    if pat in nm:
+                        for sn in sovereign_names_set:
+                            if nm.startswith(sn) or sn.startswith(nm[:2]) or (len(nm) >= 1 and len(sn) >= 1 and nm[0] == sn[0]):
+                                is_agent = False
+                                break
+                        break
         re = RegisteredEntity(
             id=kuzu_id,
             name=e["name"], type=e["type"], freq=e["freq"],
@@ -2116,7 +2140,8 @@ async def build_registry(
             rich_description=e["description"],
             tier=tier, tier_evidence=d.get("reason", "")[:80],
             group=d.get("group", ""),
-            base_type=e.get("base_type", "Unknown"),
+            base_type=bt,
+            is_decision_agent=is_agent,
         )
         registry.entities[e["name"]] = re
         if tier in (1, 2):
