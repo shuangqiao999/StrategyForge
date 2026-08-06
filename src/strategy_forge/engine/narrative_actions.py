@@ -92,8 +92,20 @@ _FALLBACK_ACTIONS = [
 ]
 
 
-def get_narrative_actions(entity_type: str) -> list[str]:
-    """根据实体类型返回可用动作列表。类型不匹配时返回通用回退目录。"""
+def get_narrative_actions(entity_type: str, base_type: str = "Agent") -> list[str]:
+    """根据实体类型返回可用动作列表。
+
+    优先按 base_type（7 大类）门控，与量化模式统一分类学：
+      Agent=全量，Subordinate=受限集，其余=观察等待。
+    次回退 entity_type 匹配（GraphRAG 原始类型）。
+    """
+    # 第一层：base_type 门控（与量化模式统一）
+    if base_type in ("Geography", "Concept", "Resource", "Contract", "Event"):
+        return ["观察等待"]
+    if base_type == "Subordinate":
+        return ["公开声明", "私下会面", "寻求结盟", "观察等待", "调查行动"]
+
+    # 第二层：entity_type 匹配（Agent 类型）
     t = (entity_type or "").strip()
     if not t:
         return list(_FALLBACK_ACTIONS)

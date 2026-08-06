@@ -2030,9 +2030,9 @@ class SimulationEngine:
         from .narrative_actions import get_narrative_actions
         env_lines = [f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()]
         env_text = "当前社会环境：\n" + "\n".join(env_lines) if not self._quantified else ""
-        action_list = get_narrative_actions(agent.entity_type) if not self._quantified else []
-        # 附加 base_type 能力提示
         bt = getattr(agent, "base_type", "Agent") or "Agent"
+        action_list = get_narrative_actions(agent.entity_type, base_type=bt) if not self._quantified else []
+        # 附加 base_type 能力提示
         if bt != "Agent" and not self._quantified:
             action_catalog_text = f"\n## 你的角色类型\n你是 {bt} 类型实体，决策范围受限于你的身份和资源。\n"
         else:

@@ -2029,12 +2029,15 @@ async def build_registry(
             log_fn("agents", f"机构名模式拦截: {agency_forced} 个实体强制 tier=3")
 
     # 8a0. NarrativeSorter 排除：include_in_simulation=False → 强制 tier3
+    # 注：此路径已被 is_decision_agent 门 + force_tier3_substrings 完整覆盖，
+    # 保留仅作为 NarrativeSorter 的直接标记通道（NarrativeSorter 仍设置此字段）
     n_sorter_excluded = 0
     for e in entity_list:
         nm = e["name"]
         if nm in decisions and not e.get("include_in_simulation", True):
             if decisions[nm].get("tier", 3) != 3:
-                decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": "NarrativeSorter排除(背景)"}
+                decisions[nm] = {"decision": "DISCARD", "tier": 3,
+                                 "reason": "NarrativeSorter排除(背景)"}
                 n_sorter_excluded += 1
     if n_sorter_excluded and log_fn:
         log_fn("agents", f"NarrativeSorter排除: {n_sorter_excluded} 个实体强制 tier=3")
