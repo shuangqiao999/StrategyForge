@@ -180,15 +180,12 @@ class StrategyOptimizer:
                 elif domain == "auto":
                     detected = await RuleEngine.detect_domain(source, LLMClient())
                     if detected != "narrative":
-                        domain = detected
                         rule_engine = RuleEngine.from_domain(detected)
                 else:
                     rule_engine = RuleEngine.from_domain(domain)
             if rule_engine is not None:
                 for a in agents:
-                    base_states[a.entity_id] = rule_engine.init_state(
-                        a.entity_id, a.name,
-                        base_type=getattr(a, "base_type", "Agent"))
+                    base_states[a.entity_id] = rule_engine.init_state(a.entity_id, a.name)
                 olog(f"量化模式: 领域={rule_engine.domain}，{len(base_states)} 个量化实体，胜负由数值阈值判定")
         except Exception as e:
             logger.warning("[Optimizer] 量化初始化失败，回退 LLM 评估: %s", e)
@@ -223,14 +220,13 @@ class StrategyOptimizer:
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
                         rule_engine=rule_engine, states=states_copy, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
-                        env=opt_env, domain=domain, cancel_event=cancel_event,
+                        env=opt_env,
                     )
                     actions: list[Any] = []
                     for rnd in range(1, total_rounds + 1):
                         if cancel_event is not None and cancel_event.is_set():
                             break
-                        rd = await sim.run_round(rnd)
-                        actions.extend(rd.actions)
+                        await sim.run_round(rnd)
                     outcome = self._judge_quantified(rule_engine, states_copy, sc)
                 else:
                     sim = SimulationEngine(
@@ -238,8 +234,6 @@ class StrategyOptimizer:
                         log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[sc["directive"]] if sc.get("directive") else [],
                         seed=seed, temperature=temp, persist_events=False, max_concurrent=None,
-                        domain=domain, cancel_event=cancel_event,
-                        enable_multi_action=enable_multi_action, max_actions=max_actions,
                     )
                     actions = []
                     for rnd in range(1, total_rounds + 1):
@@ -293,7 +287,7 @@ class StrategyOptimizer:
         )
 
         # ── 4. 推荐方案"代表性 run"：persist=True 生成叙事报告 + 点亮时间线/因果页 ──
-        if not cancelled and report.get("recommended"):
+        if not cancelled and rule_engine is not None and base_states and report.get("recommended"):
             try:
                 import json
                 rec_name = report["recommended"]["name"]
@@ -306,10 +300,9 @@ class StrategyOptimizer:
                         log_fn=lambda _p, _m: None, preprocessor=None,
                         pre_goals=[rec_sc["directive"]] if rec_sc.get("directive") else [],
                         seed=20240101, temperature=0.6, persist_events=True, max_concurrent=None,
-                        rule_engine=rule_engine, states=rep_states or None,
-                        enable_narrate=(rule_engine is None),
+                        rule_engine=rule_engine, states=rep_states, enable_narrate=False,
                         enable_multi_action=enable_multi_action, max_actions=max_actions,
-                        env=opt_env, domain=domain, cancel_event=cancel_event,
+                        env=opt_env,
                     )
                     rep_rounds = []
                     for rnd in range(1, total_rounds + 1):
@@ -318,20 +311,19 @@ class StrategyOptimizer:
                     session.current_round = total_rounds
                     rep = await generate_report(
                         session=session, graph=graph, rounds=rep_rounds,
-                        log_fn=lambda _p, _m: None, preprocessor=None,
-                        states=rep_states or None, domain=domain)
+                        log_fn=lambda _p, _m: None, preprocessor=None)
                     payload = {
                         "summary": rep.summary,
                         "key_events": rep.key_events,
                         "risk_alerts": rep.risk_alerts,
                         "recommendations": rep.recommendations,
-                        "quantified": rule_engine is not None,
-                        "domain": (rule_engine.domain if rule_engine is not None else domain),
+                        "quantified": True,
+                        "domain": rule_engine.domain,
                         "optimized_scenario": rec_name,
                         "final_states": {
                             eid: {"name": st.name, "metrics": st.metrics,
                                   "history": st.history[-60:],
-                                  "alive": rule_engine.is_alive(st) if rule_engine is not None else True}
+                                  "alive": rule_engine.is_alive(st)}
                             for eid, st in rep_states.items()
                         },
                     }
@@ -352,8 +344,6 @@ class StrategyOptimizer:
         无 weights 时回退等权平均。
         """
         win_target = scenario.get("win_target") or {}
-        if not isinstance(win_target, dict):
-            win_target = {}
         ref = (win_target.get("entity_ref") or "").strip()
         target_state = None
         if ref:
@@ -372,10 +362,10 @@ class StrategyOptimizer:
             return SimulationOutcome(False, 0.0, 1.0, "无量化实体")
         alive = sum(1 for st in states.values() if rule_engine.is_alive(st))
         n = len(states)
-        survival = alive / n
+        win_score = round(alive / n, 4)
         # 使用规则包 elimination.weights 做加权平均，无 weights 时回退等权
         weights = rule_engine.pack.get("elimination", {}).get("weights", {})
-        metric_list = rule_engine.metrics()
+        metric_list = getattr(rule_engine, "_metrics", []) or rule_engine.metrics()
         if not weights:
             weights = {m: 1.0 / len(metric_list) for m in metric_list} if metric_list else {}
         total_weighted = 0.0
@@ -386,8 +376,6 @@ class StrategyOptimizer:
                 total_weighted += val * w
                 total_weight += w
         avg_weighted = (total_weighted / max(1, total_weight)) / 100.0 if total_weight > 0 else 0.0
-        # win_score = 存活率 + 加权健康度 综合（避免"濒死但存活"与"满血"得分相同）
-        win_score = round(survival * 0.3 + avg_weighted * 0.7, 4)
         cost = round(1.0 - avg_weighted, 4)
         return SimulationOutcome(success=win_score >= 0.5, win_score=win_score,
                                  cost=cost, rationale=f"存活 {alive}/{n}，加权健康度 {avg_weighted:.0%}")
@@ -444,7 +432,7 @@ class StrategyOptimizer:
             n = len(runs)
             succ = sum(1 for r in runs if r.outcome.success)
             mean = statistics.mean(wins) if wins else 0.0
-            sd = statistics.stdev(wins) if n > 1 else 0.0
+            sd = statistics.pstdev(wins) if n > 1 else 0.0
             ci = 1.96 * sd / math.sqrt(n) if n > 0 else 0.0
             cost_mean = statistics.mean(costs) if costs else 0.0
             stats_list.append({

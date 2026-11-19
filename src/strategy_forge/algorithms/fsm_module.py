@@ -16,6 +16,15 @@ import numpy as np
 from .base import AlgorithmModule, ModuleContext
 
 
+def _normalize_counters(raw: Any, n: int) -> list[int]:
+    """把（可能来自上一轮的）计数器数据归一化为长度 n 的 int 列表。"""
+    if isinstance(raw, dict):
+        raw = [raw.get(i, 0) for i in range(n)]
+    if isinstance(raw, (list, tuple)) and len(raw) == n:
+        return [int(x) for x in raw]
+    return [0] * n
+
+
 class FiniteStateMachineModule(AlgorithmModule):
     """Discrete state transition engine for entity behavior autonomy.
 
@@ -37,6 +46,20 @@ class FiniteStateMachineModule(AlgorithmModule):
         self._default_state: str = "idle"
         self._action_map: dict[str, dict[str, Any] | None] = {}
         self._command_states: set[str] = {"combat"}
+        self._observe_llm_guard: list[dict[str, Any]] = []
+        self._observe_stale_rounds: int = 0
+
+    def configure(self, params: dict[str, Any]) -> None:
+        self._rules = list(params.get("transition_rules", []))
+        self._default_state = str(params.get("default_state", "idle"))
+        self._action_map = dict(params.get("action_map", {}))
+        command = params.get("command_states", ["combat"])
+        self._command_states = set(command if isinstance(command, list) else [command])
+        self._observe_llm_guard = list(params.get("observe_llm_guard", []))
+        try:
+            self._observe_stale_rounds = int(params.get("observe_stale_rounds", 0))
+        except (TypeError, ValueError):
+            self._observe_stale_rounds = 0
 
     @property
     def name(self) -> str:
@@ -46,22 +69,22 @@ class FiniteStateMachineModule(AlgorithmModule):
     def description(self) -> str:
         return "有限状态机（离散状态转移+动作映射）——降低 NPC 行为决策的 LLM 调用开销"
 
-    def configure(self, params: dict[str, Any]) -> None:
-        self._rules = list(params.get("transition_rules", []))
-        self._default_state = str(params.get("default_state", "idle"))
-        self._action_map = dict(params.get("action_map", {}))
-        command = params.get("command_states", ["combat"])
-        self._command_states = set(command if isinstance(command, list) else [command])
-        self._polar_threshold = float(params.get("polar_threshold", 3.0))
-
     def execute(self, ctx: ModuleContext) -> ModuleContext:
         n = len(next(iter(ctx.arrays.values()))) if ctx.arrays else 0
         if n == 0:
             return ctx
 
-        prev_states: list[str] = ctx.metadata.get(
-            "fsm.agent_states", [self._default_state] * n
-        )
+        # 从上一轮持久化的状态 blob 恢复（跨轮 streak / observe 计数）
+        blob = ctx.metadata.get("fsm.state_blob")
+        prev_streaks: dict[str, list[int]] = {}
+        observe_streak: list[int] = [0] * n
+        if isinstance(blob, dict):
+            prev_states = blob.get("agent_states", [self._default_state] * n)
+            prev_streaks = blob.get("streaks") or {}
+            observe_streak = _normalize_counters(blob.get("observe_streak"), n)
+        else:
+            prev_states = ctx.metadata.get("fsm.agent_states", [self._default_state] * n)
+
         if isinstance(prev_states, dict):
             prev_states = [prev_states.get(i, self._default_state) for i in range(n)]
         if len(prev_states) != n:
@@ -87,7 +110,7 @@ class FiniteStateMachineModule(AlgorithmModule):
             ).hexdigest()[:6] if isinstance(condition, dict) else "noop"
             rule_fprint = f"{from_state}->{to_state}.{cond_fprint}"
             if rule_fprint not in streak_counters:
-                streak_counters[rule_fprint] = ctx.metadata.get(f"fsm.streak.{rule_fprint}", [0] * n)
+                streak_counters[rule_fprint] = _normalize_counters(prev_streaks.get(rule_fprint), n)
                 streak_keys.append(rule_fprint)
             counters = streak_counters[rule_fprint]
             for i in range(n):
@@ -106,6 +129,13 @@ class FiniteStateMachineModule(AlgorithmModule):
         for rf in streak_keys:
             ctx.metadata[f"fsm.streak.{rf}"] = streak_counters[rf]
 
+        # 跨轮 observe 计数：连续停留在 observe 则递增，否则清零
+        for i in range(n):
+            if new_states[i] == "observe":
+                observe_streak[i] += 1
+            else:
+                observe_streak[i] = 0
+
         ctx.metadata["fsm.agent_states"] = new_states
         ctx.metadata["fsm.command_states"] = list(self._command_states)
 
@@ -115,6 +145,9 @@ class FiniteStateMachineModule(AlgorithmModule):
             state = new_states[i]
             if state in self._command_states:
                 agent_actions.append(None)  # handed to LLM
+            elif state == "observe" and self._observe_handoff(ctx, i, observe_streak[i]):
+                # 指标恶化，或连续 observe 超过阈值时，交还 LLM 重新决策
+                agent_actions.append(None)
             else:
                 mapped = self._action_map.get(state)
                 if mapped is None:
@@ -133,9 +166,37 @@ class FiniteStateMachineModule(AlgorithmModule):
                     agent_actions.append(None)
         ctx.metadata["fsm.agent_actions"] = agent_actions
 
+        # 持久化状态 blob（供下一轮 build_context 回注）
+        ctx.metadata["fsm.state_blob"] = {
+            "agent_states": new_states,
+            "streaks": {rf: streak_counters[rf] for rf in streak_keys},
+            "observe_streak": observe_streak,
+        }
+
         return ctx
 
-    def _match_condition(self, ctx: ModuleContext, idx: int, condition: dict) -> bool:
+    def _observe_handoff(self, ctx: ModuleContext, idx: int, observe_rounds: int) -> bool:
+        """observe 态实体是否应交还 LLM：指标恶化守卫，或连续 observe 超过阈值。"""
+        return self._guard_triggered(ctx, idx) or (
+            self._observe_stale_rounds > 0 and observe_rounds >= self._observe_stale_rounds
+        )
+
+    def _guard_triggered(self, ctx: ModuleContext, idx: int) -> bool:
+        """observe 态实体命中任一 observe_llm_guard 条件即交还 LLM。"""
+        for g in self._observe_llm_guard:
+            if not isinstance(g, dict):
+                continue
+            metric = g.get("metric")
+            op = g.get("op")
+            threshold = g.get("threshold")
+            if metric is None or op is None or threshold is None:
+                continue
+            if self._match_condition(ctx, idx, {metric: [op, threshold]}):
+                return True
+        return False
+
+    @staticmethod
+    def _match_condition(ctx: ModuleContext, idx: int, condition: dict) -> bool:
         """Check if entity idx satisfies all condition thresholds.
         
         Supports virtual spatial metrics:
@@ -147,9 +208,9 @@ class FiniteStateMachineModule(AlgorithmModule):
             # opponent.<metric>：读取最强对手的指标值
             if metric.startswith("opponent."):
                 real_metric = metric[len("opponent."):]
-                val = self._resolve_opponent_metric(ctx, idx, real_metric)
+                val = FiniteStateMachineModule._resolve_opponent_metric(ctx, idx, real_metric)
             else:
-                val = self._resolve_metric(ctx, idx, metric)
+                val = FiniteStateMachineModule._resolve_metric(ctx, idx, metric)
             if val is None:
                 return False
             if op == "<" and not (val < float(threshold)):
@@ -164,7 +225,8 @@ class FiniteStateMachineModule(AlgorithmModule):
                 return False
         return True
 
-    def _resolve_metric(self, ctx: ModuleContext, idx: int, metric: str) -> float | None:
+    @staticmethod
+    def _resolve_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
         """Resolve a metric value: real arrays first, then virtual spatial metrics."""
         # Real metric from arrays
         if metric in ctx.arrays:
@@ -185,9 +247,8 @@ class FiniteStateMachineModule(AlgorithmModule):
                 if polar is not None and len(polar) == n:
                     own_pol = float(polar[idx])
                     others = [j for j in range(n) if j != idx]
-                    pt = getattr(self, "_polar_threshold", 3.0)
-                    enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > pt]
-                    ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= pt]
+                    enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0]
+                    ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= 3.0]
                 else:
                     # Fallback: treat all other entities as enemies
                     enemy_ids = [j for j in range(n) if j != idx]
@@ -198,19 +259,13 @@ class FiniteStateMachineModule(AlgorithmModule):
             targets = enemy_ids if "enemy" in metric else ally_ids
             if not targets:
                 return None
-            import numpy as np
-            sp = ctx.spatial
-            n = len(sp.positions)
-            min_dist = float("inf")
-            for tidx in targets:
-                if not isinstance(tidx, int) or tidx >= n:
-                    continue
-                d = float(np.linalg.norm(sp.positions[idx] - sp.positions[tidx]))
-                if d < min_dist:
-                    min_dist = d
-            return min_dist if min_dist < float("inf") else None
+            valid = [t for t in targets if isinstance(t, int) and 0 <= t < n]
+            if not valid:
+                return None
+            return float(min(np.linalg.norm(sp.positions[idx] - sp.positions[t]) for t in valid))
 
-    def _resolve_opponent_metric(self, ctx: ModuleContext, idx: int, metric: str) -> float | None:
+    @staticmethod
+    def _resolve_opponent_metric(ctx: ModuleContext, idx: int, metric: str) -> float | None:
         """读取最强对手的指标值。从 enemy_ids 中找到距离最近的敌人，读取其 metric。"""
         sp = ctx.spatial
         n = len(sp.positions)
@@ -221,9 +276,8 @@ class FiniteStateMachineModule(AlgorithmModule):
             polar = ctx.arrays.get("polarization")
             if polar is not None and len(polar) == n:
                 own_pol = float(polar[idx])
-                pt = getattr(self, "_polar_threshold", 3.0)
                 enemy_ids = [j for j in range(n) if j != idx and
-                            (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > pt)]
+                            (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0)]
             else:
                 enemy_ids = [j for j in range(n) if j != idx]
         if not enemy_ids:

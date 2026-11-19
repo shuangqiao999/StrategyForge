@@ -41,10 +41,10 @@ _INTEL_PROMPT = """你是情报分析师。请根据以下种子材料，整理�
 {domain_extra_rules}"""
 
 
-# ── 说明 ──
-# 本模块的「实体分类/tier 判定」职责已由 EntityRegistry 接管（Layer2/Layer3），
-# 此处仅保留 sort_entities（别名合并 + 层级关系提取）供量化模式情报整理使用，
-# 以及 _as_name/_as_name_list 归一化辅助函数。不合并至 narrative_sorter（职责不同）。
+# ── 领域示例：帮助 LLM 理解各领域的层级关系 ──
+
+
+# ── 已废弃——EntityRegistry 接管分类判定，保留为兼容旧引用 ──
 def _as_name(x: Any) -> str:
     """将实体名元素统一转为干净字符串。
 
@@ -100,12 +100,8 @@ async def sort_entities(
     if not source or not entity_names:
         return []
 
-    extra_rules = ""
-    try:
-        from strategy_forge.engine.domain_adapter import get_adapter
-        extra_rules = get_adapter(domain).prompts.intel_extra_rules or ""
-    except Exception:
-        pass
+    from strategy_forge.core.rule_templates import get_domain_prompt
+    extra_rules = get_domain_prompt(domain, "intel_extra_rules")
     prompt = _INTEL_PROMPT.format(
         entity_names=", ".join(entity_names),
         source=source[:max_source_chars],

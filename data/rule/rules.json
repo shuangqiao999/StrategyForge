@@ -32,12 +32,7 @@
       "siege",
       "electronic_warfare",
       "observe",
-      "intel_gather",
-      "logistics_support",
-      "intel_sharing",
-      "strategic_retreat",
-      "fortification",
-      "negotiated_ceasefire"
+      "intel_gather"
     ],
     "self_effects": {
       "intel_gather": {
@@ -46,8 +41,8 @@
         "leadership": 3
       },
       "attack": {
-        "strength": -10,
-        "supply": -10,
+        "strength": -15,
+        "supply": -12,
         "fatigue": 10,
         "morale": -5
       },
@@ -61,8 +56,7 @@
         "supply": -10,
         "strength": 5,
         "morale": 3,
-        "fatigue": -2,
-        "leadership": 3
+        "fatigue": -2
       },
       "maneuver": {
         "supply": -8,
@@ -71,8 +65,7 @@
       },
       "diplomacy": {
         "morale": 2,
-        "supply": -1,
-        "leadership": 2
+        "supply": -1
       },
       "siege": {
         "supply": -10,
@@ -86,30 +79,6 @@
       "observe": {
         "fatigue": -5,
         "morale": 1
-      },
-      "logistics_support": {
-        "supply": 5,
-        "morale": 3,
-        "fatigue": -2
-      },
-      "intel_sharing": {
-        "leadership": 3,
-        "supply": 2
-      },
-      "strategic_retreat": {
-        "strength": -3,
-        "supply": -5,
-        "fatigue": -3
-      },
-      "fortification": {
-        "strength": 4,
-        "supply": -4,
-        "fatigue": 3
-      },
-      "negotiated_ceasefire": {
-        "morale": 3,
-        "fatigue": -4,
-        "supply": 2
       }
     },
     "target_effects": {
@@ -117,7 +86,7 @@
         "_intel_exposed": 1
       },
       "attack": {
-        "strength": -15,
+        "strength": -20,
         "morale": -12,
         "supply": -8
       },
@@ -134,18 +103,6 @@
       "electronic_warfare": {
         "leadership": -8,
         "morale": -10
-      },
-      "logistics_support": {
-        "morale": 2,
-        "supply": 3
-      },
-      "intel_sharing": {
-        "leadership": 2,
-        "morale": 2
-      },
-      "fortification": {
-        "strength": -3,
-        "fatigue": 2
       }
     },
     "conditional_effects": {
@@ -170,14 +127,14 @@
           "morale": -8
         }
       },
-      "defend_desperate_defense": {
+      "desperate_defense": {
         "condition": "strength < 30",
         "self_effects": {
           "morale": 8,
           "strength": -2
         }
       },
-      "attack_blitzkrieg_fatigue": {
+      "blitzkrieg_fatigue": {
         "condition": "strength > 80 and fatigue < 20",
         "self_effects": {
           "fatigue": 5
@@ -191,13 +148,6 @@
           "strength": 8,
           "morale": 3,
           "leadership": 2
-        }
-      },
-      "attack_overflow": {
-        "delay": 2,
-        "effects": {
-          "strength": -5,
-          "supply": -2
         }
       }
     },
@@ -435,133 +385,6 @@
           "combat": null
         }
       }
-    },
-    "event_impact": {
-      "军事封锁": {
-        "supply": -20,
-        "morale": -8,
-        "strength": -5
-      },
-      "全面开战": {
-        "strength": -15,
-        "morale": -10,
-        "supply": -8
-      },
-      "斩首行动": {
-        "leadership": -15,
-        "morale": -10
-      },
-      "国际制裁": {
-        "supply": -12,
-        "morale": -5,
-        "leadership": -3
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "supply",
-        "op": "<",
-        "value": 25,
-        "event": "后勤补给危机",
-        "content": "后勤补给中断：弹药与燃料告急",
-        "impact": {
-          "supply": -8,
-          "morale": -6
-        },
-        "once": true
-      },
-      {
-        "metric": "morale",
-        "op": "<",
-        "value": 35,
-        "event": "士气崩溃风险",
-        "content": "部队士气持续低迷：逃兵与哗变风险上升",
-        "impact": {
-          "strength": -8,
-          "supply": -5
-        },
-        "once": true
-      },
-      {
-        "metric": "fatigue",
-        "op": ">",
-        "value": 75,
-        "event": "军队过度疲劳",
-        "content": "连续作战致军队极度疲劳：战斗力下降",
-        "impact": {
-          "strength": -8,
-          "morale": -8
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "strength": 0.3,
-        "morale": 0.2,
-        "supply": 0.25,
-        "fatigue": 0.1,
-        "leadership": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "strength": 5,
-        "supply": 5
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "strength",
-          "fatigue",
-          "leadership"
-        ],
-        "exclude_actions": [
-          "attack",
-          "defend",
-          "siege",
-          "maneuver",
-          "electronic_warfare"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "business": {
@@ -574,8 +397,7 @@
       "brand",
       "rnd",
       "morale",
-      "supply_chain",
-      "tech_lead"
+      "supply_chain"
     ],
     "initial_metrics": {
       "market_share": 20,
@@ -583,14 +405,12 @@
       "brand": 60,
       "rnd": 50,
       "morale": 70,
-      "supply_chain": 70,
-      "tech_lead": 40
+      "supply_chain": 70
     },
     "thresholds": {
       "cash_flow": 10,
       "market_share": 5,
-      "supply_chain": 15,
-      "tech_lead": 10
+      "supply_chain": 15
     },
     "actions": [
       "price_war",
@@ -602,11 +422,7 @@
       "embargo",
       "poach_talent",
       "observe",
-      "intel_gather",
-      "strategic_alliance",
-      "innovation_pivot",
-      "cost_optimization",
-      "market_exit"
+      "intel_gather"
     ],
     "self_effects": {
       "intel_gather": {
@@ -615,13 +431,13 @@
         "morale": 1
       },
       "price_war": {
-        "cash_flow": -10,
+        "cash_flow": -12,
         "market_share": 10,
         "brand": -6,
         "morale": -2
       },
       "invest_rnd": {
-        "cash_flow": -10,
+        "cash_flow": -15,
         "rnd": 10,
         "morale": 2,
         "brand": 1
@@ -633,21 +449,21 @@
         "morale": 1
       },
       "expand": {
-        "cash_flow": -10,
+        "cash_flow": -15,
         "market_share": 8,
         "morale": -4,
         "supply_chain": -4,
         "brand": 2
       },
       "partner": {
-        "cash_flow": 10,
+        "cash_flow": 15,
         "brand": 5,
         "supply_chain": 8,
         "morale": 3,
         "rnd": 2
       },
       "ipo": {
-        "cash_flow": 10,
+        "cash_flow": 50,
         "morale": -10,
         "brand": -5,
         "supply_chain": -3,
@@ -668,26 +484,6 @@
       "observe": {
         "cash_flow": -1,
         "morale": 1
-      },
-      "strategic_alliance": {
-        "cash_flow": 4,
-        "brand": 3,
-        "market_share": 2
-      },
-      "innovation_pivot": {
-        "rnd": 5,
-        "tech_lead": 3,
-        "cash_flow": -4
-      },
-      "cost_optimization": {
-        "cash_flow": 6,
-        "morale": -2,
-        "supply_chain": -2
-      },
-      "market_exit": {
-        "market_share": -5,
-        "cash_flow": 8,
-        "brand": -3
       }
     },
     "target_effects": {
@@ -706,7 +502,7 @@
         "supply_chain": -3
       },
       "embargo": {
-        "supply_chain": -15,
+        "supply_chain": -25,
         "market_share": -8,
         "cash_flow": -4,
         "morale": -3
@@ -722,15 +518,7 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      },
-      "strategic_alliance": {
-        "market_share": -2
-      },
-      "innovation_pivot": {
-        "tech_lead": -2
-      },
-      "cost_optimization": {},
-      "market_exit": {}
+      }
     },
     "conditional_effects": {
       "price_war_diminishing": {
@@ -753,6 +541,18 @@
           "cash_flow": -3
         }
       },
+      "rnd_diminishing": {
+        "condition": "rnd > 70",
+        "self_effects": {
+          "rnd": 3
+        }
+      },
+      "rnd_capped": {
+        "condition": "rnd > 85",
+        "self_effects": {
+          "rnd": 1
+        }
+      },
       "partner_synergy": {
         "condition": "cash_flow < 25",
         "self_effects": {
@@ -760,26 +560,14 @@
           "morale": 2
         }
       },
-      "invest_rnd_diminishing": {
-        "condition": "rnd > 70",
-        "self_effects": {
-          "rnd": 3
-        }
-      },
-      "invest_rnd_capped": {
-        "condition": "rnd > 85",
-        "self_effects": {
-          "rnd": 1
-        }
-      },
-      "partner_distress_protection": {
+      "distress_protection": {
         "condition": "cash_flow < 12 and market_share > 25",
         "self_effects": {
           "cash_flow": 3,
           "morale": -4
         }
       },
-      "auto_bankruptcy_protection": {
+      "bankruptcy_protection": {
         "condition": "cash_flow < 8 and brand > 60",
         "self_effects": {
           "cash_flow": 2,
@@ -807,36 +595,6 @@
         "effects": {
           "market_share": 3,
           "cash_flow": -2
-        }
-      },
-      "price_war_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -2
-        }
-      },
-      "invest_rnd_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -5
-        }
-      },
-      "expand_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -5
-        }
-      },
-      "partner_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": 5
-        }
-      },
-      "ipo_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": 20
         }
       }
     },
@@ -932,7 +690,7 @@
           "brand",
           "morale"
         ],
-        "epsilon": 0.12,
+        "epsilon": 0.2,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -1014,127 +772,6 @@
           "active": null
         }
       }
-    },
-    "event_impact": {
-      "embargo": {
-        "supply_chain": -20,
-        "market_share": -6,
-        "cash_flow": -5,
-        "morale": -4
-      },
-      "poach_talent": {
-        "rnd": -12,
-        "morale": -6,
-        "tech_lead": -5
-      },
-      "price_war": {
-        "market_share": 8,
-        "cash_flow": -10,
-        "brand": -5
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "morale",
-        "op": "<",
-        "value": 20,
-        "event": "员工大规模离职潮",
-        "content": "员工大规模离职潮：核心团队流失，运营陷入混乱",
-        "impact": {
-          "rnd": -8,
-          "supply_chain": -5
-        },
-        "once": true
-      },
-      {
-        "metric": "cash_flow",
-        "op": "<",
-        "value": 25,
-        "event": "资金链断裂危机",
-        "content": "资金链断裂危机：融资受阻，债权人上门",
-        "impact": {
-          "morale": -10,
-          "brand": -8
-        },
-        "once": true
-      },
-      {
-        "metric": "supply_chain",
-        "op": "<",
-        "value": 30,
-        "event": "供应链中断",
-        "content": "供应链中断：核心原材料断供，产能受阻",
-        "impact": {
-          "market_share": -8,
-          "cash_flow": -6
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "cash_flow": 0.3,
-        "market_share": 0.2,
-        "brand": 0.15,
-        "morale": 0.15,
-        "rnd": 0.2
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "cash_flow": 3,
-        "market_share": 8
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "supply_chain"
-        ],
-        "exclude_actions": [
-          "price_war",
-          "embargo",
-          "expand",
-          "ipo"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "politics": {
@@ -1168,11 +805,7 @@
       "propaganda",
       "fact_check",
       "observe",
-      "intel_gather",
-      "coalition_form",
-      "policy_innovation",
-      "strategic_compromise",
-      "crisis_reshuffle"
+      "intel_gather"
     ],
     "self_effects": {
       "intel_gather": {
@@ -1195,7 +828,7 @@
         "support_rate": 1
       },
       "reform": {
-        "economy": -10,
+        "economy": -12,
         "support_rate": -10,
         "unity": -8,
         "legislative_power": -5
@@ -1217,26 +850,6 @@
       "observe": {
         "unity": 1,
         "legislative_power": 0.5
-      },
-      "coalition_form": {
-        "support_rate": 4,
-        "legislative_power": 3,
-        "intl_relations": 3
-      },
-      "policy_innovation": {
-        "economy": 4,
-        "unity": 3,
-        "legislative_power": 2
-      },
-      "strategic_compromise": {
-        "intl_relations": 5,
-        "support_rate": -2,
-        "unity": -2
-      },
-      "crisis_reshuffle": {
-        "unity": -4,
-        "support_rate": 3,
-        "legislative_power": 2
       }
     },
     "target_effects": {
@@ -1261,15 +874,7 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      },
-      "coalition_form": {
-        "support_rate": -2
-      },
-      "policy_innovation": {},
-      "strategic_compromise": {
-        "intl_relations": 3
-      },
-      "crisis_reshuffle": {}
+      }
     },
     "conditional_effects": {
       "campaign_boom": {
@@ -1291,23 +896,23 @@
           "support_rate": -5
         }
       },
-      "diplomacy_overreach": {
-        "condition": "intl_relations > 80",
-        "self_effects": {
-          "support_rate": -3,
-          "unity": -2
-        }
-      },
-      "attack_opponent_justified": {
+      "attack_justified": {
         "condition": "intl_relations < 30 or support_rate > 70",
         "self_effects": {
           "support_rate": 6
         }
       },
-      "attack_opponent_unjustified": {
+      "attack_unjustified": {
         "condition": "intl_relations > 70 and support_rate < 40",
         "self_effects": {
           "support_rate": -4
+        }
+      },
+      "diplomacy_overreach": {
+        "condition": "intl_relations > 80",
+        "self_effects": {
+          "support_rate": -3,
+          "unity": -2
         }
       }
     },
@@ -1325,23 +930,17 @@
         "effects": {
           "support_rate": 2
         }
-      },
-      "reform_overflow": {
-        "delay": 2,
-        "effects": {
-          "economy": -2
-        }
       }
     },
     "auto_effects": {
       "unity_drift": {
-        "condition": "unity < 40",
+        "condition": "unity < 30",
         "effects": {
-          "unity": -1
+          "unity": -2
         }
       },
       "internal_crisis": {
-        "condition": "unity < 20",
+        "condition": "unity < 30",
         "effects": {
           "support_rate": -2,
           "legislative_power": -1
@@ -1519,109 +1118,6 @@
           }
         }
       }
-    },
-    "event_impact": {
-      "政治丑闻": {
-        "support_rate": -15,
-        "unity": -8,
-        "legislative_power": -5
-      },
-      "外交制裁": {
-        "intl_relations": -12,
-        "economy": -8
-      },
-      "党内分裂": {
-        "unity": -15,
-        "legislative_power": -8
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "support_rate",
-        "op": "<",
-        "value": 30,
-        "event": "支持率崩盘预警",
-        "content": "支持率持续下滑：执政合法性受质疑",
-        "impact": {
-          "unity": -8,
-          "legislative_power": -6
-        },
-        "once": true
-      },
-      {
-        "metric": "unity",
-        "op": "<",
-        "value": 25,
-        "event": "党内分裂危机",
-        "content": "党内路线斗争激化：分裂风险上升",
-        "impact": {
-          "support_rate": -8,
-          "legislative_power": -6
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "support_rate": 0.44999999999999996,
-        "legislative_power": 0.2,
-        "unity": 0.2,
-        "intl_relations": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "support_rate": 10,
-        "unity": 10
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "legislative_power"
-        ],
-        "exclude_actions": [
-          "legislate",
-          "campaign"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "ecology": {
@@ -1655,16 +1151,13 @@
       "expand_habitat",
       "compete",
       "restoration",
-      "observe",
-      "eco_restoration",
-      "sustainable_harvest",
-      "pollution_transfer"
+      "observe"
     ],
     "self_effects": {
       "exploit": {
-        "resources": -10,
+        "resources": -20,
         "population": 10,
-        "pollution": 10,
+        "pollution": 15,
         "biodiversity": -8
       },
       "conserve": {
@@ -1674,14 +1167,14 @@
         "stability": 2
       },
       "pollute_control": {
-        "pollution": -10,
-        "resources": -10,
+        "pollution": -20,
+        "resources": -12,
         "stability": 8,
         "population": -2
       },
       "expand_habitat": {
-        "population": 10,
-        "resources": -10,
+        "population": 12,
+        "resources": -15,
         "biodiversity": -5
       },
       "compete": {
@@ -1697,20 +1190,6 @@
       },
       "observe": {
         "stability": 1
-      },
-      "eco_restoration": {
-        "biodiversity": 5,
-        "stability": 3,
-        "resources": -3
-      },
-      "sustainable_harvest": {
-        "resources": 4,
-        "population": 2,
-        "stability": 2
-      },
-      "pollution_transfer": {
-        "pollution": -5,
-        "stability": -3
       }
     },
     "target_effects": {
@@ -1722,11 +1201,6 @@
       "exploit": {
         "resources": -8,
         "biodiversity": -3
-      },
-      "eco_restoration": {},
-      "sustainable_harvest": {},
-      "pollution_transfer": {
-        "pollution": 4
       }
     },
     "conditional_effects": {
@@ -1737,7 +1211,7 @@
           "biodiversity": -5
         }
       },
-      "conserve_emergency": {
+      "conservation_emergency": {
         "condition": "biodiversity < 30",
         "self_effects": {
           "resources": -5,
@@ -1752,27 +1226,6 @@
           "biodiversity": 5,
           "stability": 3,
           "pollution": -3
-        }
-      },
-      "exploit_overflow": {
-        "delay": 2,
-        "effects": {
-          "resources": -10,
-          "pollution": 5
-        }
-      },
-      "pollute_control_overflow": {
-        "delay": 2,
-        "effects": {
-          "pollution": -10,
-          "resources": -2
-        }
-      },
-      "expand_habitat_overflow": {
-        "delay": 2,
-        "effects": {
-          "population": 2,
-          "resources": -5
         }
       }
     },
@@ -1820,16 +1273,14 @@
         "population": "ode",
         "resources": "ode",
         "pollution": "ode",
-        "biodiversity": "ode",
-        "stability": "ode"
+        "biodiversity": "ode"
       },
       "ode_engine": {
         "equations": {
           "population": "competitive_logistic",
           "resources": "resource_depletion",
           "pollution": "pollution_spread",
-          "biodiversity": "competitive_logistic",
-          "stability": "logistic"
+          "biodiversity": "competitive_logistic"
         },
         "params": {
           "population": {
@@ -1930,108 +1381,6 @@
           }
         }
       }
-    },
-    "event_impact": {
-      "生态灾难": {
-        "biodiversity": -20,
-        "pollution": 15,
-        "population": -8
-      },
-      "重大污染": {
-        "pollution": 15,
-        "biodiversity": -10
-      },
-      "资源枯竭": {
-        "resources": -15,
-        "stability": -8
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "pollution",
-        "op": ">",
-        "value": 70,
-        "event": "严重环境污染",
-        "content": "污染物超标：生态链受损",
-        "impact": {
-          "population": -6,
-          "biodiversity": -6,
-          "stability": -5
-        },
-        "once": true
-      },
-      {
-        "metric": "biodiversity",
-        "op": "<",
-        "value": 25,
-        "event": "物种灭绝危机",
-        "content": "生物多样性锐减：生态系统失衡",
-        "impact": {
-          "stability": -8,
-          "resources": -6
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "biodiversity": 0.3,
-        "population": 0.2,
-        "resources": 0.2,
-        "stability": 0.15,
-        "pollution": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "biodiversity": 5,
-        "population": 8
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [],
-        "exclude_actions": [
-          "exploit"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "urban": {
@@ -2064,27 +1413,24 @@
       "welfare",
       "attract_talent",
       "regulate",
-      "observe",
-      "smart_city_upgrade",
-      "talent_import",
-      "green_transformation"
+      "observe"
     ],
     "self_effects": {
       "build_infra": {
-        "finance": -10,
-        "infrastructure": 10,
+        "finance": -18,
+        "infrastructure": 15,
         "satisfaction": 4,
         "employment": 2
       },
       "develop_industry": {
-        "finance": -10,
-        "employment": 10,
+        "finance": -12,
+        "employment": 12,
         "population": 6,
         "satisfaction": -4
       },
       "welfare": {
-        "finance": -10,
-        "satisfaction": 10,
+        "finance": -15,
+        "satisfaction": 15,
         "employment": -2
       },
       "attract_talent": {
@@ -2101,21 +1447,6 @@
       },
       "observe": {
         "finance": 1
-      },
-      "smart_city_upgrade": {
-        "infrastructure": 5,
-        "satisfaction": 3,
-        "finance": -4
-      },
-      "talent_import": {
-        "employment": 4,
-        "population": 3,
-        "finance": -3
-      },
-      "green_transformation": {
-        "satisfaction": 4,
-        "infrastructure": 3,
-        "finance": -3
       }
     },
     "target_effects": {
@@ -2126,12 +1457,7 @@
       "develop_industry": {
         "population": -5,
         "satisfaction": -3
-      },
-      "smart_city_upgrade": {},
-      "talent_import": {
-        "employment": -2
-      },
-      "green_transformation": {}
+      }
     },
     "conditional_effects": {
       "build_infra_strained": {
@@ -2141,7 +1467,7 @@
           "infrastructure": 5
         }
       },
-      "attract_talent_shortage": {
+      "talent_shortage": {
         "condition": "employment > 80",
         "self_effects": {
           "satisfaction": -4,
@@ -2163,27 +1489,6 @@
         "effects": {
           "satisfaction": 6,
           "population": 2
-        }
-      },
-      "build_infra_overflow": {
-        "delay": 2,
-        "effects": {
-          "finance": -8,
-          "infrastructure": 5
-        }
-      },
-      "develop_industry_overflow": {
-        "delay": 2,
-        "effects": {
-          "finance": -2,
-          "employment": 2
-        }
-      },
-      "welfare_overflow": {
-        "delay": 2,
-        "effects": {
-          "finance": -5,
-          "satisfaction": 5
         }
       }
     },
@@ -2241,16 +1546,14 @@
         "population": "ode",
         "finance": "ode",
         "employment": "ode",
-        "infrastructure": "ode",
-        "satisfaction": "ode"
+        "infrastructure": "ode"
       },
       "ode_engine": {
         "equations": {
           "population": "logistic",
           "finance": "logistic",
           "employment": "competitive_logistic",
-          "infrastructure": "logistic",
-          "satisfaction": "logistic"
+          "infrastructure": "logistic"
         },
         "params": {
           "population": {
@@ -2280,7 +1583,7 @@
         "target_metrics": [
           "satisfaction"
         ],
-        "epsilon": 0.12,
+        "epsilon": 0.25,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -2351,112 +1654,6 @@
           }
         }
       }
-    },
-    "event_impact": {
-      "城市灾害": {
-        "infrastructure": -20,
-        "finance": -10,
-        "satisfaction": -8
-      },
-      "重大事故": {
-        "infrastructure": -15,
-        "satisfaction": -10
-      },
-      "经济下行": {
-        "finance": -15,
-        "employment": -8
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "finance",
-        "op": "<",
-        "value": 30,
-        "event": "财政危机",
-        "content": "城市财政紧张：公共服务面临削减",
-        "impact": {
-          "infrastructure": -8,
-          "satisfaction": -6
-        },
-        "once": true
-      },
-      {
-        "metric": "satisfaction",
-        "op": "<",
-        "value": 30,
-        "event": "市民不满加剧",
-        "content": "市民满意度下滑：抗议与迁离风险上升",
-        "impact": {
-          "population": -6,
-          "finance": -5
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "finance": 0.2,
-        "employment": 0.25,
-        "infrastructure": 0.2,
-        "satisfaction": 0.2,
-        "population": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "finance": 5,
-        "employment": 10
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "infrastructure",
-          "finance"
-        ],
-        "exclude_actions": [
-          "build_infra",
-          "develop_industry",
-          "regulate"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "tech": {
@@ -2489,10 +1686,7 @@
       "talent_war",
       "standards_battle",
       "observe",
-      "intel_gather",
-      "open_source_release",
-      "patent_blockade",
-      "talent_aquisition"
+      "intel_gather"
     ],
     "self_effects": {
       "intel_gather": {
@@ -2501,8 +1695,8 @@
         "talent_pool": 1
       },
       "invest_rd": {
-        "chip_stock": -10,
-        "tech_lead": 10,
+        "chip_stock": -15,
+        "tech_lead": 12,
         "talent_pool": 2,
         "patent_barrier": 3
       },
@@ -2520,26 +1714,11 @@
       },
       "observe": {
         "tech_lead": 1
-      },
-      "open_source_release": {
-        "tech_lead": -3,
-        "commercialization": 5,
-        "talent_pool": 3
-      },
-      "patent_blockade": {
-        "patent_barrier": 5,
-        "chip_stock": 3,
-        "commercialization": -2
-      },
-      "talent_aquisition": {
-        "talent_pool": 5,
-        "tech_lead": 2,
-        "cash_flow": -3
       }
     },
     "target_effects": {
       "export_control": {
-        "chip_stock": -15,
+        "chip_stock": -25,
         "tech_lead": -10,
         "commercialization": -5
       },
@@ -2552,15 +1731,6 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      },
-      "open_source_release": {
-        "tech_lead": -4
-      },
-      "patent_blockade": {
-        "patent_barrier": -3
-      },
-      "talent_aquisition": {
-        "talent_pool": -3
       }
     },
     "conditional_effects": {
@@ -2570,7 +1740,7 @@
           "tech_lead": 8
         }
       },
-      "invest_rd_forced_innovation": {
+      "forced_innovation": {
         "condition": "tech_lead < 20 and chip_stock < 20",
         "self_effects": {
           "tech_lead": 5,
@@ -2591,13 +1761,6 @@
         "delay": 1,
         "effects": {
           "talent_pool": 5
-        }
-      },
-      "invest_rd_overflow": {
-        "delay": 2,
-        "effects": {
-          "chip_stock": -5,
-          "tech_lead": 2
         }
       }
     },
@@ -2621,7 +1784,7 @@
         }
       },
       "rnd_saturation": {
-        "condition": "tech_lead > 80",
+        "condition": "tech_lead > 70",
         "effects": {
           "talent_pool": -1,
           "patent_barrier": -1
@@ -2634,7 +1797,7 @@
         }
       },
       "research_diminishing_returns": {
-        "condition": "tech_lead > 90",
+        "condition": "tech_lead > 70",
         "effects": {
           "tech_lead": -1
         }
@@ -2668,7 +1831,7 @@
         "target_metrics": [
           "tech_lead"
         ],
-        "epsilon": 0.12,
+        "epsilon": 0.2,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -2724,111 +1887,6 @@
           "launch": null
         }
       }
-    },
-    "event_impact": {
-      "技术封锁": {
-        "chip_stock": -20,
-        "tech_lead": -10,
-        "talent_pool": -5
-      },
-      "供应链断供": {
-        "chip_stock": -25,
-        "commercialization": -8
-      },
-      "人才挖角潮": {
-        "talent_pool": -15,
-        "patent_barrier": -5
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "chip_stock",
-        "op": "<",
-        "value": 30,
-        "event": "芯片库存告急",
-        "content": "芯片库存告急：产线面临停产风险",
-        "impact": {
-          "commercialization": -10,
-          "tech_lead": -6
-        },
-        "once": true
-      },
-      {
-        "metric": "talent_pool",
-        "op": "<",
-        "value": 25,
-        "event": "核心技术人才流失",
-        "content": "核心技术人才大量流失：研发能力受损",
-        "impact": {
-          "tech_lead": -8,
-          "patent_barrier": -6
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "tech_lead": 0.25,
-        "talent_pool": 0.25,
-        "chip_stock": 0.15,
-        "commercialization": 0.2,
-        "patent_barrier": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "tech_lead": 5,
-        "talent_pool": 8
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "patent_barrier",
-          "chip_stock"
-        ],
-        "exclude_actions": [
-          "export_control",
-          "standards_battle"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "info_war": {
@@ -2857,10 +1915,7 @@
       "leak_info",
       "framing_battle",
       "observe",
-      "intel_gather",
-      "narrative_reset",
-      "facts_dump",
-      "echo_chamber_break"
+      "intel_gather"
     ],
     "self_effects": {
       "intel_gather": {
@@ -2880,7 +1935,7 @@
       },
       "leak_info": {
         "narrative_dominance": -8,
-        "polarization": 10,
+        "polarization": 12,
         "public_trust": -10
       },
       "framing_battle": {
@@ -2889,21 +1944,6 @@
         "public_trust": -3
       },
       "observe": {
-        "media_reach": 2
-      },
-      "narrative_reset": {
-        "public_trust": 5,
-        "polarization": -4,
-        "narrative_dominance": -2
-      },
-      "facts_dump": {
-        "public_trust": 4,
-        "narrative_dominance": 3,
-        "polarization": -3
-      },
-      "echo_chamber_break": {
-        "polarization": -5,
-        "public_trust": 4,
         "media_reach": 2
       }
     },
@@ -2921,13 +1961,6 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      },
-      "narrative_reset": {},
-      "facts_dump": {
-        "narrative_dominance": -3
-      },
-      "echo_chamber_break": {
-        "polarization": -3
       }
     },
     "conditional_effects": {
@@ -2944,7 +1977,7 @@
           "public_trust": 5
         }
       },
-      "propaganda_echo_chamber": {
+      "echo_chamber": {
         "condition": "polarization > 75",
         "self_effects": {
           "public_trust": -3,
@@ -2965,12 +1998,6 @@
         "delay": 1,
         "effects": {
           "media_reach": 6
-        }
-      },
-      "leak_info_overflow": {
-        "delay": 2,
-        "effects": {
-          "polarization": 2
         }
       }
     },
@@ -3031,7 +2058,7 @@
           "public_trust",
           "narrative_dominance"
         ],
-        "epsilon": 0.12,
+        "epsilon": 0.15,
         "graph_type": "complete",
         "norm_range": [
           0,
@@ -3097,106 +2124,6 @@
           }
         }
       }
-    },
-    "event_impact": {
-      "舆论危机": {
-        "public_trust": -15,
-        "narrative_dominance": -8
-      },
-      "信息泄露": {
-        "public_trust": -12,
-        "polarization": 8
-      },
-      "事实核查反噬": {
-        "narrative_dominance": -10,
-        "public_trust": -6
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "public_trust",
-        "op": "<",
-        "value": 30,
-        "event": "公众信任危机",
-        "content": "公众信任崩塌：舆论主导权丧失",
-        "impact": {
-          "narrative_dominance": -8,
-          "polarization": 5
-        },
-        "once": true
-      },
-      {
-        "metric": "polarization",
-        "op": ">",
-        "value": 75,
-        "event": "社会严重撕裂",
-        "content": "社会对立加剧：信息战失控",
-        "impact": {
-          "public_trust": -6,
-          "narrative_dominance": -5
-        },
-        "once": true
-      }
-    ],
-    "elimination": {
-      "mode": "weighted_score",
-      "weights": {
-        "narrative_dominance": 0.3,
-        "public_trust": 0.35,
-        "polarization": 0.2,
-        "media_reach": 0.15
-      },
-      "threshold_score": 25.0,
-      "hard_core": {
-        "narrative_dominance": 8,
-        "public_trust": 8
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [],
-        "exclude_actions": [
-          "framing_battle",
-          "propaganda"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
     }
   },
   "geo_strategy": {
@@ -3219,9 +2146,7 @@
       "energy_resource",
       "grain_resource",
       "global_reputation",
-      "alliance_trust",
-      "rnd",
-      "talent_pool"
+      "alliance_trust"
     ],
     "initial_metrics": {
       "strength": 100,
@@ -3239,9 +2164,7 @@
       "energy_resource": 70,
       "grain_resource": 65,
       "global_reputation": 60,
-      "alliance_trust": 50,
-      "rnd": 45,
-      "talent_pool": 50
+      "alliance_trust": 50
     },
     "thresholds": {
       "strength": 15,
@@ -3256,9 +2179,7 @@
       "energy_resource": 15,
       "grain_resource": 10,
       "global_reputation": 15,
-      "alliance_trust": 10,
-      "rnd": 10,
-      "talent_pool": 10
+      "alliance_trust": 10
     },
     "actions": [
       "military_offensive",
@@ -3270,52 +2191,59 @@
       "defensive_buildup",
       "observe",
       "intel_gather",
-      "tech_sanctions_with_narrative",
-      "military_deterrence_with_diplomacy",
-      "energy_hostage_diplomacy",
-      "trade_blockade_with_talent_war",
-      "coalition_building",
-      "resource_exchange",
-      "decupling",
-      "tech_breakthrough",
-      "interest_swap"
+      {
+        "name": "tech_sanctions_with_narrative",
+        "description": "技术封锁+国际舆论污名化"
+      },
+      {
+        "name": "military_deterrence_with_diplomacy",
+        "description": "军事威慑+外交斡旋对冲"
+      },
+      {
+        "name": "energy_hostage_diplomacy",
+        "description": "能源供应+技术置换+外交捆绑"
+      },
+      {
+        "name": "trade_blockade_with_talent_war",
+        "description": "贸易封锁+高端人才争夺"
+      }
     ],
     "self_effects": {
       "intel_gather": {
-        "cash_flow": -10,
+        "cash_flow": -12,
         "supply": -6,
         "fatigue": 4,
         "tech_lead": 2
       },
       "military_offensive": {
-        "strength": -10,
-        "supply": -10,
+        "strength": -15,
+        "supply": -12,
         "fatigue": 10,
         "morale": -5,
-        "cash_flow": -10,
+        "cash_flow": -12,
         "supply_chain": -5,
         "support_rate": 5,
-        "intl_relations": -10,
+        "intl_relations": -12,
         "unity": 4
       },
       "economic_mobilization": {
-        "cash_flow": -10,
-        "supply_chain": 10,
+        "cash_flow": -12,
+        "supply_chain": 12,
         "strength": 5,
         "morale": 3,
         "support_rate": -2,
         "unity": -1
       },
       "diplomatic_engagement": {
-        "intl_relations": 10,
+        "intl_relations": 12,
         "cash_flow": 3,
         "fatigue": 6,
         "support_rate": -2,
         "public_trust": -1
       },
       "tech_investment": {
-        "cash_flow": -10,
-        "tech_lead": 10,
+        "cash_flow": -20,
+        "tech_lead": 12,
         "strength": 5,
         "supply_chain": 3
       },
@@ -3331,7 +2259,7 @@
         "cash_flow": -8,
         "supply_chain": 10,
         "support_rate": 6,
-        "intl_relations": -10,
+        "intl_relations": -12,
         "public_trust": -4,
         "polarization": 4
       },
@@ -3354,7 +2282,7 @@
         "talent_pool": 6,
         "cash_flow": -6,
         "public_trust": 5,
-        "intl_relations": -10,
+        "intl_relations": -12,
         "global_reputation": -8,
         "supply_chain": -4
       },
@@ -3367,7 +2295,7 @@
         "fatigue": 3
       },
       "energy_hostage_diplomacy": {
-        "energy_resource": 10,
+        "energy_resource": 12,
         "cash_flow": 10,
         "intl_relations": 8,
         "global_reputation": -5,
@@ -3381,37 +2309,11 @@
         "tech_lead": 6,
         "intl_relations": -8,
         "global_reputation": -6
-      },
-      "coalition_building": {
-        "alliance_trust": 5,
-        "intl_relations": 4,
-        "global_reputation": 3
-      },
-      "resource_exchange": {
-        "energy_resource": 4,
-        "grain_resource": 4,
-        "cash_flow": 3
-      },
-      "decupling": {
-        "supply_chain": -6,
-        "cash_flow": -4,
-        "strength": 3
-      },
-      "tech_breakthrough": {
-        "tech_lead": 6,
-        "rnd": 4,
-        "talent_pool": 3,
-        "cash_flow": -5
-      },
-      "interest_swap": {
-        "support_rate": 3,
-        "intl_relations": 4,
-        "public_trust": 2
       }
     },
     "target_effects": {
       "military_offensive": {
-        "strength": -15,
+        "strength": -20,
         "morale": -12,
         "supply": -8,
         "supply_chain": -10,
@@ -3420,7 +2322,7 @@
         "public_trust": -4
       },
       "trade_warfare": {
-        "supply_chain": -15,
+        "supply_chain": -25,
         "cash_flow": -12,
         "support_rate": -6,
         "intl_relations": -8,
@@ -3435,99 +2337,52 @@
       },
       "intel_gather": {
         "_intel_exposed": 1
-      },
-      "tech_sanctions_with_narrative": {
-        "tech_lead": -5,
-        "talent_pool": -4,
-        "cash_flow": -3,
-        "global_reputation": -4,
-        "rnd": -3
-      },
-      "military_deterrence_with_diplomacy": {
-        "morale": -5,
-        "supply": -4,
-        "intl_relations": -3,
-        "alliance_trust": -3,
-        "strength": -2
-      },
-      "energy_hostage_diplomacy": {
-        "energy_resource": -6,
-        "supply_chain": -4,
-        "cash_flow": -4,
-        "strength": -2
-      },
-      "trade_blockade_with_talent_war": {
-        "supply_chain": -5,
-        "cash_flow": -4,
-        "talent_pool": -4,
-        "rnd": -3,
-        "strength": -2
-      },
-      "coalition_building": {
-        "intl_relations": -3,
-        "alliance_trust": -2
-      },
-      "resource_exchange": {
-        "supply_chain": 3,
-        "cash_flow": 2
-      },
-      "decupling": {
-        "supply_chain": -5,
-        "cash_flow": -4
-      },
-      "tech_breakthrough": {
-        "tech_lead": -3,
-        "talent_pool": -2
-      },
-      "interest_swap": {
-        "public_trust": 2,
-        "intl_relations": 2
       }
     },
     "conditional_effects": {
-      "tech_investment_catchup_bonus": {
+      "tech_catchup_bonus": {
         "condition": "tech_lead < 50",
         "self_effects": {
           "tech_lead": 6,
           "strength": 2
         }
       },
-      "tech_investment_overreach_penalty": {
+      "tech_overreach_penalty": {
         "condition": "tech_lead > 85",
         "self_effects": {
           "polarization": 4,
           "public_trust": -3
         }
       },
-      "economic_mobilization_resilience": {
+      "economic_resilience": {
         "condition": "cash_flow < 15 and supply_chain > 70",
         "self_effects": {
           "cash_flow": 4,
           "support_rate": 2
         }
       },
-      "military_offensive_weariness": {
+      "offensive_weariness": {
         "condition": "fatigue > 65",
         "self_effects": {
           "morale": -5,
           "support_rate": -4
         }
       },
-      "economic_mobilization_boom": {
+      "war_economy_boom": {
         "condition": "support_rate > 70 and cash_flow > 60",
         "self_effects": {
           "supply_chain": 5,
           "morale": 3
         }
       },
-      "domestic_propaganda_backfire": {
+      "propaganda_backfire": {
         "condition": "public_trust < 30",
         "self_effects": {
           "support_rate": -8,
           "polarization": 5
         }
       },
-      "diplomatic_engagement_isolation": {
+      "diplomatic_isolation": {
         "condition": "intl_relations < 25",
         "self_effects": {
           "cash_flow": -6,
@@ -3535,7 +2390,7 @@
           "support_rate": -3
         }
       },
-      "defensive_buildup_rally": {
+      "rally_around_flag": {
         "condition": "strength < 30 and support_rate > 50",
         "self_effects": {
           "morale": 10,
@@ -3546,88 +2401,29 @@
     },
     "delay_effects": {
       "military_offensive": {
-        "delay": 2,
-        "effects": {
-          "supply_chain": -5,
-          "fatigue": 8,
-          "global_reputation": -5
-        }
+        "supply_chain": -5,
+        "fatigue": 8,
+        "global_reputation": -5,
+        "delay_rounds": 2
       },
       "trade_warfare": {
-        "delay": 3,
-        "effects": {
-          "cash_flow": -8,
-          "intl_relations": -5,
-          "supply_chain": -4
-        }
+        "cash_flow": -8,
+        "intl_relations": -5,
+        "supply_chain": -4,
+        "delay_rounds": 3
       },
       "economic_mobilization": {
-        "delay": 2,
-        "effects": {
-          "global_reputation": -3,
-          "alliance_trust": -2
-        }
-      },
-      "intel_gather_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -2
-        }
-      },
-      "military_offensive_overflow": {
-        "delay": 2,
-        "effects": {
-          "strength": -5,
-          "supply": -2,
-          "cash_flow": -2,
-          "intl_relations": -2
-        }
-      },
-      "economic_mobilization_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -2,
-          "supply_chain": 2
-        }
-      },
-      "diplomatic_engagement_overflow": {
-        "delay": 2,
-        "effects": {
-          "intl_relations": 2
-        }
-      },
-      "tech_investment_overflow": {
-        "delay": 2,
-        "effects": {
-          "cash_flow": -10,
-          "tech_lead": 2
-        }
-      },
-      "trade_warfare_overflow": {
-        "delay": 2,
-        "effects": {
-          "intl_relations": -2
-        }
-      },
-      "tech_sanctions_with_narrative_overflow": {
-        "delay": 2,
-        "effects": {
-          "intl_relations": -2
-        }
-      },
-      "energy_hostage_diplomacy_overflow": {
-        "delay": 2,
-        "effects": {
-          "energy_resource": 2
-        }
+        "global_reputation": -3,
+        "alliance_trust": -2,
+        "delay_rounds": 2
       }
     },
     "auto_effects": {
       "war_exhaustion": {
         "condition": "fatigue > 60 and strength > 40",
         "effects": {
-          "support_rate": -1,
-          "morale": -2,
+          "support_rate": -2,
+          "morale": -3,
           "unity": -1
         }
       },
@@ -3679,8 +2475,8 @@
       "collapse_spiral": {
         "condition": "unity < 20 and support_rate < 25",
         "effects": {
-          "cash_flow": -4,
-          "strength": -4,
+          "cash_flow": -8,
+          "strength": -8,
           "intl_relations": -5,
           "public_trust": -5
         }
@@ -3713,9 +2509,7 @@
           "supply": "supply_consumption",
           "cash_flow": "cash_flow_dynamics",
           "supply_chain": "supply_consumption",
-          "tech_lead": "competitive_logistic",
-          "energy_resource": "resource_depletion",
-          "grain_resource": "logistic"
+          "tech_lead": "competitive_logistic"
         },
         "params": {
           "fatigue": {
@@ -3742,6 +2536,7 @@
         }
       },
       "physics_engine": {
+        "subsystems": [],
         "collision_elasticity": 0.3,
         "diffusion_rate": 0.04
       },
@@ -3751,8 +2546,8 @@
           "morale",
           "support_rate"
         ],
-        "epsilon": 0.1,
-        "graph_type": "complete",
+        "epsilon": 0.07,
+        "graph_type": "spatial",
         "weighted": true,
         "norm_range": [
           0,
@@ -3773,6 +2568,14 @@
         "command_states": [
           "engage"
         ],
+        "observe_llm_guard": [
+          {
+            "metric": "strength",
+            "op": "<",
+            "threshold": 40
+          }
+        ],
+        "observe_stale_rounds": 3,
         "transition_rules": [
           {
             "from": "observe",
@@ -3780,11 +2583,11 @@
             "condition": {
               "strength": [
                 ">",
-                50
+                30
               ],
               "intl_relations": [
                 ">",
-                30
+                20
               ]
             }
           },
@@ -3815,11 +2618,11 @@
             "condition": {
               "supply": [
                 ">",
-                60
+                40
               ],
               "unity": [
                 ">",
-                50
+                30
               ]
             }
           },
@@ -3861,8 +2664,7 @@
             "intensity": 0.5,
             "target": ""
           }
-        },
-        "polar_threshold": 25.0
+        }
       }
     },
     "elimination": {
@@ -3885,141 +2687,19 @@
         "unity": 30
       }
     },
-    "event_impact": {
-      "全面贸易封锁": {
-        "supply_chain": -20,
-        "cash_flow": -15,
-        "tech_lead": -8
-      },
-      "军事冲突升级": {
-        "strength": -15,
-        "supply": -10,
-        "morale": -8
-      },
-      "能源断供": {
-        "energy_resource": -20,
-        "supply_chain": -10,
-        "grain_resource": -5
-      },
-      "国际孤立": {
-        "intl_relations": -12,
-        "global_reputation": -10,
-        "alliance_trust": -8
-      }
-    },
-    "event_triggers": [
-      {
-        "metric": "energy_resource",
-        "op": "<",
-        "value": 30,
-        "event": "能源危机",
-        "content": "能源供应吃紧：工业与民生承压",
-        "impact": {
-          "supply_chain": -8,
-          "cash_flow": -6,
-          "support_rate": -5
-        },
-        "once": true
-      },
-      {
-        "metric": "grain_resource",
-        "op": "<",
-        "value": 25,
-        "event": "粮食危机",
-        "content": "粮食储备告急：社会动荡风险上升",
-        "impact": {
-          "support_rate": -10,
-          "unity": -8
-        },
-        "once": true
-      },
-      {
-        "metric": "global_reputation",
-        "op": "<",
-        "value": 30,
-        "event": "国际声誉受损",
-        "content": "国际声誉下滑：盟友信任动摇",
-        "impact": {
-          "alliance_trust": -8,
-          "intl_relations": -6
-        },
-        "once": true
-      }
+    "inherited_from": [
+      "military",
+      "business",
+      "politics",
+      "tech",
+      "info_war"
     ],
-    "action_meta": {
-      "tech_sanctions_with_narrative": {
-        "description": "技术封锁+国际舆论污名化"
+    "ode_engine": {
+      "equations": {
+        "energy_resource": "resource_depletion",
+        "grain_resource": "logistic"
       },
-      "military_deterrence_with_diplomacy": {
-        "description": "军事威慑+外交斡旋对冲"
-      },
-      "energy_hostage_diplomacy": {
-        "description": "能源供应+技术置换+外交捆绑"
-      },
-      "trade_blockade_with_talent_war": {
-        "description": "贸易封锁+高端人才争夺"
-      }
-    },
-    "entity_capabilities": {
-      "Agent": {
-        "metrics": "all",
-        "actions": "all",
-        "tier_hint": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量动作。"
-      },
-      "Subordinate": {
-        "metrics": "all",
-        "exclude_metrics": [
-          "strength",
-          "fatigue",
-          "leadership",
-          "supply",
-          "morale",
-          "energy_resource",
-          "grain_resource",
-          "chip_stock"
-        ],
-        "exclude_actions": [
-          "trade_blockade_with_talent_war",
-          "resource_exchange",
-          "interest_swap",
-          "military_deterrence_with_diplomacy",
-          "trade_warfare",
-          "defensive_buildup",
-          "military_offensive",
-          "coalition_building"
-        ],
-        "tier_hint": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。无权执行主权级战略/军事动作。"
-      },
-      "Geography": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Concept": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Resource": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Contract": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      },
-      "Event": {
-        "metrics": [],
-        "actions": [
-          "observe"
-        ]
-      }
+      "params": {}
     }
   }
 }

@@ -28,7 +28,6 @@ from .models import EntityState
 logger = logging.getLogger(__name__)
 
 _CONDITION_RE = re.compile(r'\s*(\w+)\s*(<=|>=|!=|==|<|>)\s*([\d.]+)\s*')
-_NOT_RE = re.compile(r'^\s*not\s+')
 
 
 def _normalize_action(a: Any) -> str:
@@ -57,29 +56,14 @@ class RuleEngine:
 
     @staticmethod
     def _parse_condition(condition: str) -> list[list[tuple[str, str, float]]]:
-        """Pre-parse condition string into structured form.
-
-        'a<5 and b>2 or c==1' → [[(a,<,5),(b,>,2)], [(c,==,1)]]
-        Each atom is (metric, op, value). Negated atoms prefixed with 'not '
-        are parsed as (metric, op, value) with op containing '!' marker
-        for later evaluation.
-        """
+        """Pre-parse 'a<5 and b>2 or c==1' → [[(a,<,5),(b,>,2)], [(c,==,1)]]."""
         result: list[list[tuple[str, str, float]]] = []
         for or_part in condition.split(" or "):
             atoms: list[tuple[str, str, float]] = []
             for and_part in or_part.strip().split(" and "):
-                stripped = and_part.strip()
-                negated = bool(_NOT_RE.match(stripped))
-                if negated:
-                    stripped = _NOT_RE.sub('', stripped).strip()
-                m = _CONDITION_RE.match(stripped)
+                m = _CONDITION_RE.match(and_part.strip())
                 if m:
-                    metric, op, val = m.group(1), m.group(2), float(m.group(3))
-                    if negated:
-                        op = '!' + op  # marker for eval
-                    atoms.append((metric, op, val))
-                else:
-                    logger.debug("[RuleEngine] condition atom failed to parse: '%s'", stripped)
+                    atoms.append((m.group(1), m.group(2), float(m.group(3))))
             if atoms:
                 result.append(atoms)
         return result
@@ -109,71 +93,7 @@ class RuleEngine:
         p.setdefault("conditional_effects", {})
         p.setdefault("delay_effects", {})
         p.setdefault("auto_effects", {})
-        # 融合架构：事件→数值冲击 与 数值→事件触发（规则包为空则通道不激活，保持兼容）
-        p.setdefault("event_impact", {})
-        p.setdefault("event_triggers", [])
-        # 实体能力分级：按 SemanticMediator 基础类型限制指标/动作权限
-        # Agent=全权限，Subordinate=无军力指标，其余=仅观察
-        p.setdefault("entity_capabilities", {
-            "Agent": {"metrics": "all", "actions": "all"},
-            "Subordinate": {"metrics": "all",
-                "exclude_metrics": ["strength", "fatigue", "leadership", "supply",
-                                    "morale", "energy_resource", "grain_resource", "chip_stock"],
-                "exclude_actions": ["attack", "defend", "siege", "maneuver", "military_offensive",
-                                    "defensive_buildup", "electronic_warfare"]},
-            "Geography": {"metrics": [], "actions": ["observe"]},
-            "Concept": {"metrics": [], "actions": ["observe"]},
-            "Resource": {"metrics": [], "actions": ["observe"]},
-            "Contract": {"metrics": [], "actions": ["observe"]},
-            "Event": {"metrics": [], "actions": ["observe"]},
-        })
         return p
-
-    # ── 融合架构：事件/数值双向通道辅助 ──
-
-    def event_impact_map(self) -> dict:
-        """事件类型 → 指标冲击映射（通道①）。"""
-        return dict(self.pack.get("event_impact", {}) or {})
-
-    def event_triggers(self) -> list:
-        """数值越界 → 事件触发规则（通道②）。"""
-        return list(self.pack.get("event_triggers", []) or [])
-
-    @staticmethod
-    def eval_metric_op(op: str, value: float, threshold: float) -> bool:
-        """单指标阈值比较，供 event_triggers 求值。"""
-        if op in ("<", "<=", ">", ">=", "==", "!="):
-            return {
-                "<": value < threshold,
-                "<=": value <= threshold,
-                ">": value > threshold,
-                ">=": value >= threshold,
-                "==": value == threshold,
-                "!=": value != threshold,
-            }[op]
-        return False
-
-    def check_event_triggers(self, state: Any, fired: set) -> list[dict]:
-        """对单个实体评估 event_triggers，返回未触发过且条件成立的事件配置列表。
-
-        fired: 已触发的 (实体id, 事件名) 集合，用于 once 去重。
-        """
-        out = []
-        for trig in self.event_triggers():
-            if not isinstance(trig, dict):
-                continue
-            m = trig.get("metric", "")
-            op = trig.get("op", ">=")
-            val = float(trig.get("value", 0))
-            name = trig.get("event", "") or str(trig)
-            if not m or not name:
-                continue
-            if trig.get("once") and (state.id, name) in fired:
-                continue
-            mv = state.get_metric(m)
-            if self.eval_metric_op(op, mv, val):
-                out.append(trig)
-        return out
 
     # ── 访问器 ──
     def metrics(self) -> list[str]:
@@ -188,67 +108,27 @@ class RuleEngine:
     def actions(self) -> list[str]:
         return [_normalize_action(a) for a in self.pack["actions"]]
 
-    def action_catalog(self, base_type: str = "Agent") -> str:
-        """供决策 prompt 使用的可选动作说明。按 base_type 过滤。
-        
-        Agent：全量动作
-        Subordinate：排除军事/战略动作
-        其余类型：仅 observe
-        """
+    def action_catalog(self) -> str:
+        """供决策 prompt 使用的可选动作说明。"""
         _TARGET_HINTS: dict[str, str] = {
             "partner": "提示：partner 应选择同行业或已知供应链/战略投资关系的实体，不应跨行业随机结盟",
             "diplomacy": "提示：diplomacy 应选择利益相关的可对话方（对手、盟国、冲突方），而非无关第三方",
         }
-        allowed = self.get_allowed_actions(base_type)
         lines = []
         for a in self.pack["actions"]:
             a = _normalize_action(a)
-            if a not in allowed:
-                continue
             eff = self.pack["self_effects"].get(a, {})
             desc = ", ".join(f"{k}{v:+.0f}" for k, v in eff.items()) or "无直接消耗"
             line = f"- {a}（自身效应: {desc}）"
             if a in _TARGET_HINTS:
                 line += f"\n  {_TARGET_HINTS[a]}"
             lines.append(line)
-        if not lines:
-            lines.append("- observe（无动作权限，仅观察）")
         return "\n".join(lines)
 
     # ── 状态初始化 ──
-    def get_capability(self, base_type: str) -> dict:
-        """返回指定 base_type 的实体能力配置（指标+动作限制）。"""
-        caps = self.pack.get("entity_capabilities", {})
-        return caps.get(base_type, caps.get("Agent", {"metrics": "all", "actions": "all"}))
-
-    def get_allowed_actions(self, base_type: str) -> list[str]:
-        """返回指定 base_type 可用的动作列表（过滤掉禁止动作）。
-        
-        - "actions": "all" → 全动作减 exclude_actions
-        - "actions": ["observe"] → 仅这些动作
-        """
-        cap = self.get_capability(base_type)
-        allowed = cap.get("actions", "all")
-        if isinstance(allowed, list):
-            all_actions = self.actions()
-            return [a for a in all_actions if a in allowed]
-        all_actions = self.actions()
-        exclude = set(cap.get("exclude_actions", []))
-        return [a for a in all_actions if a not in exclude]
-
-    def init_state(self, entity_id: str, name: str, base_type: str = "Agent") -> EntityState:
-        """创建实体初始状态。按 base_type 的能力配置过滤指标。"""
-        cap = self.get_capability(base_type)
-        if cap.get("metrics") == "all":
-            exclude = set(cap.get("exclude_metrics", []))
-            metrics = {k: float(v) for k, v in self.pack["initial_metrics"].items()
-                       if k not in exclude}
-        elif isinstance(cap.get("metrics"), list):
-            metrics = {k: float(self.pack["initial_metrics"].get(k, 50.0))
-                       for k in cap["metrics"] if k in self.pack["metrics"]}
-        else:
-            metrics = {}
-        return EntityState(id=entity_id, name=name, domain=self.domain, metrics=metrics)
+    def init_state(self, entity_id: str, name: str) -> EntityState:
+        return EntityState(id=entity_id, name=name, domain=self.domain,
+                           metrics={k: float(v) for k, v in self.pack["initial_metrics"].items()})
 
     # ── 单决策 → 增量 ──
     @staticmethod
@@ -262,34 +142,29 @@ class RuleEngine:
                 return True
         return False
 
-    def _eval_cond_cached(self, parsed: list[list[tuple[str, str, float]]], state: Any) -> bool:
-        """Evaluate a pre-parsed condition against entity state — no string ops.
-
-        Supports 'not' negated atoms (op prefixed with '!').
-        Logs unknown metrics at debug level to help catch config errors.
-        """
-        known_metrics = set(self.pack.get("metrics", []))
+    @staticmethod
+    def _eval_cond_cached(parsed: list[list[tuple[str, str, float]]], state: Any) -> bool:
+        """Evaluate a pre-parsed condition against entity state — no string ops."""
         for and_group in parsed:
             ok = True
             for metric, op, val in and_group:
-                negated = op.startswith('!')
-                real_op = op[1:] if negated else op
                 mv = state.get_metric(metric)
-                # Debug: flag condition references to non-standard metrics
-                if metric not in known_metrics and metric not in ('_intel_exposed',):
-                    logger.debug("[RuleEngine] condition references unknown metric '%s' (resolves to 0.0)", metric)
-                # Evaluate comparison
-                cmp = (
-                    (real_op == "<" and mv < val) or
-                    (real_op == ">" and mv > val) or
-                    (real_op == "<=" and mv <= val) or
-                    (real_op == ">=" and mv >= val) or
-                    (real_op == "==" and mv == val) or
-                    (real_op == "!=" and mv != val)
-                )
-                if negated:
-                    cmp = not cmp
-                if not cmp:
+                if op == "<" and not (mv < val):
+                    ok = False
+                    break
+                if op == ">" and not (mv > val):
+                    ok = False
+                    break
+                if op == "<=" and not (mv <= val):
+                    ok = False
+                    break
+                if op == ">=" and not (mv >= val):
+                    ok = False
+                    break
+                if op == "==" and not (mv == val):
+                    ok = False
+                    break
+                if op == "!=" and not (mv != val):
                     ok = False
                     break
             if ok:
@@ -307,20 +182,15 @@ class RuleEngine:
                 "==": mv == val, "!=": mv != val}[op]
 
     def compute_deltas(self, action: str, intensity: float,
-                        env: dict[str, str] | None = None,
-                        state: Any = None,
-                        allowed_actions: list[str] | None = None) -> tuple[dict, dict]:
+                       env: dict[str, str] | None = None,
+                       state: Any = None) -> tuple[dict, dict]:
         intensity = max(0.0, min(1.0, float(intensity)))
-        # 越权回退：若动作不在允许列表中，回退为 observe
-        if allowed_actions is not None and action not in allowed_actions:
-            logger.debug("[RuleEngine] action '%s' not allowed, fallback to observe", action)
-            action = "observe"
         self_d = {k: v * intensity for k, v in self.pack["self_effects"].get(action, {}).items()}
         tgt_d = {k: v * intensity for k, v in self.pack["target_effects"].get(action, {}).items()}
         # 状态依赖条件效应
         if state is not None:
             for key, cfg in self.pack.get("conditional_effects", {}).items():
-                if not key.startswith(action + "_"):
+                if not key.startswith(action):
                     continue
                 cond = cfg.get("condition", "")
                 parsed = self._parsed_conditions.get(cond)
@@ -445,17 +315,6 @@ class RuleEngine:
 
     # ── 存亡 ──
     def is_alive(self, state: EntityState) -> bool:
-        """存亡判定。支持两种模式：
-
-        weighted_score（需 rules.json 配置 elimination）：
-          综合评分 = Σ(metrics[m] × weights[m])
-          淘汰条件：score < threshold_score 或 任一 hard_core 指标 ≤ 保底值
-          适用：大国博弈等需要多维度综合评估的场景
-
-        threshold（默认，无需配置）：
-          任一指标 ≤ thresholds[m] → 死亡
-          适用：军事/商业等单维崩盘即淘汰的场景
-        """
         elim = self.pack.get("elimination")
         if elim and elim.get("mode") == "weighted_score":
             weights = elim.get("weights", {})

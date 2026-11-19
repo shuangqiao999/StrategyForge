@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,40 +11,27 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _safe_json_load(raw: Any) -> Any:
-    """容错 JSON 解析：损坏/非 JSON 值回退空 dict，避免 500。"""
-    if isinstance(raw, dict):
-        return raw
-    try:
-        return json.loads(raw or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-
-
 class SessionStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._local = threading.local()
+        self._conn: sqlite3.Connection | None = None
         self._init()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = sqlite3.connect(str(self._db_path))
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            conn.row_factory = sqlite3.Row
-            self._local.conn = conn
-        return conn
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self._db_path))
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA temp_store=MEMORY")
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
 
     def close(self) -> None:
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
-            conn.close()
-            self._local.conn = None
+        if self._conn:
+            self._conn.close()
+            self._conn = None
 
     def _init(self) -> None:
         with self._get_conn() as conn:
@@ -116,23 +102,13 @@ class SessionStore:
         except (TypeError, ValueError):
             total_rounds = 10
         with self._get_conn() as conn:
-            try:
-                conn.execute(
-                    "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
-                    "total_rounds, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, title, source_material,
-                     json.dumps(cfg, ensure_ascii=False), total_rounds, now, now),
-                )
-                conn.commit()
-            except sqlite3.IntegrityError:
-                # 会话已存在：更新而非重复插入（幂等）
-                conn.execute(
-                    "UPDATE deduction_sessions SET title=?, source_material=?, config_json=?, "
-                    "total_rounds=?, updated_at=? WHERE id=?",
-                    (title, source_material,
-                     json.dumps(cfg, ensure_ascii=False), total_rounds, now, session_id),
-                )
-                conn.commit()
+            conn.execute(
+                "INSERT INTO deduction_sessions (id, title, source_material, config_json, "
+                "total_rounds, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session_id, title, source_material,
+                 json.dumps(cfg, ensure_ascii=False), total_rounds, now, now),
+            )
+            conn.commit()
         return self.get(session_id)
 
     _ALLOWED_COLUMNS = frozenset({
@@ -148,16 +124,6 @@ class SessionStore:
         invalid = set(kwargs) - self._ALLOWED_COLUMNS
         if invalid:
             raise ValueError(f"不允许的列: {', '.join(sorted(invalid))}。允许的列: {', '.join(sorted(self._ALLOWED_COLUMNS))}")
-        # JSON 列：调用方若传 dict/list 则自动序列化，避免 sqlite3 绑定报错；
-        # 不可序列化对象（含嵌套）兜底为字符串，杜绝存储阶段 500（P1#9）
-        json_cols = {"config_json", "report_json", "optimization_report_json", "token_json"}
-        for k in json_cols & set(kwargs):
-            v = kwargs[k]
-            if v is not None and not isinstance(v, str):
-                try:
-                    kwargs[k] = json.dumps(v, ensure_ascii=False)
-                except (TypeError, ValueError):
-                    kwargs[k] = str(v)
         now = datetime.now().isoformat()
         set_parts = [f"{k} = ?" for k in kwargs]
         set_parts.append("updated_at = ?")
@@ -178,19 +144,20 @@ class SessionStore:
         if row is None:
             return None
         d = dict(row)
-        d["config_json"] = _safe_json_load(d.get("config_json", "{}"))
-        d["report_json"] = _safe_json_load(d.get("report_json", "{}"))
-        d["optimization_report_json"] = _safe_json_load(d.get("optimization_report_json", "{}"))
-        d["token_json"] = _safe_json_load(d.get("token_json", "{}"))
+        d["config_json"] = json.loads(d.get("config_json", "{}") or "{}")
+        d["report_json"] = json.loads(d.get("report_json", "{}") or "{}")
+        d["optimization_report_json"] = json.loads(d.get("optimization_report_json", "{}") or "{}")
+        d["token_json"] = json.loads(d.get("token_json", "{}") or "{}")
         return d
 
-    def list_all(self) -> list[dict[str, Any]]:
+    def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, title, status, phase, entity_count, relation_count, "
                 "agent_count, current_round, total_rounds, config_json, "
                 "created_at, updated_at "
-                "FROM deduction_sessions ORDER BY created_at DESC"
+                "FROM deduction_sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
             ).fetchall()
         out: list[dict[str, Any]] = []
         for r in rows:

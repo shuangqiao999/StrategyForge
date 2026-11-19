@@ -20,7 +20,24 @@ class ConfigValidationError(ValueError):
     """Raised when rules.json configuration is invalid (fail-fast before deduction starts)."""
 
 
-# 模块注册表 — 与 __init__.py::MODULE_REGISTRY 保持同步
+# ODE preset 子串匹配黑名单：这些 pattern 是常见子串，禁止参与前缀/后缀匹配，
+# 避免 supply→supply_chain、resource→energy_resource 之类的巧合命中。
+_ODE_SUBSTRING_BLACKLIST = frozenset({"supply", "resource", "resources"})
+
+
+def _match_ode_preset(metric: str, ode_preset_map: dict[str, str]) -> str | None:
+    """精确优先，其次前缀/后缀匹配（pattern 长度≥4 且非黑名单），否则返回 None。"""
+    if metric in ode_preset_map:
+        return ode_preset_map[metric]
+    for pattern, preset in ode_preset_map.items():
+        if len(pattern) < 4 or pattern in _ODE_SUBSTRING_BLACKLIST:
+            continue
+        if metric.startswith(pattern) or metric.endswith(pattern):
+            return preset
+    return None
+
+
+# ── Module class registry (maps config keys to concrete classes) ──
 _MODULE_CLASSES: dict[str, type[AlgorithmModule]] = {
     "ode_engine": ODEModule,
     "physics_engine": PhysicsModule,
@@ -45,12 +62,7 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
         "fatigue": "fatigue_recovery", "supply": "supply_consumption",
         "pollution": "pollution_spread", "resources": "resource_depletion",
         "population": "logistic", "economy": "logistic",
-        "market_share": "logistic", "cash_flow": "cash_flow_dynamics",
-        "brand": "logistic", "morale": "logistic", "stability": "logistic",
-        "satisfaction": "logistic", "support_rate": "logistic",
-        "unity": "logistic", "public_trust": "logistic",
-        "polarization": "logistic", "employment": "logistic",
-        "infrastructure": "logistic", "supply_chain": "logistic",
+        "market_share": "logistic", "cash_flow": "decay", "brand": "logistic",
     }
 
     engine = PipelineEngine()
@@ -60,7 +72,6 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
     for name in order:
         cls = _MODULE_CLASSES.get(name)
         if cls is None:
-            logger.warning("[ModuleUtils] pipeline.order 含未注册模块 '%s'，已跳过（检查 rules.json）", name)
             continue
         cfg = dict(pack_modules.get(name, {}))
 
@@ -68,10 +79,11 @@ def build_pipeline(rule_engine: Any) -> PipelineEngine:
         if name == "ode_engine" and not cfg.get("equations"):
             final_eqs: dict[str, str] = {}
             for metric in metrics:
-                for pattern, preset in ode_preset_map.items():
-                    if pattern in metric:
-                        final_eqs[metric] = preset
-                        break
+                preset = _match_ode_preset(metric, ode_preset_map)
+                if preset is not None:
+                    final_eqs[metric] = preset
+                else:
+                    logger.debug("[ModuleUtils] metric '%s' 无 ODE preset，导数=0", metric)
             cfg["equations"] = final_eqs
 
         module = cls()
@@ -94,42 +106,29 @@ def _validate_fsm_config(cfg: dict, metrics: list[str]) -> None:
         "streak",  # FSM historical condition (not a metric)
     })
     metrics_set = set(metrics) | _VIRTUAL_METRICS
-    _OPS = frozenset({">", "<", ">=", "<=", "=="})
     for rule in cfg.get("transition_rules", []):
         condition = rule.get("condition", {})
-        if not isinstance(condition, dict):
-            raise ConfigValidationError(
-                f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
-                f"condition 必须是 dict（got {type(condition).__name__}）"
-            )
-        for metric, val in condition.items():
+        for metric in condition:
             if metric not in metrics_set:
                 raise ConfigValidationError(
                     f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
                     f"references metric '{metric}' which is not in the rule pack metrics "
                     f"{metrics}. Check rules.json transition_rules."
                 )
-            # streak 是 int 计数；其余条件必须是 (op, threshold) 二元组
-            if metric == "streak":
-                if not isinstance(val, (int, float)):
-                    raise ConfigValidationError(
-                        f"FSM streak 条件值必须是数值（got {val!r}）")
-                continue
-            if (not isinstance(val, (list, tuple)) or len(val) != 2
-                    or val[0] not in _OPS):
-                raise ConfigValidationError(
-                    f"FSM transition '{rule.get('from','?')} → {rule.get('to','?')}' "
-                    f"metric '{metric}' 条件值必须是 [op, threshold]（如 [\">\", 50]），"
-                    f"got {val!r}"
-                )
 
 
 def build_module_chain(rule_engine: Any) -> list[AlgorithmModule]:
-    """Returns the configured module list from build_pipeline (backward compat)."""
+    """Backward-compat: returns module list from build_pipeline."""
     engine = build_pipeline(rule_engine)
+    result: list[AlgorithmModule] = []
+    # Get order from pipeline config
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
     order = pack.get("modules", {}).get("pipeline", {}).get("order", ["ode_engine", "physics_engine"])
-    return [m for name in order if (m := engine.get(name)) is not None]
+    for name in order:
+        mod = engine.get(name)
+        if mod is not None:
+            result.append(mod)
+    return result
 
 
 def build_context(
@@ -138,11 +137,13 @@ def build_context(
     entity_ids: list[str],
     round_number: int,
     prev_spatial: Any = None,
+    prev_fsm_state: Any = None,
 ) -> ModuleContext:
     """Build a ModuleContext from current EntityState dicts and rule pack config.
 
     If prev_spatial is provided, spatial state (positions/velocities/forces)
     carries over from the previous round instead of re-initializing.
+    If prev_fsm_state is provided (entity_id-keyed dict), seed FSM 跨轮状态.
     """
     pack: dict[str, Any] = getattr(rule_engine, "pack", {})
     metric_names: list[str] = pack.get("metrics", [])
@@ -173,14 +174,10 @@ def build_context(
     if ode_params:
         ctx.metadata.setdefault("ode_params", {})
         for metric, param_dict in ode_params.items():
-            if not isinstance(param_dict, dict):
-                continue
-            for key, val in param_dict.items():
-                ctx_key = key if key.startswith("_") else f"_{key}"
-                if ctx_key in ctx.metadata["ode_params"] and ctx.metadata["ode_params"][ctx_key] != float(val):
-                    logger.warning("[ModuleUtils] ODE 参数 '%s' 被指标 '%s' 与先前指标覆盖冲突（每指标同名参数会互相覆盖，建议指标间避免同名 key）",
-                                   ctx_key, metric)
-                ctx.metadata["ode_params"][ctx_key] = float(val)
+            if isinstance(param_dict, dict):
+                for key, val in param_dict.items():
+                    ctx_key = key if key.startswith("_") else f"_{key}"
+                    ctx.metadata["ode_params"][ctx_key] = float(val)
 
     # Inject physics explosion sources from rules.json + extractor fallback
     phys_cfg = pack.get("modules", {}).get("physics_engine", {})
@@ -196,7 +193,94 @@ def build_context(
                 "radius": float(src.get("radius", 50.0)),
             })
 
+    # ── Inject ODE competition groups (modules.ode_engine.params.competition_groups) ──
+    competition_groups = (pack.get("modules", {}).get("ode_engine", {}).get("params", {})
+                          .get("competition_groups"))
+    if competition_groups is None:
+        competition_groups = pack.get("competition_groups")
+    if competition_groups is not None:
+        groups = _resolve_competition_groups(competition_groups, entity_ids)
+        if groups is not None:
+            ctx.metadata["_competition_groups"] = groups
+        else:
+            logger.debug("[ModuleUtils] competition_groups 配置格式无效，已忽略")
+    else:
+        logger.debug("[ModuleUtils] 未配置 competition_groups，competitive_logistic 使用全局池")
+
+    # ── Seed FSM 跨轮状态（entity_id-keyed → 按 entity_ids 对齐为 index 列表）──
+    if prev_fsm_state is not None and isinstance(prev_fsm_state, dict):
+        fsm_cfg = pack.get("modules", {}).get("finite_state_machine", {})
+        default_state = str(fsm_cfg.get("default_state", "idle"))
+        states_map = prev_fsm_state.get("states", {}) or {}
+        streaks_map = prev_fsm_state.get("streaks", {}) or {}
+        obs_map = prev_fsm_state.get("observe_streak", {}) or {}
+        ctx.metadata["fsm.state_blob"] = {
+            "agent_states": [states_map.get(eid, default_state) for eid in entity_ids],
+            "streaks": {
+                rf: [m.get(eid, 0) for eid in entity_ids]
+                for rf, m in streaks_map.items() if isinstance(m, dict)
+            },
+            "observe_streak": [obs_map.get(eid, 0) for eid in entity_ids],
+        }
+
     return ctx
+
+
+def _resolve_competition_groups(
+    competition_groups: Any, entity_ids: list[str],
+) -> np.ndarray | None:
+    """将 competition_groups 配置转换为与 entity_ids 对齐的 int ndarray。
+
+    支持两种格式：
+      - dict: {entity_id: group_id(int)}
+      - list: 与 entity_ids 等长的 int 列表
+    未列出的实体默认归入 0 组。格式非法返回 None。
+    """
+    n = len(entity_ids)
+    groups = np.zeros(n, dtype=np.int64)
+    if isinstance(competition_groups, dict):
+        for i, eid in enumerate(entity_ids):
+            g = competition_groups.get(eid, 0)
+            try:
+                groups[i] = int(g)
+            except (TypeError, ValueError):
+                return None
+        return groups
+    if isinstance(competition_groups, (list, tuple)):
+        if len(competition_groups) != n:
+            return None
+        try:
+            groups = np.array([int(g) for g in competition_groups], dtype=np.int64)
+        except (TypeError, ValueError):
+            return None
+        return groups
+    return None
+
+
+def rekey_fsm_blob(blob: Any, entity_ids: list[str]) -> dict[str, Any]:
+    """把 FSM 模块输出的 index-aligned state_blob 转成 entity_id-keyed，便于跨轮回注。
+
+    返回 {"states": {eid: state}, "streaks": {rf: {eid: int}}, "observe_streak": {eid: int}}。
+    """
+    out: dict[str, Any] = {"states": {}, "streaks": {}, "observe_streak": {}}
+    if not isinstance(blob, dict):
+        return out
+    states = blob.get("agent_states", [])
+    obs = blob.get("observe_streak", [])
+    streaks = blob.get("streaks", {}) or {}
+    for i, eid in enumerate(entity_ids):
+        if i < len(states):
+            out["states"][eid] = states[i]
+        if i < len(obs):
+            out["observe_streak"][eid] = obs[i]
+    for rf, arr in streaks.items():
+        d: dict[str, int] = {}
+        if isinstance(arr, (list, tuple)):
+            for i, eid in enumerate(entity_ids):
+                if i < len(arr):
+                    d[eid] = int(arr[i])
+        out["streaks"][rf] = d
+    return out
 
 
 def apply_context_results(

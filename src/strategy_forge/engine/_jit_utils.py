@@ -52,6 +52,14 @@ def batch_apply_deltas(
         _batch_apply_deltas_py(metrics_arr, deltas_arr, lo_arr, hi_arr)
 
 
+def _batch_apply_deltas_py(
+    metrics: np.ndarray, deltas: np.ndarray, lo: np.ndarray, hi: np.ndarray
+) -> None:
+    """Pure-numpy fallback for batch delta application (numba unavailable)."""
+    np.add(metrics, deltas, out=metrics)
+    np.clip(metrics, lo, hi, out=metrics)
+
+
 if _HAS_NUMBA:
     @jit(nopython=True, parallel=True)
     def _batch_apply_deltas_jit(

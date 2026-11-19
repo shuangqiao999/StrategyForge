@@ -9,7 +9,6 @@ export interface SessionItem {
   current_round: number;
   total_rounds: number;
   created_at: string;
-  error?: string;
 }
 
 export interface GraphNode {

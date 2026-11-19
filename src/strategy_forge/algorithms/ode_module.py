@@ -153,7 +153,7 @@ _ODE_DEPS: dict[str, list[str]] = {
     "supply_consumption": ["strength"],
     "pollution_spread": ["factory_output", "green_coverage"],
     "resource_depletion": ["population"],
-    "cash_flow_dynamics": ["supply_chain", "tech_lead", "rnd"],
+    "cash_flow_dynamics": ["supply_chain", "tech_lead"],
 }
 
 
@@ -227,8 +227,6 @@ class ODEModule(AlgorithmModule):
                 if eq_fn is not None:
                     deriv_parts.append(eq_fn(_views[k], _views))
                 else:
-                    if eq_name:
-                        logger.warning("[ODE] 未知方程名 '%s' (指标='%s') → 导数=0，指标将不变", eq_name, k)
                     deriv_parts.append(np.zeros(n, dtype=np.float64))
             return np.concatenate(deriv_parts)
 

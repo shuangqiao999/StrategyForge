@@ -41,9 +41,6 @@ class DeductionEngine:
         # 用户强制动作 override（按会话 → {agent: {action_type,intensity,target,remaining}}），
         # 由 API 写入、运行中的 SimulationEngine 按引用逐轮消费。
         self._fsm_overrides: dict[str, dict[str, dict]] = {}
-        # 融合架构·盲点4：外部注入的系统事件（按会话 → {pending: [...]}），
-        # 由 API 写入、运行中的 SimulationEngine 通道①逐轮消费。
-        self._injected_events: dict[str, dict] = {}
 
     _RUNNING_GRAPH_STATUSES = frozenset({
         "ontology_running", "graph_running", "agents_running",
@@ -99,8 +96,8 @@ class DeductionEngine:
             return None
         return self._row_to_session(data)
 
-    def list_sessions(self) -> list[dict[str, Any]]:
-        return self.session_store.list_all()
+    def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self.session_store.list_all(limit=limit)
 
     def delete_session(self, session_id: str, force: bool = False) -> None:
         existing = self.session_store.get(session_id)
@@ -171,8 +168,6 @@ class DeductionEngine:
         if hasattr(self, '_round_snapshots'):
             self._round_snapshots.pop(session_id, None)
         self._fsm_overrides.pop(session_id, None)
-        # 修复B：清理外部注入事件队列，防会话删除后内存泄漏/残留生效
-        self._injected_events.pop(session_id, None)
 
     # ── 用户强制动作 override ──
     def get_fsm_override_store(self, session_id: str) -> dict[str, dict]:
@@ -186,46 +181,6 @@ class DeductionEngine:
             "action_type": action_type, "intensity": float(intensity),
             "target": target or "", "remaining": max(1, int(rounds)),
         }
-
-    # ── 融合架构·盲点4：外部注入的系统事件（供模拟引擎通道①消费）──
-    def get_injected_events_store(self, session_id: str) -> dict:
-        """返回按会话的外部注入事件队列（按引用共享给运行中的模拟引擎）。
-
-        保证返回的 dict 始终含 "pending" 键（空队列），便于 SimulationEngine 通道①
-        直接读取/清空，避免外部持有方检查键存在性。
-        """
-        store = self._injected_events.setdefault(session_id, {})
-        store.setdefault("pending", [])
-        return store
-
-    def inject_system_event(self, session_id: str, event: dict) -> None:
-        """注入一个外部系统事件（可选 event_type 匹配规则包 event_impact）。
-
-        事件在下一轮模拟开始时由通道①消费，确定性冲击相关实体指标。
-        """
-        store = self.get_injected_events_store(session_id)
-        store.setdefault("pending", []).append(dict(event))
-        self.log(session_id, "intervene", f"注入系统事件: {event.get('event_type') or event.get('content')}")
-
-    def is_quantified_session(self, session_id: str) -> bool:
-        """判断会话是否量化模式（规则包驱动）。
-
-        量化模式 = domain 存在且非 narrative（auto 视为潜在量化，探测后回写具体域）。
-        用于 API 层决定 event_type 干预是否走数值冲击（修复A）。
-        """
-        try:
-            data = self.session_store.get(session_id)
-            if not data:
-                return False
-            cfg = data.get("config_json", {}) or {}
-            if isinstance(cfg, str):
-                import json as _json
-                cfg = _json.loads(cfg)
-            dom = str(cfg.get("domain") or "").strip()
-            # 缺陷3：auto 视为潜在量化（探测后会回写具体域），避免 event_type 干预被误降级
-            return dom not in ("", "narrative")
-        except Exception:
-            return False
 
     async def start(self, session_id: str, cancel_event=None) -> DeductionSession:
         session = self.get_session(session_id)
@@ -252,7 +207,6 @@ class DeductionEngine:
             round_callback=lambda rnd, total, snap=None: self.signal_round_complete(session_id, rnd, total, snap),
             resume_start_round=resume_start_round,
             fsm_override_store=self.get_fsm_override_store(session_id),
-            injected_events_store=self.get_injected_events_store(session_id),
         )
 
         try:

@@ -48,17 +48,14 @@ async def get_llm_config():
 
 @router.post("/llm")
 async def update_llm(body: LLMConfigUpdate):
-    updated = body.model_dump(exclude_unset=True)
-    if "llm_base_url" in updated:
-        registry.llm_base_url = (body.llm_base_url or "").rstrip("/")
-    if "llm_api_key" in updated and body.llm_api_key != "••••••••":
-        registry.llm_api_key = body.llm_api_key
-    if "llm_model" in updated:
+    if body.llm_base_url or body.llm_base_url == "":
+        registry.llm_base_url = body.llm_base_url.rstrip("/")
+    if body.llm_api_key != "••••••••": registry.llm_api_key = body.llm_api_key
+    if body.llm_model or body.llm_model == "":
         registry.llm_model = body.llm_model
-    if "provider_slug" in updated:
+    if body.provider_slug or body.provider_slug == "":
         registry.llm_provider_slug = body.provider_slug
-    if "llm_temperature" in updated:
-        registry.llm_temperature = body.llm_temperature
+    registry.llm_temperature = body.llm_temperature
     registry.save()
     return {"status": "ok"}
 
@@ -75,14 +72,12 @@ async def get_embed_config():
 
 @router.post("/embedding")
 async def update_embed(body: EmbedConfigUpdate):
-    updated = body.model_dump(exclude_unset=True)
-    if "embedding_api_base" in updated:
-        registry.embedding_api_base = (body.embedding_api_base or "").rstrip("/")
-    if "embedding_api_key" in updated and body.embedding_api_key != "••••••••":
-        registry.embedding_api_key = body.embedding_api_key
-    if "embedding_model_name" in updated:
+    if body.embedding_api_base or body.embedding_api_base == "":
+        registry.embedding_api_base = body.embedding_api_base.rstrip("/")
+    if body.embedding_api_key != "••••••••": registry.embedding_api_key = body.embedding_api_key
+    if body.embedding_model_name or body.embedding_model_name == "":
         registry.embedding_model_name = body.embedding_model_name
-    if "provider_slug" in updated and body.provider_slug:
+    if body.provider_slug or body.provider_slug == "":
         registry.embed_provider_slug = body.provider_slug
     registry.save()
     return {"status": "ok"}

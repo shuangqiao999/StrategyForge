@@ -54,7 +54,7 @@ class DeductionGraphStore:
                 "CREATE NODE TABLE IF NOT EXISTS Event("
                 "id STRING, description STRING, event_type STRING, "
                 "timestamp STRING, agent_id STRING, round INT64, target_id STRING, "
-                "effect STRING, driver STRING, visibility STRING, "
+                "effect STRING, driver STRING, "
                 "PRIMARY KEY(id))"
             )
             self._conn.execute(
@@ -70,11 +70,6 @@ class DeductionGraphStore:
                 "CREATE REL TABLE IF NOT EXISTS CAUSED("
                 "FROM Event TO Entity, metric STRING, amount DOUBLE)"
             )
-            # 兼容存量数据库：若 Event 表缺少 visibility 列则追加
-            try:
-                self._conn.execute("ALTER TABLE Event ADD visibility STRING DEFAULT 'public'")
-            except Exception:
-                pass
 
     def _check_conn(self) -> None:
         if self._conn is None or self._closed:
@@ -131,24 +126,27 @@ class DeductionGraphStore:
 
     def add_event(self, event_id: str, description: str, event_type: str,
                   timestamp: str, agent_id: str = "", round_number: int = 0,
-                  target_id: str = "", effect: str = "", driver: str = "",
-                  visibility: str = "public") -> None:
+                  target_id: str = "", effect: str = "", driver: str = "") -> None:
         self._check_conn()
-        safe_desc = (description or "")[:500]
-        safe_eff = (effect or "")[:200]
-        safe_drv = (driver or "")[:16]
-        safe_vis = (visibility or "public")[:16]
+        # String interpolation for CREATE: Kuzu event nodes use UUIDs (safe) and
+        # LLM-generated content (trusted source). MERGE+SET pattern used elsewhere
+        # is not compatible with CREATE semantics in Kuzu.
+        safe_id = event_id.replace("'", "\\'")
+        safe_desc = (description or "")[:500].replace("'", "\\'")
+        safe_type = event_type.replace("'", "\\'")
+        safe_ts = timestamp.replace("'", "\\'")
+        safe_aid = agent_id.replace("'", "\\'")
+        safe_tid = (target_id or "").replace("'", "\\'")
+        safe_eff = (effect or "")[:200].replace("'", "\\'")
+        safe_drv = (driver or "")[:16].replace("'", "\\'")
+        rnd = int(round_number)
         with self._lock:
             self._conn.execute(
-                f"CREATE (ev:{self.EVENT_TABLE} {{id: $id, "
-                "description: $description, event_type: $etype, "
-                "timestamp: $ts, agent_id: $aid, "
-                "round: $rnd, target_id: $tid, "
-                "effect: $eff, driver: $drv, visibility: $vis})",
-                {"id": event_id, "description": safe_desc, "etype": event_type,
-                 "ts": timestamp, "aid": agent_id, "rnd": int(round_number),
-                 "tid": target_id or "", "eff": safe_eff, "drv": safe_drv,
-                 "vis": safe_vis},
+                f"CREATE (ev:{self.EVENT_TABLE} {{id: '{safe_id}', "
+                f"description: '{safe_desc}', event_type: '{safe_type}', "
+                f"timestamp: '{safe_ts}', agent_id: '{safe_aid}', "
+                f"round: {rnd}, target_id: '{safe_tid}', "
+                f"effect: '{safe_eff}', driver: '{safe_drv}'}})"
             )
 
     def add_acted(self, agent_id: str, event_id: str, action: str, timestamp: str = "") -> None:
@@ -422,79 +420,6 @@ class DeductionGraphStore:
             links.append({"source": r[0], "target": r[1], "relation": r[2], "weight": r[3]})
 
         return {"nodes": nodes, "links": links}
-
-    def ensure_min_edges(self, min_neighbors: int = 3, base_weight: float = 0.3) -> int:
-        """图谱补全：为邻居不足的实体自动添加中性/互补关系边。
-
-        使用规则启发式（无 LLM 调用），为孤立实体补全博弈空间：
-        - 同类型实体之间添加中性"共存"关系
-        - 上下游供应链实体添加"依存"关系
-        - 同地域实体添加"联动"关系
-        返回新添加的边数。
-        """
-        self._check_conn()
-        # 获取所有实体及其邻居计数
-        result = self._conn.execute(
-            f"MATCH (e:{self.NODE_TABLE}) "
-            "OPTIONAL MATCH (e)-[r:RELATES]-() "
-            "RETURN e.id as id, e.name as name, COUNT(r) as degree, e.type as type"
-        )
-        entities = []
-        while result.has_next():
-            r = result.get_next()
-            eid, name, deg, etype = r[0], r[1], int(r[2]), r[3]
-            if deg < min_neighbors:
-                entities.append({"id": eid, "name": name, "type": etype, "degree": deg})
-
-        if not entities:
-            return 0
-
-        added = 0
-        # 策略1：同类型实体间补全"共存/博弈"中性边
-        by_type: dict[str, list[dict]] = {}
-        for e in entities:
-            by_type.setdefault(e["type"], []).append(e)
-
-        for etype, group in by_type.items():
-            for i, a in enumerate(group):
-                for b in group[i + 1:]:
-                    rel = "共存博弈" if etype in ("国家", "Country", "政权", "Regime", "Company", "企业") else "联动"
-                    self._add_relation(a["id"], b["id"], rel, base_weight)
-                    added += 1
-
-        # 策略2：实体类型互补配对（国家→组织、组织→企业）
-        complementary_pairs = [
-            ("国家", "组织", "影响"), ("Country", "Organization", "influence"),
-            ("组织", "企业", "协作"), ("Organization", "Company", "collaboration"),
-            ("企业", "企业", "竞争"), ("Company", "Company", "competition"),
-        ]
-        for t1, t2, rel in complementary_pairs:
-            g1 = by_type.get(t1, [])
-            g2 = by_type.get(t2, [])
-            pairs = min(len(g1), len(g2), 3)
-            for i in range(pairs):
-                self._add_relation(g1[i]["id"], g2[i]["id"], rel, base_weight)
-                added += 1
-
-        logger.info("[DeductionGraph] ensure_min_edges: added %d synthetic edges", added)
-        return added
-
-    def _add_relation(self, id_a: str, id_b: str, relation: str, weight: float) -> None:
-        """安全添加关系边（幂等：已存在则跳过）。"""
-        import uuid
-        # 检查边是否已存在
-        result = self._conn.execute(
-            f"MATCH (a:{self.NODE_TABLE} {{id: $ida}})-[r:RELATES]-(b:{self.NODE_TABLE} {{id: $idb}}) "
-            "RETURN count(r)", {"ida": id_a, "idb": id_b}
-        )
-        if result.get_next()[0] > 0:
-            return
-        self._conn.execute(
-            f"MATCH (a:{self.NODE_TABLE} {{id: $ida}}), (b:{self.NODE_TABLE} {{id: $idb}}) "
-            "CREATE (a)-[:RELATES {relation: $rel, weight: $w, evidence: $ev}]->(b)",
-            {"ida": id_a, "idb": id_b, "rel": relation, "w": weight,
-             "ev": "auto-completed|heuristic"},
-        )
 
     def close(self) -> None:
         with self._lock:

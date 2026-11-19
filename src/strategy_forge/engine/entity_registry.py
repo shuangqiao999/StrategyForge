@@ -2,11 +2,10 @@
 
 架构：
   Layer 1: 实体归一化
-    - 快速路径: 单次 LLM 全量归一化
-    - 分片路径: 滑动分片 → 保守归一化 → 内存合并 → LLM 精修
+    - 快速路径 (≤12K字): 单次 LLM 全量归一化
+    - 分片路径 (>12K字):  滑动分片 → 保守归一化 → 内存合并 → LLM 精修
   Layer 2: 逐批角色判定 — 10 个一组并行判定 KEEP/DISCARD + 证据
-  Layer 3: 交叉裁决 — LLM 全局冗余检测；文学/历史域跳过
-  SemanticMediator: 跨域 7 大类基础类型映射 + 通用 tier 标准
+  Layer 3: 交叉裁决 — LLM 全局冗余检测 (地缘/商业域)；文学/历史域跳过
 
 用法：
   registry = await build_registry(graph, preprocessor, intel_list, source_material=source)
@@ -22,82 +21,126 @@ import re as _re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from strategy_forge.engine.domain_adapter import DomainAdapter
+import yaml
 
 logger = logging.getLogger(__name__)
 
-# ── LRU 缓存 (协程安全 + TTL过期 + 主动清理) ──
+# ── LRU 缓存 (P0-1: 防止内存溢出 + TTL过期) ──
 class _LRUCache:
-    """LRU 缓存，asyncio 锁保护，TTL 过期，主动后台清理。
-
-    P2#11: 改用纯 maxsize 条目计数淘汰——sys.getsizeof 对嵌套结构估算不准，
-    简单计数约束更可靠、无系统性误差。
-    """
+    """简易 LRU 缓存，带 TTL 过期（默认30分钟）。"""
     def __init__(self, maxsize: int = 64, ttl_sec: int = 1800):
         self._maxsize = maxsize
         self._ttl = ttl_sec
         self._data: dict[str, object] = {}
         self._timestamps: dict[str, float] = {}
         self._order: list[str] = []
-        self._lock = asyncio.Lock()
 
-    def _expire_stale(self, now: float) -> None:
-        """清理所有过期键（调用方需持有锁）。"""
-        if self._ttl <= 0:
-            return
-        stale = [k for k in self._order if now - self._timestamps.get(k, 0) > self._ttl]
-        for k in stale:
-            self._order.remove(k)
-            del self._data[k]
-            del self._timestamps[k]
-
-    async def get(self, key: str) -> object | None:
+    def get(self, key: str) -> object | None:
         import time
-        async with self._lock:
-            now = time.time()
-            self._expire_stale(now)
-            if key in self._data:
+        if key in self._data:
+            if self._ttl > 0 and time.time() - self._timestamps.get(key, 0) > self._ttl:
                 self._order.remove(key)
-                self._order.append(key)
-                return self._data[key]
-            return None
-
-    async def set(self, key: str, value: object) -> None:
-        import time
-        async with self._lock:
-            now = time.time()
-            self._expire_stale(now)
-            if key in self._data:
-                self._order.remove(key)
-            else:
-                while len(self._data) >= self._maxsize:
-                    if not self._order:
-                        break
-                    oldest = self._order.pop(0)
-                    del self._data[oldest]
-                    self._timestamps.pop(oldest, None)
-                    logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
-            self._data[key] = value
-            self._timestamps[key] = now
+                del self._data[key]
+                del self._timestamps[key]
+                return None
+            self._order.remove(key)
             self._order.append(key)
+            return self._data[key]
+        return None
 
-    async def contains(self, key: str) -> bool:
-        async with self._lock:
-            return key in self._data
+    def set(self, key: str, value: object) -> None:
+        import time
+        if key in self._data:
+            self._order.remove(key)
+        elif len(self._data) >= self._maxsize:
+            oldest = self._order.pop(0)
+            del self._data[oldest]
+            self._timestamps.pop(oldest, None)
+            logger.debug("[LRU] 淘汰缓存: %s", oldest[:16])
+        self._data[key] = value
+        self._timestamps[key] = time.time()
+        self._order.append(key)
 
-    async def size(self) -> int:
-        async with self._lock:
-            return len(self._data)
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
 
 
-# ── 方差日志限制 ──
-_MAX_VARIANCE_LOG = 200
-_layer3_variance_log: list[dict] = []
-_layer3_decision_cache = _LRUCache(64)
-_layer1_normalize_cache = _LRUCache(16)
+# ── 模块级缓存 (P0-1 + P1-3) ──
+_layer3_decision_cache = _LRUCache(64)     # Layer3 哈希缓存
+_layer1_normalize_cache = _LRUCache(16)    # Layer1 归一化结果缓存
+_layer3_variance_log: list[dict] = []      # P0-2: 方差日志
+_token_defaults: dict | None = None        # 统一 token 配置缓存
+
+
+def _token_cfg(key: str, n: int, domain: str = "geo_strategy") -> int:
+    """读取统一 token 配置。模块级缓存避免重复 YAML 解析。"""
+    global _token_defaults
+    if _token_defaults is None:
+        _token_defaults = _load_layer3_config(domain).get("token", {})
+    return _get_token_limit({"token": _token_defaults}, key, n)
+
+
+# ── 字典加载 (P0-3: 统一数据源) ──
+def _load_alias_json() -> dict:
+    """P0-3: 从 entity_alias.json 加载全部内置映射 + 别名词典。"""
+    try:
+        rule_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule"
+        path = rule_dir / "entity_alias.json"
+        if not path.exists():
+            import os
+            env_dir = os.environ.get("FORGE_RULE_DIR", "")
+            if env_dir:
+                path = Path(env_dir) / "entity_alias.json"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception as e:
+        logger.warning("[EntityRegistry] 加载 entity_alias.json 失败: %s", e)
+    return {}
+
+# 模块加载时读取内置字典（仅一次文件IO）
+_alias_data = _load_alias_json()
+_ORG_MEMBERS: dict[str, frozenset[str]] = {
+    k: frozenset(v) for k, v in _alias_data.get("_builtin_org_members", {}).items()
+}
+_PERSON_COUNTRY: dict[str, str] = dict(_alias_data.get("_builtin_person_country", {}))
+
+# 方法论块：注入 LLM Prompt，不参与代码逻辑
+_A_METHODOLOGY = _alias_data.get("_methodology", {})
+_A_AGENCY_METHOD = _A_METHODOLOGY.get("entity_agency", {}).get("framework", "")
+_A_ALIAS_METHOD = _A_METHODOLOGY.get("alias_detection", {}).get("framework", "")
+_A_REDUNDANCY_METHOD = _A_METHODOLOGY.get("redundancy_detection", {}).get("framework", "")
+_A_TYPE_METHOD = _A_METHODOLOGY.get("type_normalization", {}).get("framework", "")
+
+_SHARD_SIZE = 7500
+_SHARD_OVERLAP = 800
+_SHARD_THRESHOLD = 12000  # 超过此字数启用分片路径 (P1-2: 默认值，运行时可用 config 覆盖)
+
+# Jaccard 阈值：地缘政治实体名较短(2-4字)，文学叙事实体名较长(3-6字)
+_JACCARD_THRESHOLDS = {
+    "geo_strategy": 0.40, "military": 0.40,
+    "business": 0.45, "politics": 0.40,
+    "novel": 0.50,
+    "ecology": 0.45, "urban": 0.45,
+    "tech": 0.45, "info_war": 0.40,
+    "_default": 0.45,
+}
+
+# ── 兜底域规则（域无匹配时使用——通用中立，适配任何种子材料）──
+_DEFAULT_DOMAIN_RULES = """## 归属分组
+- 实体若有独立行为+独立决策权 → 自身即组（根节点）
+- 实体若是某个已存在组的上级/下级成员 → 归入对应组
+
+## 决策主权判定（每组最多 1 个 tier1）
+| 独立决策实体（无论类型） | tier1 | 始终——该域的最高博弈单位 |
+| 该实体的领导/负责人 | tier2 | 决策⊆上级决策 |
+| 该实体的下属/部门/子品牌 | tier3 | 决策空间已被覆盖 |
+| 工具/资源/概念/数据/地点 | tier3 | 永远——非决策实体 |"""
 
 
 # ── Data Classes ──
@@ -117,8 +160,6 @@ class RegisteredEntity:
     tier: int = 0           # 1=核心博弈者 2=次级参与者 3=纯背景 0=未判定
     tier_evidence: str = "" # 分级证据（原文引用）
     group: str = ""         # L2 归属分组（所属国家/组织）
-    base_type: str = "Unknown"  # SemanticMediator 基础类型
-    is_decision_agent: bool = False  # 是否具备最终战略决策权（最高层实体）
 
 
 @dataclass
@@ -130,22 +171,6 @@ class EntityRegistry:
     tier1_count: int = 0
     tier2_count: int = 0
     discard_reasons: dict[str, int] = field(default_factory=dict)
-
-    def _mark_discard(self, entity: "RegisteredEntity", reason_key: str) -> None:
-        """统一弃用逻辑：同步更新 tier/decision/counter，防止 tier3 泄漏为 Agent。
-
-        替代此前散落在 6 处仅改 decision 不更新 tier 的半截弃用代码。
-        """
-        old_tier = entity.tier
-        entity.tier = 3
-        entity.decision = "DISCARD"
-        if old_tier == 1:
-            self.tier1_count = max(0, self.tier1_count - 1)
-        elif old_tier == 2:
-            self.tier2_count = max(0, self.tier2_count - 1)
-        self.kept = max(0, self.kept - 1)
-        self.discarded += 1
-        self.discard_reasons[reason_key] = self.discard_reasons.get(reason_key, 0) + 1
 
     def get_kept(self) -> list[RegisteredEntity]:
         return sorted(
@@ -270,21 +295,17 @@ def _repair_json(s: str) -> str:
 # 工具函数
 # ────────────────────────────────────────────────────────────
 
-def _smart_sample(source: str, max_chars: int = 8000, adapter: "DomainAdapter | None" = None) -> str:
+def _smart_sample(source: str, max_chars: int = 8000, domain: str = "") -> str:
     """智能采样：头 + 均匀中段 + 尾，覆盖全文叙事弧。
     文学域增加中段权重（关键剧情多在中段），地缘域保持均匀。"""
     n = len(source)
     if n <= max_chars:
         return source
-    if adapter is not None:
-        s = adapter.params.sampling
-        head_size = s.head_size
-        tail_size = s.tail_size
-        _lit = s.lit_mode
-    else:
-        head_size = 2000
-        tail_size = 2000
-        _lit = False
+    # 文学域：头1500 + 中段(多取) + 尾1500
+    # 其他域：头2000 + 中段(均匀) + 尾2000
+    _lit = domain in ("novel", "history", "narrative")
+    head_size = 1500 if _lit else 2000
+    tail_size = 1500 if _lit else 2000
     mid_budget = max_chars - head_size - tail_size
     if mid_budget <= 0:
         mid_budget = max_chars // 2
@@ -294,7 +315,7 @@ def _smart_sample(source: str, max_chars: int = 8000, adapter: "DomainAdapter | 
     tail = source[-tail_size:]
     mid_start = head_size
     mid_end = n - tail_size
-    if remaining <= 0:
+    if mid_budget <= 0:
         return head + "\n...(中段省略)...\n" + tail
     # 均匀采样中段
     mid_start = 2000
@@ -311,8 +332,8 @@ def _smart_sample(source: str, max_chars: int = 8000, adapter: "DomainAdapter | 
     return head + "".join(samples) + "\n--- [结尾] ---\n" + tail
 
 
-def _shard_source(text: str, shard_size: int = 7500,
-                  overlap: int = 800) -> list[str]:
+def _shard_source(text: str, shard_size: int = _SHARD_SIZE,
+                  overlap: int = _SHARD_OVERLAP) -> list[str]:
     """滑动分片，重叠区确保边界实体不丢失。"""
     shards = []
     start = 0
@@ -333,15 +354,6 @@ def _get_token_limit(cfg: dict, key: str, n: int) -> int:
     per = tk.get("per", 100)
     cap = tk.get("cap", 4000)
     return min(cap, base + n * per)
-
-
-def _adapter_token(adapter: "DomainAdapter", key: str, n: int, extra_chars: int = 0) -> int:
-    """从 DomainAdapter 读取 token 限制，叠加 20% 安全冗余 + 额外字符 token 估算。"""
-    if adapter is None:
-        return 4000
-    limit = adapter.params.token.get_limit(key, n)
-    extra_tokens = extra_chars // 4 if extra_chars > 0 else 0
-    return int(max(limit, (limit + extra_tokens) * 1.2))
 
 
 def _char_jaccard(a: str, b: str) -> float:
@@ -421,19 +433,18 @@ async def _layer1_normalize(
     source: str,
     freq_map: dict[str, int],
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> list[dict]:
     """Layer 1 快速路径：单次 LLM 全量归一化。>15 实体自动拆批并行。"""
     n_total = len(raw_fragments)
-    batch_size = 15
+    batch_size = 15  # qwen3.5-9b 在此规模 JSON 输出稳定
 
     if n_total <= batch_size:
-        return await _layer1_normalize_batch(raw_fragments, source, freq_map, 1, 1, log_fn, adapter)
+        return await _layer1_normalize_batch(raw_fragments, source, freq_map, 1, 1, log_fn)
 
     # 拆批 + 并行 + 代码合并
     batches = [raw_fragments[i:i + batch_size] for i in range(0, n_total, batch_size)]
     total = len(batches)
-    tasks = [_layer1_normalize_batch(b, source, freq_map, i + 1, total, log_fn, adapter) for i, b in enumerate(batches)]
+    tasks = [_layer1_normalize_batch(b, source, freq_map, i + 1, total, log_fn) for i, b in enumerate(batches)]
     all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     merged: dict[str, dict] = {}
@@ -473,7 +484,6 @@ async def _layer1_normalize_batch(
     batch_idx: int,
     total_batches: int,
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> list[dict]:
     """Layer 1 单批归一化。"""
 
@@ -486,7 +496,7 @@ async def _layer1_normalize_batch(
         lines.append(f"  {i}. 名={nm}  类型={tp}  频次={fm}  描述={desc}")
     frags_text = "\n".join(lines)
 
-    source_trim = _smart_sample(source, 8000, adapter)
+    source_trim = _smart_sample(source, 8000)
 
     prompt = _LAYER1_USER.format(source=source_trim, fragments=frags_text)
     if total_batches > 1:
@@ -499,7 +509,7 @@ async def _layer1_normalize_batch(
         system=_LAYER1_SYSTEM,
         schema_name="l1_entities",
         temperature=0,
-        max_tokens=_adapter_token(adapter, "l1_normalize", len(raw_fragments)) if adapter else 4000,
+        max_tokens=_token_cfg("l1_normalize", len(raw_fragments)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -594,7 +604,6 @@ async def _layer1_shard_normalize(
     shard_idx: int,
     total_shards: int,
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> list[dict]:
     """分片级保守归一化：宁杂勿缺。"""
 
@@ -617,7 +626,7 @@ async def _layer1_shard_normalize(
         system=_SHARD_SYSTEM,
         schema_name="l1_entities",
         temperature=0,
-        max_tokens=_adapter_token(adapter, "l1_shard", len(shard_entities)) if adapter else 4000,
+        max_tokens=_token_cfg("l1_shard", len(shard_entities)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -671,13 +680,13 @@ async def _layer1_shard_normalize(
 # 内存合并层 (纯代码, 无 LLM)
 # ────────────────────────────────────────────────────────────
 
-def _memory_merge(all_shard_entities: list[dict], adapter: "DomainAdapter") -> tuple[list[dict], list[dict]]:
+def _memory_merge(all_shard_entities: list[dict], domain: str = "") -> tuple[list[dict], list[dict]]:
     """纯内存合并所有分片的局部实体。返回 (merged, conflicts)。
 
     merged:   代码已合并的规范实体列表
     conflicts: 需 LLM 裁定的歧义实体对 [{"a":..., "b":..., "reason":...}, ...]
     """
-    jaccard_threshold = adapter.params.jaccard_threshold
+    jaccard_threshold = _JACCARD_THRESHOLDS.get(domain, _JACCARD_THRESHOLDS["_default"])
     # 1. HashIndex: name → 出现记录
     by_name: dict[str, list[dict]] = defaultdict(list)
     # alias → canonical_name
@@ -797,11 +806,10 @@ async def _layer1_global_refine(
     conflicts: list[dict],
     source: str,
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> list[dict]:
     """LLM 全局精修：裁定歧义 + 描述精炼。"""
 
-    sample = _smart_sample(source, 6000, adapter)
+    sample = _smart_sample(source, 6000)
 
     prompt_parts = [
         "## 原文采样",
@@ -825,7 +833,7 @@ async def _layer1_global_refine(
         system=_REFINE_SYSTEM,
         schema_name="l1_entities",
         temperature=0,
-        max_tokens=_adapter_token(adapter, "l1_refine", len(merged)) if adapter else 4000,
+        max_tokens=_token_cfg("l1_refine", len(merged)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -861,30 +869,12 @@ async def _layer1_global_refine(
 
 _LAYER2_SYSTEM = """你是战略分析专家。先归属分组，再按决策主权分配 tier。
 
-## 通用基础类型定义（全领域统一标准）
-- **Agent** (独立决策主体): 具备独立完整决策+独立行动+独立利益诉求
-- **Subordinate** (附属参与者): 有决策行为但依附上级Agent，无独立博弈空间
-- **Resource** (资源/工具/物资): 纯背景
-- **Geography** (地理空间)
-- **Contract** (合约/条约/协议)
-- **Event** (事件/项目/冲突)
-- **Concept** (抽象概念)
-
-## 通用 tier 分级标准（全领域通用）
-- **tier1**: 实体具备独立完整决策+独立行动+独立利益诉求，不依附其他实体
-- **tier2**: 实体有决策行为但依附上级tier1，无独立博弈空间
-- **tier3**: 纯资源/工具/地点/概念，无自主决策与行动
-
 ## 域规则（本域博弈单位定义 + tier 分配表）
 ${domain_rules}
 
 ## 通用判定原则
-- 基础类型为 Agent → 默认可独立建组，最低tier1
-- 基础类型为 Subordinate → 依附上级Agent，最低tier2
-- 基础类型为 Resource/Geography/Contract/Event/Concept → tier3
-- **基础类型为 Unknown**：不预设排除，按决策主权判定——若该实体有独立决策权+独立利益诉求且不依附他者 → tier1/2；若为纯资源/地点/概念/工具或完全依附他者 → tier3。不要因 Unknown 就一律 tier3
-- 不确定时保守保留
-- 频次陷阱：高频≠重要，1次关键决策 > 10次背景提及
+- 不确定归属时 → 保守保留为 tier2 并注明原因
+- 频次陷阱：高频≠重要，1 次关键决策 > 10 次背景提及
 - 白名单中的实体 → 无条件 tier1（但其属下的官员/子品牌仍按域规则降级）
 
 ## 输出 JSON
@@ -895,7 +885,7 @@ ${domain_rules}
 _LAYER2_USER = """## 原文全文
 {source}
 
-## 待判定实体（已归一化，含融合描述与基础类型）
+## 待判定实体（已归一化，含融合描述）
 {batch}
 
 请逐实体判定 tier (1/2/3)。只输出 JSON。"""
@@ -908,31 +898,27 @@ async def _layer2_classify_batch(
     total_batches: int,
     log_fn: Any = None,
     domain_rules: str = "",
-    adapter: "DomainAdapter | None" = None,
 ) -> list[dict]:
-    """Layer 2: 判定一批实体。domain_rules 从 DomainAdapter 注入。"""
+    """Layer 2: 判定一批实体。domain_rules 从 domain_prompts.json 注入。"""
     from string import Template as _Template
 
     lines = []
     for e in batch:
         desc = e.get("description", "")[:300]
         tp = e.get("type", "?")
-        bt = e.get("base_type", "Unknown")
         fm = e.get("freq", "?")
         aliases = ",".join(e.get("aliases", [])) or "无"
         lines.append(
-            f"  - 名={e['name']}  类型={tp}  基础类型={bt}  频次={fm}  别名={aliases}\n"
+            f"  - 名={e['name']}  类型={tp}  频次={fm}  别名={aliases}\n"
             f"    描述: {desc}"
         )
     batch_text = "\n".join(lines)
 
-    source_trim = _smart_sample(source, 8000, adapter)
+    source_trim = _smart_sample(source, 8000)
 
     prompt = _LAYER2_USER.format(source=source_trim, batch=batch_text)
 
-    system = _Template(_LAYER2_SYSTEM).substitute(
-        domain_rules=domain_rules or _get_default_domain_rules()
-    )
+    system = _Template(_LAYER2_SYSTEM).substitute(domain_rules=domain_rules or _DEFAULT_DOMAIN_RULES)
 
     from strategy_forge.core.llm_client import DeductionLLMClient, Message
     client = DeductionLLMClient()
@@ -941,7 +927,7 @@ async def _layer2_classify_batch(
         system=system,
         schema_name="l2_results",
         temperature=0,
-        max_tokens=_adapter_token(adapter, "l2_classify", len(batch)) if adapter else 4000,
+        max_tokens=_token_cfg("l2_classify", len(batch)),
     )
     content = resp.content if hasattr(resp, "content") else str(resp)
     if isinstance(content, list):
@@ -989,7 +975,6 @@ async def _layer2_classify_all(
     batch_size: int = 10,
     log_fn: Any = None,
     domain_rules: str = "",
-    adapter: "DomainAdapter | None" = None,
 ) -> dict[str, dict]:
     """Layer 2: 分批并行判定。"""
 
@@ -999,7 +984,7 @@ async def _layer2_classify_all(
 
     total = len(batches)
     tasks = [
-        _layer2_classify_batch(batch, source, idx + 1, total, log_fn, domain_rules, adapter)
+        _layer2_classify_batch(batch, source, idx + 1, total, log_fn, domain_rules)
         for idx, batch in enumerate(batches)
     ]
     all_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1012,7 +997,7 @@ async def _layer2_classify_all(
                 log_fn("agents", f"  Layer2 批次{i+1} 失败，拆为单实体重试...")
             # 拆分失败批次为单实体重试
             retry_tasks = [
-                _layer2_classify_batch([e], source, 0, 1, log_fn, domain_rules, adapter)
+                _layer2_classify_batch([e], source, 0, 1, log_fn, domain_rules)
                 for e in batches[i]
             ]
             retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
@@ -1059,62 +1044,44 @@ def _fallback_classify(
     registry: EntityRegistry,
     entities: list[RegisteredEntity],
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> None:
-    """LLM 不可用时的兜底规则。基于基础类型 + 域规则兜底分类。"""
-
-    # 从 adapter 获取基础类型强制 tier
-    force_t1 = set(adapter.tier_rule.force_tier1_base_types) if adapter and adapter.tier_rule.force_tier1_base_types else {"Agent"}
-    force_t2 = set(adapter.tier_rule.force_tier2_base_types) if adapter and adapter.tier_rule.force_tier2_base_types else {"Subordinate"}
-    force_t3 = set(adapter.tier_rule.force_tier3_base_types) if adapter and adapter.tier_rule.force_tier3_base_types else {"Resource", "Geography", "Contract", "Event", "Concept"}
+    """LLM 不可用时的兜底规则。优先保留国家/组织为 tier1，人物降为 tier2。"""
+    # 按 group 分组（兜底时大多数实体无 group，从 entity_alias.json 推断）
+    country_group: dict[str, list[str]] = {}
+    for e in entities:
+        if e.type in ("Country", "国家"):
+            country_group.setdefault(e.name, []).append(e.name)
+        elif e.type in ("Person", "人物") and e.group:
+            country_group.setdefault(e.group, []).append(e.name)
 
     for e in entities:
-        bt = getattr(e, "base_type", "") or ""
-        if bt in force_t1:
-            e.decision = "KEEP"
-            e.tier = 1
-            e.reason = f"兜底(Agent:{bt})"
-            registry.kept += 1
-            registry.tier1_count += 1
-        elif bt in force_t2:
-            e.decision = "KEEP"
-            e.tier = 2
-            e.reason = f"兜底(Subordinate:{bt})"
-            registry.kept += 1
-            registry.tier2_count += 1
-        elif bt in force_t3:
-            e.decision = "DISCARD"
-            e.tier = 3
-            e.reason = f"兜底排除({bt})"
-            registry.discarded += 1
-            registry.discard_reasons["兜底排除"] = registry.discard_reasons.get("兜底排除", 0) + 1
-        elif e.type in ("Country", "国家") and e.freq >= 1:
+        if e.type in ("Country", "国家", "Organization", "组织") and e.freq >= 1:
             e.decision = "KEEP"
             e.tier = 1
             e.reason = "兜底(国家/组织)"
             registry.kept += 1
             registry.tier1_count += 1
-        elif e.type in ("Person", "人物") and e.freq >= _fallback_threshold(adapter, "person_freq_tier1", 5):
-            e.decision = "KEEP"
-            if adapter and adapter.meta.methodology_mode == "narrative":
-                e.tier = 1
-            else:
-                e.tier = 2
-            e.reason = "兜底(高频人物)"
-            registry.kept += 1
-            if e.tier == 1:
-                registry.tier1_count += 1
-            else:
-                registry.tier2_count += 1
-        elif e.freq >= _fallback_threshold(adapter, "generic_freq_tier2", 8):
+        elif e.type in ("Person", "人物") and e.group:
+            # 有归属组 → tier2（决策被所属国家覆盖）
             e.decision = "KEEP"
             e.tier = 2
-            e.reason = "兜底(高频>=8)"
+            e.reason = f"兜底(人物归属{e.group})"
+            registry.kept += 1
+            registry.tier2_count += 1
+        elif e.type in ("Person", "人物") and e.freq >= 5:
+            e.decision = "KEEP"
+            e.tier = 2
+            e.reason = "兜底(高频人物)"
+            registry.kept += 1
+            registry.tier2_count += 1
+        elif e.freq >= 8:
+            e.decision = "KEEP"
+            e.tier = 2
+            e.reason = f"兜底(高频≥8)"
             registry.kept += 1
             registry.tier2_count += 1
         else:
             e.decision = "DISCARD"
-            e.tier = 3
             e.reason = "兜底排除"
             registry.discarded += 1
             registry.discard_reasons["兜底排除"] = registry.discard_reasons.get("兜底排除", 0) + 1
@@ -1128,49 +1095,39 @@ def _fallback_classify(
 # ────────────────────────────────────────────────────────────
 
 def _layer3_cache_key(registry: EntityRegistry) -> str:
-    """基于所有 KEEP 实体的 name|type|freq|base_type 生成 MD5 哈希。"""
+    """Defect #4: 基于所有 KEEP 实体生成 MD5 哈希。"""
     kept = sorted(registry.get_kept(), key=lambda e: e.name)
     parts = []
     for e in kept:
-        bt = getattr(e, "base_type", "")
-        parts.append(f"{e.name}|{e.type}|{e.freq}|{bt}")
+        parts.append(f"{e.name}|{e.type}|{e.freq}")
     raw = ";".join(parts)
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
-def _load_alias_dict(adapter: "DomainAdapter") -> dict[str, set[str]]:
-    """从 DomainAdapter 加载别名词典。返回 {主名: {别名集合}}。"""
-    return dict(adapter.aliases.entity_aliases) if adapter else {}
-
-
-def _fallback_threshold(adapter: "DomainAdapter | None", key: str, default: int) -> int:
-    """从 adapter.param_config.fallback_thresholds 读取兜底阈值。"""
-    if adapter is None:
-        return default
+def _load_alias_dict(domain: str) -> dict[str, set[str]]:
+    """Defect #2: 加载别名词典。返回 {主名: {别名集合}}。"""
     try:
-        ft = getattr(adapter.params, "fallback_thresholds", None)
-        if isinstance(ft, dict):
-            return int(ft.get(key, default))
+        rule_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule"
+        path = rule_dir / "entity_alias.json"
+        if not path.exists():
+            # 尝试环境变量路径
+            import os
+            env_dir = os.environ.get("FORGE_RULE_DIR", "")
+            if env_dir:
+                path = Path(env_dir) / "entity_alias.json"
+        if not path.exists():
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
     except Exception:
-        pass
-    return default
+        return {}
 
-
-def _get_default_domain_rules() -> str:
-    """通用兜底域规则（不再硬编码，从 universal_neutral 读取）。"""
-    try:
-        from strategy_forge.engine.domain_adapter import get_adapter
-        a = get_adapter("universal_neutral")
-        return (a.prompts.l2_entity_rules or "") + "\n\n" + (a.prompts.l2_tier_table or "")
-    except Exception:
-        return """## 归属分组
-- 实体若有独立行为+独立决策权 → 自身即组（根节点）
-
-## 决策主权判定
-| 独立决策实体（无论类型） | tier1 | 始终 |
-| 该实体的领导/负责人 | tier2 | 决策⊆上级决策 |
-| 该实体的下属/部门/子品牌 | tier3 | 决策空间已被覆盖 |
-| 工具/资源/概念/数据/地点 | tier3 | 永远 |"""
+    domain_data = data.get(domain, {})
+    result: dict[str, set[str]] = {}
+    for main_name, aliases in domain_data.items():
+        if isinstance(aliases, list):
+            result[main_name] = {str(a) for a in aliases if a}
+    return result
 
 
 def _pre_merge_aliases(
@@ -1209,8 +1166,6 @@ def _pre_merge_aliases(
             continue
         if src_entity.decision != "KEEP":
             continue
-        if tgt_entity.decision != "KEEP":
-            continue
         # 合并: 频次累加, 别名归入, 描述拼接
         tgt_entity.freq += src_entity.freq
         if src_entity.rich_description:
@@ -1218,36 +1173,58 @@ def _pre_merge_aliases(
         if source not in tgt_entity.aliases:
             tgt_entity.aliases.append(source)
         # 标记源为 DISCARD
+        src_entity.decision = "DISCARD"
         src_entity.reason = f"代码别名合并→{target}"
-        registry._mark_discard(src_entity, "代码别名合并")
+        registry.kept -= 1
+        registry.discarded += 1
+        reason_key = "代码别名合并"
+        registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
         merged_count += 1
         logger.info("[Layer3 PreMerge] %s → %s (代码别名)", source, target)
 
     return merged_count
 
 
-def _load_layer3_config(adapter: "DomainAdapter") -> dict:
-    """从 DomainAdapter 构建 Layer3 配置字典（兼容旧调用方式）。"""
+def _load_layer3_config(domain: str) -> dict:
+    """Defect #3: 加载 Layer3 配置文件。"""
+    config_paths = [
+        Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule" / "layer3_config.yaml",
+    ]
+    import os
+    env_dir = os.environ.get("FORGE_RULE_DIR", "")
+    if env_dir:
+        config_paths.insert(0, Path(env_dir) / "layer3_config.yaml")
+
+    for path in config_paths:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                if isinstance(data, dict):
+                    domain_cfg = data.get(domain, {})
+                    if isinstance(domain_cfg, dict):
+                        return domain_cfg
+                    # 文学/历史/叙事域回退到 novel 配置
+                    fallback_domain = "novel" if domain in ("novel", "history", "narrative") else "geo_strategy"
+                    defaults = data.get(fallback_domain, {})
+                    if isinstance(defaults, dict):
+                        return defaults
+    # 内置默认
     return {
-        "system_prompt": adapter.prompts.l3_system_prompt or "",
-        "min_kept_for_check": adapter.layer.min_kept_for_check,
-        "warn_threshold": adapter.layer.warn_threshold,
-        "sample_chars": adapter.layer.sample_chars_l3,
-        "desc_truncate": adapter.layer.desc_truncate,
+        "system_prompt": "",
+        "min_kept_for_check": 3,
+        "warn_threshold": 8,
+        "sample_chars": 5000,
+        "desc_truncate": 80,
         "token": {
-            "l3_cross": {
-                "base": adapter.params.token.l3_cross.base,
-                "per": adapter.params.token.l3_cross.per,
-                "cap": adapter.params.token.l3_cross.cap,
-            },
+            "l1_normalize": {"base": 200, "per": 150, "cap": 12000},
+            "l1_shard":     {"base": 200, "per": 200, "cap": 6000},
+            "l1_refine":    {"base": 200, "per": 120, "cap": 8000},
+            "l2_classify":  {"base": 150, "per": 100, "cap": 4000},
+            "l3_cross":     {"base": 300, "per": 60,  "cap": 3000},
         },
-        "log_file": adapter.layer.log_file,
-        "cache_enabled": adapter.params.cache.l3_enabled,
-        "fallback_rules": {
-            "org_overlap_threshold": adapter.layer.fallback_rules.org_overlap_threshold,
-            "org_members_map": adapter.layer.fallback_rules.org_members_map,
-            "person_country_map": adapter.layer.fallback_rules.person_country_map,
-        },
+        "log_file": "",
+        "cache_enabled": True,
+        "fallback_rules": {"org_overlap_threshold": 3},
     }
 
 
@@ -1283,8 +1260,6 @@ def _log_variance(
         "domain": domain,
     }
     _layer3_variance_log.append(entry)
-    while len(_layer3_variance_log) > _MAX_VARIANCE_LOG:
-        _layer3_variance_log.pop(0)
 
     # 简易跨轮统计
     if len(_layer3_variance_log) >= 2:
@@ -1317,32 +1292,57 @@ def _persist_variance(entry: dict, log_file: str) -> None:
         logger.warning("[Layer3 Log] 日志持久化失败: %s", e)
 
 
+# ── Layer 3 主函数 (签名不变，内部全部改造) ──
+
 async def _layer3_cross_validate(
     registry: EntityRegistry,
     source: str,
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
+    domain: str = "",
 ) -> None:
-    """Layer 3: LLM 交叉裁决。所有域相关判定从 DomainAdapter 读取，零硬编码分支。"""
+    """Layer 3: LLM 交叉裁决 (改造版)。
 
-    if adapter is None:
-        from strategy_forge.engine.domain_adapter import get_adapter
-        adapter = get_adapter("universal_neutral")
+    文学/历史/叙事域跳过 Layer 3 —— 其角色冗余场景极少，
+    9B 模型易将核心角色误判为背景/附属，反而过杀。
+    地缘/商业/军事域正常执行 LLM 冗余检测。
+    """
 
-    # 是否跳过 Layer 3（文学/叙事域）
-    if adapter.layer.skip_layer3:
+    # ── 0. 配置加载 (Defect #3) ──
+    from strategy_forge.core.config import config as _cfg
+    _domain_raw = domain or getattr(_cfg, "active_domain", "") or getattr(_cfg, "domain", "")
+    domain = _domain_raw or "geo_strategy"
+
+    # 内容特征检测：决定是否跳过 Layer 3
+    kept_before = registry.get_kept() if hasattr(registry, "get_kept") else []
+    _skip = False
+    if _domain_raw in ("novel", "history", "narrative"):
+        _skip = True
+    elif _domain_raw == "geo_strategy":
+        _skip = False
+    elif not _domain_raw:
+        # 域名未知 → 内容特征检测
+        person_types = {"Person", "人物"}
+        geo_types = {"Country", "国家", "Organization", "组织", "国际组织"}
+        n_person = sum(1 for e in kept_before if e.type in person_types)
+        n_geo = sum(1 for e in kept_before if e.type in geo_types)
+        total = len(kept_before)
+        if total > 0 and n_person / total > 0.5 and n_geo < 3:
+            _skip = True  # 人物为主+少组织 → 文学叙事
+        # 否则不跳过 → 按地缘处理
+
+    if _skip:
         kept = registry.get_kept()
         if log_fn:
-            log_fn("agents", f"Layer3 跳过 (域={adapter.meta.display_name}: {len(kept)} KEEP，不执行冗余检测)")
+            log_fn("agents", f"Layer3 跳过 (域={_domain_raw or '未知/文学特征'}: {len(kept)} KEEP，不执行冗余检测)")
+        # 仍执行权重联动
         _reconcile_weights(registry)
         return
-
-    cfg = _load_layer3_config(adapter)
-    min_kept = adapter.layer.min_kept_for_check
-    warn_threshold = adapter.layer.warn_threshold
-    sample_chars = adapter.layer.sample_chars_l3
-    desc_trunc = adapter.layer.desc_truncate
-    cache_enabled = adapter.params.cache.l3_enabled
+    cfg = _load_layer3_config(domain)
+    min_kept = cfg.get("min_kept_for_check", 3)
+    warn_threshold = cfg.get("warn_threshold", 8)
+    sample_chars = cfg.get("sample_chars", 5000)
+    desc_trunc = cfg.get("desc_truncate", 80)
+    cache_enabled = cfg.get("cache_enabled", True)
 
     kept = registry.get_kept()
     total_kept = len(kept)
@@ -1351,11 +1351,10 @@ async def _layer3_cross_validate(
             log_fn("agents", f"Layer3 跳过 (KEEP={total_kept}<{min_kept})")
         return
 
-    # 哈希缓存（追加 domain 标识防止跨域污染）
+    # ── 1. 哈希缓存 (Defect #4) ──
     if cache_enabled:
-        ck = _layer3_cache_key(registry) + f"|{adapter.meta.domain_id}"
-        ck = hashlib.md5(ck.encode("utf-8")).hexdigest()
-        cached = await _layer3_decision_cache.get(ck)
+        ck = _layer3_cache_key(registry)
+        cached = _layer3_decision_cache.get(ck)
         if cached:
             logger.info("[Layer3 Cache] 命中, 跳过LLM")
             _apply_layer3_result(registry, cached)
@@ -1367,36 +1366,73 @@ async def _layer3_cross_validate(
                        f"合并 {len(cached.get('merges',[]))})")
             return
 
+    # ── 2. 代码别名词典预合并 (Defect #2) ──
+    alias_dict = _load_alias_dict(domain)
+    merged_count = 0
+    if alias_dict:
+        merged_count = _pre_merge_aliases(registry, alias_dict)
+        if merged_count and log_fn:
+            log_fn("agents", f"Layer3 代码预合并: {merged_count} 个实体 (减少LLM负担)")
+        # 重新读取 KEEP 列表 (可能已缩减)
+        kept = registry.get_kept()
+        total_kept = len(kept)
+
+    # ── 3. LLM 交叉裁决 (Defect #5: 新增 merge 支持) ──
     # 构建实体表格
     entity_lines = []
     for i, e in enumerate(kept, 1):
         tp = e.type or "?"
-        bt = getattr(e, "base_type", "") or ""
         desc = (e.rich_description or e.reason or "")[:desc_trunc]
         entity_lines.append(
-            f"{i}. {e.name} | {tp} | 基础类型={bt} | 频次={e.freq} | {desc}"
+            f"{i}. {e.name} | {tp} | 频次={e.freq} | {desc}"
         )
     entity_table = "\n".join(entity_lines)
 
-    sample = _smart_sample(source, sample_chars, adapter)
-    system_prompt = adapter.prompts.l3_system_prompt.strip()
+    sample = _smart_sample(source, sample_chars)
+    system_prompt = cfg.get("system_prompt", "").strip()
     if not system_prompt:
-        system_prompt = """你是通用博弈实体冗余检测专家。基于整体种子材料，检测实体间是否存在决策权重叠。
+        system_prompt = """你是博弈实体冗余检测专家。基于整体种子材料，检测实体间是否存在决策权重叠。
 
 ## 核心原则：决策覆盖链
+
 一个实体的决策空间 ⊆ 另一个实体的决策空间时 → 前者冗余。
 
-## 通用冗余检测类型
-| 类型 | 判定 |
-|------|------|
-| 人物-组织重叠 | 人物决策⊆组织决策 → 降级人物 |
-| 下级-上级重叠 | 下级决策被上级覆盖 → 降级下级 |
-| 组织-成员重叠 | 核心成员≥3已独立列席 → 降级组织 |
-| 同义名重叠 | 合并 |
+检测路由（沿归属链自上而下）：
+```
+主权国家/最高政权（根节点）
+ └─ 该国的政府首脑/元首 → 决策 = 国家决策 → 降级人物（tier2，不另建 agent）
+     └─ 该国的部长/将领/官员 → 决策被元首覆盖 → 降级（tier3）
+         └─ 地方势力/中层将领 → 无原文独立决策证据 → 降级（tier3）
+             └─ 独立军阀/叛军/割据势力 → 有独立证据 → 保留
+
+国际组织
+ └─ 核心成员国已独立列席 ≥3 个 → 组织的决策由其成员投票决定 → 降级组织
+ └─ 核心成员国未完全列席 → 组织有独立决策空间 → 保留
+     └─ 组织隶属的秘书长/主席 → 决策 = 组织决策 → 降级人物
+
+跨国企业/独立机构
+ └─ 原文明确其决策跨越 3 个以上国家的管辖边界 → 独立组 → 保留
+ └─ 主要依附单一国家 → 归入该国组 → 降级
+```
+
+## 冗余检测类型
+
+| 类型 | 检测对象 | 判定 |
+|------|---------|------|
+| 人物-国家重叠 | 元首/总理 vs 其所属国家 | 降级人物 → tier2 |
+| 人物-组织重叠 | 官员/职员 vs 其所属组织 | 降级人物 → tier3 |
+| 下级-上级重叠 | 部长/将领 vs 政府/国家 | 降级下级 → tier3 |
+| 组织-成员重叠 | 国际联盟 vs 其核心成员 | 核心成员 ≥3 已列席 → 降级组织 |
+| 政府机构重叠 | 职能部门 vs 国家 | 降级机构 → tier3 |
+| 军队-国家重叠 | 军队/武装 vs 所属国家 | 默认降级军队（仅原文明确独立军政行为时例外） |
+| 同义名重叠 | 两个名称指向同一实体 | 合并 |
 
 ## 铁律
+
+- **每一国家组最多保留 1 个 tier1**——国家本身为其最高博弈代表
+- 独立军阀/叛军除外——它们是独立博弈单元，不受国家组 tier1 上限约束
+- 优先保留国家/最高组织，降级其下属人员——而非反过来
 - 无法确定归属 → 保留，不降级
-- 不确定是否冗余 → 保留，不降级
 
 ## 输出 JSON
 {"downgrades": [{"name":"实体名","new_tier":2|3,"reason":"≤30字"}],
@@ -1405,30 +1441,25 @@ async def _layer3_cross_validate(
 
 只输出 JSON。"""
 
-    # 方法论注入：基于 methodology_mode
+    # 注入方法论 (entity_alias.json) — 文学叙事域不注入代理力/冗余，小说角色规则不同
     extra_method = []
-    if adapter.meta.methodology_mode == "geo":
-        _geo_m = adapter.methodology or {}
-        _red = _geo_m.get("_redundancy_method", "") or ""
-        _ag = _geo_m.get("_agency_method", "") or ""
-        if _red:
-            extra_method.append(f"## 冗余检测方法论\n{_red}")
-        if _ag:
-            extra_method.append(f"## 实体代理力判定方法论\n{_ag}")
-    elif adapter.meta.methodology_mode == "narrative":
+    if domain not in ("novel", "history", "narrative"):
+        if _A_REDUNDANCY_METHOD:
+            extra_method.append(f"## 冗余检测方法论\n{_A_REDUNDANCY_METHOD}")
+        if _A_AGENCY_METHOD:
+            extra_method.append(f"## 实体代理力判定方法论\n{_A_AGENCY_METHOD}")
+    else:
+        # 文学叙事使用独立方法论：角色≠博弈主体，每个有独立弧的角色都是独立实体
         extra_method.append("""## 文学叙事冗余判断规则
-- 每个有独立行动+独立对话+独立心理描写的角色都是独立实体
-- 核心角色绝不可降级
-- 上下级不降级：除非角色在文中完全无独立行为
-- 保守原则强化：宁多留角色，不可合并关键叙事主体""")
-    # neutral 模式不注入任何方法论，依赖 LLM 通用判断
-
+- 文学叙事中，每个有【独立行动 + 独立对话 + 独立心理描写】的角色都是独立实体
+- 核心角色绝不可降级：统治者/领袖≠其所属国家/组织（其个人决策、内心挣扎、性格弧线构成叙事核心）
+- 「国家意志化身」「组织代表」等理由不可用于降级——个体角色是独立叙事主体，非工具
+- 角色-组织关系不适用「组织-成员」冗余检测：将领≠其所属军队，个体≠其所属团体
+- 主要反派/外部威胁≠「背景」——只要原文有具体描写其行动、动机、决策，即为核心叙事主体
+- 上下级不降级：除非角色在文中完全无独立行为（仅作为他人命令的执行工具）
+- 保守原则强化：文学叙事宁可多留角色，不可合并关键叙事主体。5-10 个角色是合理的下限""")
     if extra_method:
         system_prompt = system_prompt.rstrip() + "\n\n" + "\n\n".join(extra_method)
-
-    # 注入域专属冗余规则
-    if adapter.prompts.l3_redundancy_rules:
-        system_prompt = system_prompt.rstrip() + "\n\n" + adapter.prompts.l3_redundancy_rules
 
     prompt = (
         f"## 原文采样\n{sample}\n\n"
@@ -1444,7 +1475,7 @@ async def _layer3_cross_validate(
             system=system_prompt,
             schema_name="l3_decisions",
             temperature=0,
-            max_tokens=adapter.params.token.get_limit("l3_cross", total_kept),
+            max_tokens=_get_token_limit(cfg, "l3_cross", total_kept),
         )
         content = resp.content if hasattr(resp, "content") else str(resp)
         if isinstance(content, list):
@@ -1454,7 +1485,7 @@ async def _layer3_cross_validate(
         logger.warning("[Layer3] LLM 调用失败: %s, 回退配置兜底规则", e)
         if log_fn:
             log_fn("agents", f"Layer3 LLM 失败({type(e).__name__})，执行配置兜底规则")
-        _resolve_hierarchy(registry, cfg, log_fn, adapter)
+        _resolve_hierarchy(registry, cfg, log_fn)
         _reconcile_weights(registry)
         return
 
@@ -1467,7 +1498,7 @@ async def _layer3_cross_validate(
     if not isinstance(merges, list):
         merges = []
 
-    # 执行 merge
+    # ── 3a. 执行 merge (Defect #5) ──
     merge_applied = 0
     for m in merges:
         if not isinstance(m, dict):
@@ -1487,6 +1518,7 @@ async def _layer3_cross_validate(
             src = registry.entities.get(dn)
             if not src or src.decision != "KEEP":
                 continue
+            # 合并频次 + 描述 + 别名
             tgt.freq += src.freq
             if src.rich_description:
                 tgt.rich_description += "；" + src.rich_description
@@ -1495,12 +1527,16 @@ async def _layer3_cross_validate(
             for a in src.aliases:
                 if a not in tgt.aliases and a != keep_name:
                     tgt.aliases.append(a)
+            src.decision = "DISCARD"
             src.reason = f"L3合并→{keep_name}({reason})"
-            registry._mark_discard(src, f"L3合并({reason[:30]})")
+            registry.kept -= 1
+            registry.discarded += 1
+            reason_key = f"L3合并({reason[:30]})"
+            registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
             merge_applied += 1
             logger.info("[Layer3 Merge] %s → %s (%s)", dn, keep_name, reason)
 
-    # 执行 downgrade
+    # ── 3b. 执行 downgrade ──
     downgrade_applied = 0
     for item in downgrades:
         if not isinstance(item, dict):
@@ -1511,25 +1547,32 @@ async def _layer3_cross_validate(
             continue
         entity = registry.entities.get(name)
         if entity and entity.decision == "KEEP":
+            entity.decision = "DISCARD"
             entity.reason = f"L3({reason})"
-            registry._mark_discard(entity, f"L3({reason[:30]})")
+            registry.kept -= 1
+            registry.discarded += 1
+            reason_key = f"L3({reason[:30]})"
+            registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
             downgrade_applied += 1
             logger.info("[Layer3 Downgrade] %s → %s", name, reason)
 
-    # 写缓存
+    # ── 4. 写缓存 (Defect #4) ──
     if cache_enabled:
-        ck = _layer3_cache_key(registry) + f"|{adapter.meta.domain_id}"
-        ck = hashlib.md5(ck.encode("utf-8")).hexdigest()
-        await _layer3_decision_cache.set(ck, {
+        ck = _layer3_cache_key(registry)
+        _layer3_decision_cache.set(ck, {
             "downgrades": downgrades,
             "merges": merges,
             "notes": notes,
         })
 
+    # ── 5. 权重联动 (Defect #6) ──
     _reconcile_weights(registry)
-    _log_variance(total_kept, downgrades, merges, notes, adapter.meta.domain_id)
+
+    # ── 6. 方差日志 (Defect #8) ──
+    _log_variance(total_kept, downgrades, merges, notes, domain)
     _persist_variance(entry=_layer3_variance_log[-1], log_file=cfg.get("log_file", ""))
 
+    # ── 7. 日志 ──
     total_changes = merge_applied + downgrade_applied
     if total_changes > 0:
         parts = []
@@ -1581,8 +1624,10 @@ def _apply_layer3_result(registry: EntityRegistry, result: dict) -> None:
                 tgt.rich_description += "；" + src.rich_description
             if dn not in tgt.aliases:
                 tgt.aliases.append(dn)
+            src.decision = "DISCARD"
             src.reason = f"L3合并→{keep_name}({reason})"
-            registry._mark_discard(src, f"L3缓存合并({reason[:20]})")
+            registry.kept -= 1
+            registry.discarded += 1
 
     # 执行 downgrade
     for item in downgrades:
@@ -1592,34 +1637,41 @@ def _apply_layer3_result(registry: EntityRegistry, result: dict) -> None:
         reason = str(item.get("reason", "缓存冗余"))[:40]
         entity = registry.entities.get(name)
         if entity and entity.decision == "KEEP":
+            entity.decision = "DISCARD"
             entity.reason = f"L3({reason})"
-            registry._mark_discard(entity, f"L3缓存({reason[:25]})")
+            registry.kept -= 1
+            registry.discarded += 1
 
 
 def _resolve_hierarchy(
     registry: EntityRegistry,
     cfg: dict | None = None,
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
 ) -> None:
-    """配置驱动的兜底层级修正。使用 DomainAdapter 的别名映射。"""
+    """Defect #7: 配置驱动的兜底层级修正。
 
+    cfg=None 时使用内置硬编码规则 (兼容旧调用)。
+    """
     kept_entities = registry.get_kept()
     kept_names = {e.name for e in kept_entities}
     to_discard: list[tuple[RegisteredEntity, str]] = []
 
+    # 读取配置的兜底规则
     fallback = (cfg or {}).get("fallback_rules", {}) if cfg else {}
     org_threshold = fallback.get("org_overlap_threshold", 3)
+    custom_org_map: dict = fallback.get("org_members_map", {})
+    custom_person_map: dict = fallback.get("person_country_map", {})
 
-    # 优先从 adapter 读取，回退到 cfg fallback_rules
-    if adapter:
-        org_map = {str(k): frozenset(v) for k, v in adapter.aliases.org_members.items()}
-        person_map = dict(adapter.aliases.person_country)
-    else:
-        custom_org_map: dict = fallback.get("org_members_map", {})
-        custom_person_map: dict = fallback.get("person_country_map", {})
-        org_map = dict(custom_org_map) if isinstance(custom_org_map, dict) else {}
-        person_map = dict(custom_person_map) if isinstance(custom_person_map, dict) else {}
+    # 合并内置 + 配置
+    org_map = {**_ORG_MEMBERS}
+    if isinstance(custom_org_map, dict):
+        for k, v in custom_org_map.items():
+            org_map[str(k)] = frozenset(str(x) for x in (v if isinstance(v, list) else []))
+
+    person_map = {**_PERSON_COUNTRY}
+    if isinstance(custom_person_map, dict):
+        for k, v in custom_person_map.items():
+            person_map[str(k)] = str(v)
 
     for e in kept_entities:
         if e.name in org_map:
@@ -1633,8 +1685,10 @@ def _resolve_hierarchy(
                 to_discard.append((e, f"人物(归入{country})"))
 
     for e, reason in to_discard:
+        e.decision = "DISCARD"
         e.reason = reason
-        registry._mark_discard(e, "兜底层级修正")
+        registry.kept -= 1
+        registry.discarded += 1
 
     if to_discard and log_fn:
         log_fn("agents", f"兜底层级修正: {len(to_discard)} 个重叠实体降级")
@@ -1716,22 +1770,13 @@ async def build_registry(
     """多层 LLM 流水线构建实体注册表。
 
     流程：
-      适配器解析 → Layer 1 (归一化) → 语义中介层 (基础类型映射) → Layer 2 (逐批判定) → Layer 3 (交叉裁决)
-    所有域相关参数、Prompt、别名从 DomainAdapter 注入，零硬编码分支。
+      ≤12K 字: Layer 1 (单次归一化) → Layer 2 (逐批判定)
+      >12K 字: 分片归一化 → 内存合并 → LLM 精修 → Layer 2
     """
-
-    # ── 0. 域适配器解析 ──
-    from strategy_forge.engine.domain_adapter import get_adapter
-    from strategy_forge.engine.domain_detector import resolve_domain
-    from strategy_forge.engine.semantic_mediator import map_to_base_type
-
-    adapter = get_adapter(resolve_domain(domain, source_material, [], log_fn))
-    if log_fn:
-        log_fn("agents", f"域适配器: {adapter.meta.display_name} ({adapter.meta.domain_id})")
 
     # ── 1. 从 Kuzu 读取所有实体 ──
     result = graph._conn.execute(
-        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description LIMIT 5000"
+        f"MATCH (e:{graph.NODE_TABLE}) RETURN e.id, e.name, e.type, e.description"
     )
     raw_fragments: list[dict] = []
     while result.has_next():
@@ -1762,15 +1807,6 @@ async def build_registry(
                 if a:
                     alias_to_std[a] = canon
 
-    # 额外注入 YAML 别名词典 (entity_aliases)，补全 preprocessor/intel_list 遗漏的别名
-    if adapter and adapter.aliases.entity_aliases:
-        for main_name, aliases in adapter.aliases.entity_aliases.items():
-            alias_to_std[main_name] = main_name
-            for a in aliases:
-                a = str(a).strip()
-                if a:
-                    alias_to_std[a] = main_name
-
     for name, std in alias_to_std.items():
         if name != std and name in freq_map and std not in freq_map:
             freq_map[std] = max(freq_map.get(std, 0), freq_map[name])
@@ -1780,35 +1816,36 @@ async def build_registry(
     use_llm = bool(_cfg.deduction_llm_review and source_material)
     source_len = len(source_material) if source_material else 0
 
-    shard_threshold = adapter.params.shard_threshold
+    # P1-2: 分片阈值从配置读取
+    l3cfg = _load_layer3_config(domain)
+    shard_threshold = int(l3cfg.get("shard_threshold", _SHARD_THRESHOLD))
     use_shard_path = source_len > shard_threshold
 
     normalized = None
-    # L1 缓存（追加域标识 + 文本长度指纹）
-    l1_cache_enabled = adapter.params.cache.l1_enabled
+    # P1-3: Layer1 结果缓存 (domain加入cache key防止跨域误复用)
+    l1_cache_enabled = bool(l3cfg.get("l1_cache_enabled", True))
     if l1_cache_enabled and source_material:
-        text_fp = f"len={source_len}"
-        l1_key = hashlib.md5(f"{source_material}|{adapter.meta.domain_id}|{text_fp}".encode("utf-8")).hexdigest()
-        cached_l1 = await _layer1_normalize_cache.get(l1_key)
+        l1_key = hashlib.md5(f"{source_material}|{domain}".encode("utf-8")).hexdigest()
+        cached_l1 = _layer1_normalize_cache.get(l1_key)
         if cached_l1:
-            normalized = list(cached_l1)
+            normalized = list(cached_l1)  # type: list[dict]
             if log_fn:
-                log_fn("agents", "Layer1 缓存命中: 跳过归一化")
+                log_fn("agents", f"Layer1 缓存命中: 跳过归一化")
 
     if use_llm and normalized is None:
         try:
             if use_shard_path:
                 normalized = await _layer1_shard_pipeline(
-                    raw_fragments, source_material, freq_map, log_fn, adapter
+                    raw_fragments, source_material, freq_map, log_fn, domain
                 )
             else:
                 normalized = await _layer1_normalize(
-                    raw_fragments, source_material, freq_map, log_fn, adapter
+                    raw_fragments, source_material, freq_map, log_fn
                 )
+            # 写 L1 缓存
             if l1_cache_enabled and source_material and normalized:
-                text_fp = f"len={source_len}"
-                l1_key = hashlib.md5(f"{source_material}|{adapter.meta.domain_id}|{text_fp}".encode("utf-8")).hexdigest()
-                await _layer1_normalize_cache.set(l1_key, normalized)
+                l1_key = hashlib.md5(f"{source_material}|{domain}".encode("utf-8")).hexdigest()
+                _layer1_normalize_cache.set(l1_key, normalized)
         except Exception as e:
             logger.warning("[Layer1] 归一化失败: %s, 回退到去重", e)
             if log_fn:
@@ -1829,6 +1866,7 @@ async def build_registry(
                 if a and a not in intel_map:
                     intel_map[a] = e
 
+    # ── 5.0 从 raw_fragments 构建 name→id 映射，回填 Layer1 丢失的 Kuzu 实体 ID ──
     name_to_kuzu_id: dict[str, str] = {}
     alias_to_kuzu_id: dict[str, str] = {}
     for frag in raw_fragments:
@@ -1836,6 +1874,7 @@ async def build_registry(
         fname = (frag.get("name") or "").strip()
         if fid and fname:
             name_to_kuzu_id[fname] = fid
+    # 从 intel_map 扩增别名映射（解决 Layer1 查重后名称变更的归位问题）
     for nm, info in intel_map.items():
         if nm in name_to_kuzu_id:
             for a in info.get("aliases", []):
@@ -1855,7 +1894,9 @@ async def build_registry(
         aliases = list(ne.get("aliases", []))
         if not aliases and intel.get("aliases"):
             aliases = [str(a) for a in intel["aliases"] if a != nm]
+        # 已保留的 ID（分片归一化合并时保留）
         raw_id = (ne.get("id") or "").strip()
+        # 从 raw_fragments 回填（同名匹配 → 别名匹配 → 空）
         kuzu_id = raw_id or name_to_kuzu_id.get(nm) or ""
         if not kuzu_id:
             for a in [nm] + aliases:
@@ -1864,11 +1905,6 @@ async def build_registry(
                     break
         if not kuzu_id:
             kuzu_id = alias_to_kuzu_id.get(nm) or ""
-        # 模糊匹配：带括号的别名实体如"阿里巴巴（平头哥）"尝试匹配主名部分
-        if not kuzu_id and "（" in nm:
-            main = nm.split("（")[0].strip()
-            if main in name_to_kuzu_id:
-                kuzu_id = name_to_kuzu_id[main]
         entity_list.append({
             "name": nm,
             "type": ne.get("type", "Unknown"),
@@ -1877,25 +1913,14 @@ async def build_registry(
             "description": ne.get("description", ""),
             "parent": str(intel.get("parent") or ""),
             "id": kuzu_id,
-            "include_in_simulation": intel.get("include_in_simulation", True),
         })
 
-    # ── 5.0 语义中介层：域类型 → 7 大类基础类型 ──
-    for e in entity_list:
-        bt = map_to_base_type(str(e.get("type", "Unknown")), adapter)
-        e["base_type"] = bt
-    if log_fn:
-        bt_counts: dict[str, int] = {}
-        for e in entity_list:
-            bt_counts[e["base_type"]] = bt_counts.get(e["base_type"], 0) + 1
-        details = ", ".join(f"{k}={v}" for k, v in sorted(bt_counts.items()))
-        log_fn("agents", f"语义中介层: {len(entity_list)} 实体映射基础类型 → {details}")
-
-    # ── 5.1 描述富化层 ──
+    # ── 5.1 描述富化层：从 Kuzu 原始碎片补全缺失的描述 ──
+    # Layer1 JSON 解析失败回退 dedup 时描述会丢失——此步用 Kuzu 原始节点描述补救
     enriched = 0
     for e in entity_list:
         if e.get("description", "").strip():
-            continue
+            continue  # 已有富描述，跳过
         nm = e["name"]
         aliases = set(e.get("aliases", [])) | {nm}
         descs = []
@@ -1924,39 +1949,26 @@ async def build_registry(
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
-                base_type=e.get("base_type", "Unknown"),
-                is_decision_agent=False,
-            )) # no-LLM
+            ))
         for re in reg_entities:
             registry.entities[re.name] = re
-        _fallback_classify(registry, reg_entities, log_fn, adapter)
-        _resolve_hierarchy(registry, None, log_fn, adapter)
+        _fallback_classify(registry, reg_entities, log_fn)
+        _resolve_hierarchy(registry, log_fn)
         return registry
 
-    # ── 7. Layer 2: 逐批判定 ──
-    domain_rules = (adapter.prompts.l2_entity_rules or "")
-    if adapter.prompts.l2_tier_table:
-        domain_rules += "\n\n" + adapter.prompts.l2_tier_table
-    if not domain_rules:
-        domain_rules = _get_default_domain_rules()
-    if log_fn and domain_rules:
-        log_fn("agents", f"域 {adapter.meta.domain_id} L2 规则已加载")
-
-    # 预判：IntelMap 已知的子公司/产品线直接标记为 tier3，避免 L2 batching 遗漏
-    entity_names = {e["name"] for e in entity_list}
-    pre_l2_tier3: set[str] = set()
-    for e in entity_list:
-        parent = (e.get("parent") or "").strip()
-        if parent and parent in entity_names:
-            pre_l2_tier3.add(e["name"])
-    if pre_l2_tier3 and log_fn:
-        log_fn("agents", f"IntelMap 预判 {len(pre_l2_tier3)} 个子实体直接 tier3: {', '.join(sorted(pre_l2_tier3))}")
-
+    # ── 7. Layer 2 ──
+    # 从 domain_prompts.json 读取域专属规则
+    domain_rules = _DEFAULT_DOMAIN_RULES
+    if domain:
+        from strategy_forge.core.rule_templates import get_domain_prompt
+        _l2_rules = get_domain_prompt(domain, "l2_entity_rules") or ""
+        _l2_table = get_domain_prompt(domain, "l2_tier_table") or ""
+        if _l2_rules or _l2_table:
+            domain_rules = _l2_rules + "\n\n" + _l2_table
+            if log_fn:
+                log_fn("agents", f"域 {domain} L2 规则已加载")
     try:
-        decisions = await _layer2_classify_all(
-            entity_list, source_material, batch_size=10, log_fn=log_fn,
-            domain_rules=domain_rules, adapter=adapter,
-        )
+        decisions = await _layer2_classify_all(entity_list, source_material, batch_size=10, log_fn=log_fn, domain_rules=domain_rules)
     except Exception as e:
         logger.warning("[Layer2] 判定失败: %s, 回退兜底", e)
         if log_fn:
@@ -1969,148 +1981,59 @@ async def build_registry(
                 decision="PENDING", reason="",
                 parent=e["parent"], aliases=e["aliases"],
                 rich_description=e["description"],
-                base_type=e.get("base_type", "Unknown"),
-                is_decision_agent=False,
-            )) # fallback
+            ))
         for re in reg_entities:
             registry.entities[re.name] = re
-        _fallback_classify(registry, reg_entities, log_fn, adapter)
-        _resolve_hierarchy(registry, None, log_fn, adapter)
+        _fallback_classify(registry, reg_entities, log_fn)
+        _resolve_hierarchy(registry, log_fn)
         return registry
 
-    # ── 8. 应用判定：优先级 基础类型硬约束 > NarrativeSorter排除 > 白名单 > IntelMap预判 > LLM L2 ──
-    from strategy_forge.engine.semantic_mediator import ensure_min_tier
-
-    # 8a-1. IntelMap 预判：已知子公司/产品线强制 tier3
-    for nm in pre_l2_tier3:
-        decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": "IntelMap预判(子公司/产品线→tier3)"}
-
-    # 8a-1b. 机构名模式硬约束：实体名含 force_tier3_substrings 中模式且对应主权实体存在 → 强制 tier3
-    # 模式列表由 domain_adapter.aliases.force_tier3_substrings 配置（中英文双份），零硬编码
-    _AGENCY_PATTERNS = adapter.aliases.force_tier3_substrings if adapter else set()
-    if _AGENCY_PATTERNS:
-        sovereign_names: set[str] = set()
-        for e in entity_list:
-            bt = e.get("base_type", "")
-            if bt in ("Agent",) and e["name"] not in pre_l2_tier3:
-                sovereign_names.add(e["name"])
-        agency_forced = 0
-        for nm in list(decisions.keys()):
-            if decisions[nm].get("tier", 3) == 3:
-                continue
-            if nm in sovereign_names:
-                continue
-            matched_pattern = None
-            for p in _AGENCY_PATTERNS:
-                if p in nm:
-                    matched_pattern = p
-                    break
-            if not matched_pattern:
-                continue
-            # 精确前缀匹配（如 "美国国防部" → "美国"）
-            has_parent = False
-            for sn in sovereign_names:
-                if nm.startswith(sn) or sn.startswith(nm[:2]):
-                    has_parent = True
-                    break
-            if has_parent:
-                decisions[nm] = {"decision": "DISCARD", "tier": 3,
-                                 "reason": f"名模式硬约束(机构→tier3:{matched_pattern})"}
-                agency_forced += 1
-                continue
-            # 宽松首字匹配（如 "美军" ← "美国"）
-            for sn in sovereign_names:
-                if len(nm) >= 1 and len(sn) >= 1 and nm[0] == sn[0]:
-                    decisions[nm] = {"decision": "DISCARD", "tier": 3,
-                                     "reason": f"名模式首字匹配(机构→tier3:{matched_pattern})"}
-                    agency_forced += 1
-                    break
-        if agency_forced and log_fn:
-            log_fn("agents", f"机构名模式拦截: {agency_forced} 个实体强制 tier=3")
-
-    # 8a0. NarrativeSorter 排除：include_in_simulation=False → 强制 tier3
-    # 注：此路径已被 is_decision_agent 门 + force_tier3_substrings 完整覆盖，
-    # 保留仅作为 NarrativeSorter 的直接标记通道（NarrativeSorter 仍设置此字段）
-    n_sorter_excluded = 0
-    for e in entity_list:
-        nm = e["name"]
-        if nm in decisions and not e.get("include_in_simulation", True):
-            if decisions[nm].get("tier", 3) != 3:
-                decisions[nm] = {"decision": "DISCARD", "tier": 3,
-                                 "reason": "NarrativeSorter排除(背景)"}
-                n_sorter_excluded += 1
-    if n_sorter_excluded and log_fn:
-        log_fn("agents", f"NarrativeSorter排除: {n_sorter_excluded} 个实体强制 tier=3")
-
-    # 8a. 基础类型硬约束（最高优先级，不可被白名单或 LLM 覆盖）
-    force_t3 = set(adapter.tier_rule.force_tier3_base_types) if adapter.tier_rule.force_tier3_base_types else {"Resource", "Geography", "Contract", "Event", "Concept"}
-    hard_constrained = 0
-    for e in entity_list:
-        nm = e["name"]
-        bt = e.get("base_type", "Unknown")
-        if nm in decisions and bt in force_t3:
-            if decisions[nm].get("tier", 3) != 3:
-                decisions[nm] = {"decision": "DISCARD", "tier": 3, "reason": f"基础类型硬约束({bt}→tier3)"}
-                hard_constrained += 1
-    if hard_constrained and log_fn:
-        log_fn("agents", f"基础类型硬约束: {hard_constrained} 个实体强制 tier=3")
-
-    # 8b. 基础类型最低保证（仅升级：Agent≥tier1, Subordinate≥tier2）
-    # 叙事域特殊保护：低频 Agent（出场≤2次且无归属组）允许 tier2，防止背景企业误升级
-    for e in entity_list:
-        nm = e["name"]
-        bt = e.get("base_type", "Unknown")
-        if nm in decisions:
-            llm_tier = int(decisions[nm].get("tier", 3))
-            min_t = ensure_min_tier(llm_tier, bt, adapter)
-            # 叙事方法论：Agent 的频次保护
-            if adapter.meta.methodology_mode == "narrative" and bt == "Agent" and llm_tier >= 2:
-                e_freq = e.get("freq", 0)
-                e_group = decisions[nm].get("group", "")
-                if e_freq <= 2 and not e_group:
-                    min_t = max(2, llm_tier)
-            if min_t != llm_tier:
-                decisions[nm]["tier"] = min_t
-                decisions[nm]["decision"] = "KEEP" if min_t in (1, 2) else "DISCARD"
-                if not decisions[nm].get("reason") or "白名单" not in str(decisions[nm].get("reason", "")):
-                    decisions[nm]["reason"] = f"基础类型安全网({bt}→tier{min_t})"
-
-    # 8c. 白名单强制一级（在 ensure_min_tier 之后执行，白名单有最终决定权）
-    force_keep_set = adapter.aliases.force_keep
-    ent_alias_map: dict[str, set[str]] = {}
-    for e in entity_list:
-        ent_alias_map[e["name"]] = set(e.get("aliases", []))
-    force_t12 = set(adapter.tier_rule.force_tier1_base_types + adapter.tier_rule.force_tier2_base_types) if adapter else {"Agent", "Subordinate"}
-
-    if force_keep_set:
+    # ── 8. 应用判定 ──
+    # 白名单强制一级：_force_keep 中的实体无视 Layer 2 分类
+    force_keep_list = _alias_data.get("_force_keep", {})
+    force_base = set(force_keep_list.get("all", []))
+    force_base.update(force_keep_list.get(domain, []))
+    # 扩增：白名单条目 + 它们的别名 (从别名词典中获取)
+    force_expanded: set[str] = set(force_base)
+    alias_dict = _alias_data.get(domain, {})
+    for fname in force_base:
+        aliases = alias_dict.get(fname, [])
+        force_expanded.update(str(a) for a in aliases if a)
+    if force_expanded:
         overridden = 0
+        ent_aliases: dict[str, set[str]] = {}
+        for e in entity_list:
+            nm = e["name"]
+            aliases_set = set(e.get("aliases", []))
+            ent_aliases[nm] = aliases_set
         for name in list(decisions.keys()):
-            bt = next((e.get("base_type", "") for e in entity_list if e["name"] == name), "")
-            matched = name in force_keep_set
+            # 匹配 1: 精确匹配 expanded 集合
+            matched = name in force_expanded
+            # 匹配 2: 实体别名命中
             if not matched:
-                for fa in ent_alias_map.get(name, set()):
-                    if fa in force_keep_set:
+                for fa in ent_aliases.get(name, set()):
+                    if fa in force_expanded:
                         matched = True
                         break
+            # 匹配 3: 白名单条目是实体名的子串 (e.g. "中国" matches "中方")
             if not matched:
-                for fname in force_keep_set:
-                    if len(fname) >= 2 and (fname in name or name in fname):
+                for fname in force_base:
+                    if len(fname) >= 2 and fname in name:
+                        matched = True
+                        break
+            # 匹配 4: 逆: 实体名是白名单条目的子串 (e.g. "美" matches "美国")
+            if not matched:
+                for fname in force_base:
+                    if len(name) >= 2 and name in fname:
                         matched = True
                         break
             if matched and decisions[name].get("tier", 3) != 1:
-                if bt in force_t3:
-                    continue
                 decisions[name] = {"decision": "KEEP", "tier": 1, "reason": "白名单强制一级"}
                 overridden += 1
         if overridden and log_fn:
             log_fn("agents", f"白名单覆盖: {overridden} 个实体强制 tier=1")
 
     missing_ids: list[str] = []
-    # ── 决策权判定：仅有最高层实体允许发起战略行动 ──
-    force_t3_sub_pats = adapter.aliases.force_tier3_substrings if adapter else set()
-    sovereign_names_set = {e["name"] for e in entity_list
-                          if e.get("base_type", "") == "Agent"
-                          and e["name"] not in pre_l2_tier3}
     for e in entity_list:
         d = decisions.get(e["name"], {"decision": "DISCARD", "tier": 3, "reason": "未判定"})
         tier = int(d.get("tier", 3))
@@ -2119,22 +2042,6 @@ async def build_registry(
         kuzu_id = e.get("id", "").strip()
         if not kuzu_id and tier in (1, 2):
             missing_ids.append(e["name"])
-        # 决策权判定：tier1 + Agent + 未被机构名模式命中 → 最高层决策实体
-        bt = e.get("base_type", "Unknown")
-        is_agent = (
-            tier == 1 and bt == "Agent"
-            and e["name"] not in pre_l2_tier3
-        )
-        if is_agent and force_t3_sub_pats:
-            nm = e["name"]
-            if nm not in sovereign_names_set:
-                for pat in force_t3_sub_pats:
-                    if pat in nm:
-                        for sn in sovereign_names_set:
-                            if nm.startswith(sn) or sn.startswith(nm[:2]) or (len(nm) >= 1 and len(sn) >= 1 and nm[0] == sn[0]):
-                                is_agent = False
-                                break
-                        break
         re = RegisteredEntity(
             id=kuzu_id,
             name=e["name"], type=e["type"], freq=e["freq"],
@@ -2143,8 +2050,6 @@ async def build_registry(
             rich_description=e["description"],
             tier=tier, tier_evidence=d.get("reason", "")[:80],
             group=d.get("group", ""),
-            base_type=bt,
-            is_decision_agent=is_agent,
         )
         registry.entities[e["name"]] = re
         if tier in (1, 2):
@@ -2163,7 +2068,7 @@ async def build_registry(
                f"注册中心: tier1={registry.tier1_count}核心 tier2={registry.tier2_count}次级 "
                f"tier3={registry.discarded}丢弃 / {registry.total}总计")
     logger.info("[EntityRegistry] tier1=%d tier2=%d tier3=%d",
-                 registry.tier1_count, registry.tier2_count, registry.discarded)
+                registry.tier1_count, registry.tier2_count, registry.discarded)
     if missing_ids:
         logger.warning("[EntityRegistry] %d tier1/2 entities missing Kuzu ID: %s",
                        len(missing_ids), ", ".join(missing_ids[:10]))
@@ -2171,21 +2076,14 @@ async def build_registry(
             log_fn("agents", f"⚠ 实体注册中 {len(missing_ids)} 个实体缺失 Kuzu ID (关系反哺将跳过): "
                    + ", ".join(missing_ids[:8]))
 
-    # ── 9a. 代码别名词典预合并（必须在 Layer3 之前执行，不依赖 skip_layer3）
-    alias_dict = _load_alias_dict(adapter)
-    if alias_dict:
-        merged_count = _pre_merge_aliases(registry, alias_dict)
-        if merged_count and log_fn:
-            log_fn("agents", f"别名预合并: {merged_count} 个实体 (代码别名)")
-
     # ── 9. Layer 3: 交叉裁决 ──
-    await _layer3_cross_validate(registry, source_material, log_fn, adapter)
+    await _layer3_cross_validate(registry, source_material, log_fn, domain)
 
     if log_fn:
         log_fn("agents", f"EntityRegistry: {registry.total} total, "
                f"tier1={registry.tier1_count} tier2={registry.tier2_count} DISCARD={registry.discarded}")
     logger.info("[EntityRegistry] 完成: tier1=%d tier2=%d / %d",
-                 registry.tier1_count, registry.tier2_count, registry.total)
+                registry.tier1_count, registry.tier2_count, registry.total)
     return registry
 
 
@@ -2198,7 +2096,7 @@ async def _layer1_shard_pipeline(
     source: str,
     freq_map: dict[str, int],
     log_fn: Any = None,
-    adapter: "DomainAdapter | None" = None,
+    domain: str = "",
 ) -> list[dict]:
     """超长文本分片路径：
     1. 滑动分片 7500+800
@@ -2208,12 +2106,10 @@ async def _layer1_shard_pipeline(
     5. LLM 全局精修 (仅裁定歧义)
     """
 
-    shard_size = adapter.params.shard_size if adapter else 7500
-    overlap = adapter.params.shard_overlap if adapter else 800
-    shards = _shard_source(source, shard_size, overlap)
+    shards = _shard_source(source)
     total = len(shards)
     if log_fn:
-        log_fn("agents", f"Layer1 超长文本({len(source)}字) → {total} 分片 (每片{shard_size}字, 重叠{overlap}字)")
+        log_fn("agents", f"Layer1 超长文本({len(source)}字) → {total} 分片 (每片{_SHARD_SIZE}字, 重叠{_SHARD_OVERLAP}字)")
 
     # 1. 实体-分片匹配
     shard_entities = _match_entities_to_shards(shards, raw_fragments)
@@ -2228,7 +2124,7 @@ async def _layer1_shard_pipeline(
     async def _run_shard(idx: int) -> list[dict]:
         async with sem:
             return await _layer1_shard_normalize(
-                shards[idx], shard_entities[idx], idx + 1, total, log_fn, adapter
+                shards[idx], shard_entities[idx], idx + 1, total, log_fn
             )
 
     tasks = [_run_shard(i) for i in range(total)]
@@ -2255,14 +2151,14 @@ async def _layer1_shard_pipeline(
         log_fn("agents", f"Layer1 内存池: {len(pool)} 局部实体 (来自 {total} 个分片)")
 
     # 4. 内存代码合并
-    merged, conflicts = _memory_merge(pool, adapter)
+    merged, conflicts = _memory_merge(pool, domain)
     if log_fn:
         log_fn("agents", f"Layer1 内存合并: {len(pool)} 局部 → {len(merged)} 预合并"
                f" (检测 {len(conflicts)} 对歧义)")
 
     # 5. LLM 精修
     try:
-        final = await _layer1_global_refine(merged, conflicts, source, log_fn, adapter)
+        final = await _layer1_global_refine(merged, conflicts, source, log_fn)
     except Exception as e:
         logger.warning("[Global Refine] LLM 精修失败: %s, 使用代码合并结果", e)
         if log_fn:

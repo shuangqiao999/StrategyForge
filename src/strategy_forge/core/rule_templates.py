@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .config import resolve_rule_dirs
+from .config import _get_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -211,24 +211,38 @@ def reload_rules() -> None:
     """
     global _RULE_CACHE, _rules_loaded_from_file
     try:
-        from .config import resolve_rule_dirs
+        data_dir = _get_data_dir()
     except Exception:
         logger.warning("[rule_templates] 无法确定数据目录，使用兜底规则")
         _RULE_CACHE = dict(_FALLBACK_RULES)
         _rules_loaded_from_file = False
         return
 
-    bundle_dir, custom_dir = resolve_rule_dirs()
+    import os
+    rule_root = os.getenv("FORGE_RULE_DIR", "")
     loaded: dict[str, dict[str, Any]] = {}
-    if bundle_dir.is_dir():
-        # 1) 内置规则包（安装包提供或开发环境 data/rule）
-        default_file = bundle_dir / "rules.json"
-        if default_file.exists():
-            rules = _load_json_file(default_file)
-            if rules:
-                loaded.update(rules)
-                logger.info("[rule_templates] 加载内置规则: %d 个领域 (%s)", len(rules), bundle_dir)
+    if rule_root:
+        bundle_dir = Path(rule_root)
+        if bundle_dir.is_dir():
+            # 1) 内置规则包（安装包提供）
+            default_file = bundle_dir / "rules.json"
+            if default_file.exists():
+                rules = _load_json_file(default_file)
+                if rules:
+                    loaded.update(rules)
+                    logger.info("[rule_templates] 加载内置规则(FORGE_RULE_DIR): %d 个领域", len(rules))
+    else:
+        # 开发模式：回退到 data/rule/
+        bundle_dir = data_dir / "rule"
+        if bundle_dir.is_dir():
+            default_file = bundle_dir / "rules.json"
+            if default_file.exists():
+                rules = _load_json_file(default_file)
+                if rules:
+                    loaded.update(rules)
+                    logger.info("[rule_templates] 加载内置规则(data/rule): %d 个领域", len(rules))
     # 2) 用户自定义规则（持久化目录，卸载不丢）
+    custom_dir = data_dir / "rule" / "custom"
     if custom_dir.is_dir():
         for f in sorted(custom_dir.glob("*.json")):
             rules = _load_json_file(f)
@@ -320,5 +334,41 @@ def list_domains() -> list[dict[str, str]]:
             for k, v in _RULE_CACHE.items()]
 
 
+_DOMAIN_PROMPTS: dict[str, dict[str, str]] = {}
+
+
+def reload_domain_prompts() -> None:
+    global _DOMAIN_PROMPTS
+    rule_dir = os.environ.get("FORGE_RULE_DIR")
+    if rule_dir:
+        path = Path(rule_dir) / "domain_prompts.json"
+    else:
+        path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "rule" / "domain_prompts.json"
+    if not path.exists():
+        alt = Path(_get_data_dir()) / "rule" / "domain_prompts.json"
+        if alt.exists():
+            path = alt
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        if isinstance(data, dict):
+            # Filter out metadata keys like "_comment"
+            prompts = {k: v for k, v in data.items()
+                       if not k.startswith("_") and isinstance(v, dict)}
+            if prompts:
+                _DOMAIN_PROMPTS.clear()
+                _DOMAIN_PROMPTS.update(prompts)
+                logger.info("[RuleTemplates] Loaded domain prompts: %d domains", len(_DOMAIN_PROMPTS))
+    except Exception as e:
+        logger.warning("[RuleTemplates] Failed to load domain_prompts.json: %s", e)
+
+
+def get_domain_prompt(domain: str, key: str) -> str:
+    val = _DOMAIN_PROMPTS.get(domain, {}).get(key, "")
+    if not val:
+        val = _DOMAIN_PROMPTS.get("_default", {}).get(key, "")
+    return val
+
+
 # ── 模块加载即初始化 ──
 reload_rules()
+reload_domain_prompts()

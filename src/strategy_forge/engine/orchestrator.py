@@ -42,8 +42,7 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
     """实体质量预检：对高频实体检查类型合理性 + 行动证据覆盖率。
 
     在 Phase 2 图谱构建完成后、Phase 2.5 情报整理前调用。
-    闭环：对"高频 + 拒收类型"的实体，若名称匹配领域无关主体词（国家/企业/组织/人物），
-    实际修正图中类型，使其在语义中介层归入正确基础类型（缺口2 修复）。
+    仅输出日志，不修改数据。
     """
     try:
         result = graph._conn.execute(
@@ -68,14 +67,6 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
 
     suspicious: list[str] = []
     high_freq_no_action: list[str] = []
-    corrected: list[str] = []
-
-    # 领域无关的拒收类型→正确主体类型 修正映射（名称匹配词，跨领域通用）
-    _TYPE_CORRECTIONS = [
-        (("国家", "政权", "国", "共和国", "联邦"), "国家"),
-        (("企业", "公司", "集团", "银行", "平台", "车企", "厂商", "品牌", "机构", "组织"), "企业"),
-        (("人物", "主席", "总统", "部长", "创始人", "CEO", "总裁"), "人物"),
-    ]
 
     for e in entities:
         name = str(e.get("name", "") or "").strip()
@@ -85,36 +76,16 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
 
         # 检查1：高频实体类型属于拒收类型
         if freq >= 3 and etype in _PRECheck_DISCARD_TYPES:
-            if any(kw in name for kw in _PRECheck_SKIP_KW):
-                continue
-            # 闭环修正：名称匹配主体词 → 更新图中类型
-            fixed = False
-            for kw_list, correct_type in _TYPE_CORRECTIONS:
-                if any(kw in name for kw in kw_list):
-                    try:
-                        graph._conn.execute(
-                            f"MATCH (e:{graph.NODE_TABLE} {{name: $n}}) "
-                            "SET e.type = $t",
-                            {"n": name, "t": correct_type},
-                        )
-                        corrected.append(f"{name}({etype}→{correct_type})")
-                        fixed = True
-                    except Exception as _e:
-                        logger.warning("[Precheck] 修正 %s 类型失败: %s", name, _e)
-                    break
-            if not fixed:
+            if not any(kw in name for kw in _PRECheck_SKIP_KW):
                 suspicious.append(f"{name}(type={etype}, freq={freq})")
 
         # 检查2：高频实体但描述中无行动动词（描述为空或仅含静态词）
         if freq >= 5 and etype not in _PRECheck_DISCARD_TYPES:
             action_kw = ("制裁", "攻击", "签署", "宣布", "部署", "发动",
-                         "出口", "进口", "限制", "投资", "谈判")
+                          "制裁", "出口", "进口", "限制", "投资", "谈判")
             if not desc or not any(kw in desc for kw in action_kw):
                 high_freq_no_action.append(f"{name}(freq={freq})")
 
-    if corrected:
-        log_fn("graph",
-               f"预检修正: {len(corrected)} 个高频实体类型已纠正 → {', '.join(corrected[:8])}")
     if suspicious:
         log_fn("graph",
                f"预检: {len(suspicious)} 个高频实体归类可能不当 → {', '.join(suspicious[:8])}")
@@ -122,7 +93,7 @@ def _precheck_entity_quality(graph, preprocessor, log_fn) -> None:
         log_fn("graph",
                f"预检: {len(high_freq_no_action)} 个高频实体描述缺少行动证据 → {', '.join(high_freq_no_action[:8])}")
 
-    if not suspicious and not high_freq_no_action and not corrected:
+    if not suspicious and not high_freq_no_action:
         logger.info("[Precheck] 实体质量预检通过 (n=%d)", len(entities))
 
 
@@ -142,7 +113,6 @@ class DeductionOrchestrator:
         round_callback: Callable[[int, int], None] | None = None,
         resume_start_round: int = 0,
         fsm_override_store: dict | None = None,
-        injected_events_store: dict | None = None,
     ) -> None:
         self.session = session
         self.graph = graph
@@ -152,8 +122,6 @@ class DeductionOrchestrator:
         self._round_callback = round_callback
         self._resume_start_round = resume_start_round
         self._fsm_override_store = fsm_override_store if fsm_override_store is not None else {}
-        # 融合架构·盲点4：外部注入事件队列（按引用，供 SimulationEngine 通道①消费）
-        self._injected_events_store = injected_events_store if injected_events_store is not None else {}
         # 量化模式状态（rule_engine 非空即量化）
         self._rule_engine: Any = None
         self._states: dict[str, Any] = {}
@@ -283,7 +251,6 @@ class DeductionOrchestrator:
 
         # 2. 恢复规则包
         domain = (cfg.get("domain") or "").strip()
-        self._domain = domain if domain else "narrative"
         custom = cfg.get("custom_rules")
         if domain and domain != "narrative":
             from .rule_engine import RuleEngine
@@ -350,7 +317,7 @@ class DeductionOrchestrator:
                     preprocessor=getattr(self, "_preprocessor", None),
                     intel_list=getattr(self, "_intel_list", None) or None,
                     source_material=self.session.source_material,
-                    domain=getattr(self, "_domain", "narrative"),
+                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
                     log_fn=self._log,
                 )
                 agents = await create_agents_from_graph(
@@ -358,7 +325,7 @@ class DeductionOrchestrator:
                     source_material=self.session.source_material,
                     log_fn=self._log,
                     preprocessor=self._preprocessor,
-                    domain=getattr(self, "_domain", "narrative"),
+                    domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
                     entity_registry=entity_registry,
                 )
                 self._agents = agents
@@ -375,7 +342,6 @@ class DeductionOrchestrator:
                 st = self._rule_engine.init_state(
                     raw.get("id", eid),
                     raw.get("name", eid),
-                    base_type=raw.get("base_type", "Agent"),
                 )
                 st.metrics = dict(raw.get("metrics", {}))
                 st.history = list(raw.get("history", []))
@@ -427,21 +393,7 @@ class DeductionOrchestrator:
         self._weather = str(cfg.get("weather", "") or "").strip()
         self._terrain = str(cfg.get("terrain", "") or "").strip()
         domain = (cfg.get("domain") or "narrative").strip()
-        self._domain = domain
         custom = cfg.get("custom_rules")
-
-        # 检查域是否支持量化模式（通过 domain adapter flag）
-        if domain not in ("", "narrative"):
-            try:
-                from strategy_forge.engine.domain_adapter import get_adapter
-                ad = get_adapter(domain)
-                if not ad.layer.quantified_supported:
-                    self._log("quantify", f"域 '{domain}' 不支持量化推演（仅叙事模式），已自动切换")
-                    self._rule_engine = None
-                    return
-            except Exception:
-                pass  # adapter 加载失败时，继续尝试加载规则包
-
         if domain in ("", "narrative"):
             self._rule_engine = None
             return
@@ -462,19 +414,6 @@ class DeductionOrchestrator:
                     return
                 self._rule_engine = RuleEngine.from_domain(detected)
                 self._log("quantify", f"识别领域: {self._rule_engine.pack.get('display_name', detected)}")
-                # 缺陷3 修复：将探测结果回写 config，保证 is_quantified_session /
-                # 暂停恢复 与规则包一致（否则 auto 会话恢复时 from_domain("auto") 抛异常回退叙事）
-                self._domain = detected
-                try:
-                    _data = self.store.get(self.session.id) or {}
-                    _cfg = (_data.get("config_json", {}) or {})
-                    if isinstance(_cfg, str):
-                        _cfg = _json.loads(_cfg)
-                    _cfg["domain"] = detected
-                    self.store.update(self.session.id,
-                                      config_json=_json.dumps(_cfg, ensure_ascii=False))
-                except Exception as _e:
-                    logger.warning("[Orchestrator] 回写探测领域失败: %s", _e)
             else:
                 self._rule_engine = RuleEngine.from_domain(domain)
                 self._log("quantify", f"阶段1.5: 使用领域规则包: {self._rule_engine.pack.get('display_name', domain)}")
@@ -538,12 +477,8 @@ class DeductionOrchestrator:
                 from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                 entity_names = list(self.graph.get_entity_names())
                 domain = self._rule_engine.domain
-                from strategy_forge.engine.domain_adapter import get_adapter
-                dr = ""
-                try:
-                    dr = get_adapter(domain).prompts.intel_extra_rules or ""
-                except Exception:
-                    pass
+                from strategy_forge.core.rule_templates import get_domain_prompt
+                dr = get_domain_prompt(domain, "intel_extra_rules")
                 if dr:
                     self._log("graph", f"领域 {domain} 自定义筛选规则已启用（{len(dr)} chars）")
                 self._intel_list = await sort_entities(
@@ -623,19 +558,6 @@ class DeductionOrchestrator:
                         e["aliases"] = aliases
                         break
 
-        # ── 图谱补全：为孤立实体自动添加中性/互补关系边 ──
-        from strategy_forge.core.config import config as _cfg
-        # 优先从会话配置读取，其次用环境变量，默认 1
-        data = self.store.get(self.session.id) or {}
-        user_cfg = (data.get("config_json", {}) or {})
-        min_nb = int(user_cfg.get("graph_min_neighbors",
-                    getattr(_cfg, "deduction_graph_min_neighbors", 1)))
-        min_nb = max(0, min(3, min_nb))
-        if min_nb > 0:
-            added_edges = self.graph.ensure_min_edges(min_neighbors=min_nb)
-            if added_edges:
-                self._log("graph", f"图谱补全: 新增 {added_edges} 条合成关系边 (阈值={min_nb})")
-
     async def _phase3_agents(self) -> None:
         _current_phase.set("agents")
         self._check_cancel()
@@ -657,10 +579,11 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             intel_list=getattr(self, "_intel_list", None) or None,
             source_material=self.session.source_material,
-            domain=getattr(self, "_domain", "narrative"),
+            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
             log_fn=self._log,
         )
         self._log("agents", f"注册中心: {entity_registry.kept}/{entity_registry.total} 实体保留为博弈者")
+        self._log("agents", f"  排除明细: {' | '.join(f'{k}:{v}' for k,v in sorted(entity_registry.discard_reasons.items()))}")
 
         agents = await create_agents_from_graph(
             graph=self.graph,
@@ -669,7 +592,7 @@ class DeductionOrchestrator:
             preprocessor=getattr(self, "_preprocessor", None),
             pre_interventions=pre_goals if pre_goals else None,
             intel_list=getattr(self, "_intel_list", None) or None,
-            domain=getattr(self, "_domain", "narrative"),
+            domain=getattr(self._rule_engine, "domain", "") if self._rule_engine else "",
             entity_registry=entity_registry,
         )
         self.session.agent_count = len(agents)
@@ -729,15 +652,14 @@ class DeductionOrchestrator:
                     self._log("simulation", f"种子数据提取失败，使用规则包默认值: {e}")
 
             for a in self._agents:
-                bt = getattr(a, "base_type", "Agent") or "Agent"
-                st = re_engine.init_state(a.entity_id, a.name, base_type=bt)
-                # Apply seed overrides if any
+                init = dict(re_engine.pack["initial_metrics"])
                 overrides = seed_metrics.get(a.name, {})
-                if overrides:
-                    for m, v in overrides.items():
-                        if m in st.metrics:
-                            st.metrics[m] = float(v)
-                states[a.entity_id] = st
+                for m, v in overrides.items():
+                    if m in init:
+                        init[m] = float(v)
+                states[a.entity_id] = EntityState(
+                    id=a.entity_id, name=a.name, domain=re_engine.domain,
+                    metrics=init, history=[])
             self._states = states
             self._log("simulation",
                       f"阶段4: 量化并行模拟开始 ({total_rounds} 轮, {len(states)} 个量化实体, "
@@ -781,9 +703,6 @@ class DeductionOrchestrator:
             seed=abs(hash(self.session.id)) % (2**31),
             algorithm_modules=algorithm_modules,
             fsm_override_store=self._fsm_override_store,
-            injected_events_store=self._injected_events_store,
-            domain=getattr(self, "_domain", ""),
-            relation_polarity=self._build_relation_polarity_map(),
         )
         self._engine = engine
 
@@ -861,35 +780,8 @@ class DeductionOrchestrator:
                           status=SessionStatus.REPORTING.value,
                           phase=DeductionPhase.REPORT.value)
 
-    def _build_relation_polarity_map(self) -> dict[str, str]:
-        """组装关系→敌友极性映射（Layer A）：ontology 标注 + 领域适配器覆盖。"""
-        from strategy_forge.engine.domain_adapter import get_adapter
-        from strategy_forge.engine.relation_polarity import merge_polarity_map
-
-        maps: list[dict | None] = []
-        if self.session.ontology:
-            onto_map = {}
-            for r in self.session.ontology.relations:
-                if getattr(r, "polarity", "neutral") in ("foe", "ally"):
-                    onto_map[r.name] = r.polarity
-            if onto_map:
-                maps.append(onto_map)
-        try:
-            adapter = get_adapter(getattr(self, "_domain", ""))
-            adapter_map = adapter.methodology.get("relation_polarity", {}) or {}
-            if adapter_map:
-                maps.append(adapter_map)
-        except Exception:
-            pass
-        merged = merge_polarity_map(*maps)
-        if merged:
-            self._log("simulation",
-                      f"关系极性映射(Layer A): {len(merged)} 种 — "
-                      + ", ".join(f"{k}={v}" for k, v in sorted(merged.items())))
-        return merged
-
     async def _check_goal_convergence(self, rounds: list[SimulationRound]) -> tuple[bool, str]:
-        """用 LLM 判定推演核心问题是否已可基于事件给出明确、可辩护的答案。
+        """用 LLM 判定推演核心问题是否已可基于事件给出明确答案。
 
         返回 (resolved, verdict)。resolved=True 时 verdict 为答案+依据；
         False 时 verdict 为缺失的决定性条件（可为空）。判定失败一律视为未收敛。
@@ -903,48 +795,34 @@ class DeductionOrchestrator:
         events: list[str] = []
         for r in rounds[-12:]:
             for act in r.actions:
-                # 消上帝视角F6: 收敛裁判只基于公开事件
-                if hasattr(act, "metadata") and isinstance(act.metadata, dict):
-                    if act.metadata.get("visibility", "public") in ("private", "alliance"):
-                        continue
                 who = name_map.get(act.agent_id, act.agent_id[:8])
-                events.append(f"[轮{r.round_number}] {who}: {act.content[:80]}")
+                events.append(f"[轮{r.round_number}] {who}: {act.content[:60]}")
         if not events:
             return False, ""
 
         goals_text = "；".join(getattr(self, "_pre_goals", []))
         prompt = (
-            "你是推演裁判。你的唯一任务：基于近期事件序列，判断推演核心问题是否已经有明确、可辩护的答案。\n\n"
-            "## 判定标准（三个条件都满足才判定为已收敛）\n"
-            "1. **答案明确**：核心问题可以直接用一句话回答（如'X公司通过Y策略走出了价格战陷阱'）\n"
-            "2. **证据充分**：答案中的每个关键论断都有 ≥2 个独立事件的支撑（事件=智能体行动，非背景描述）\n"
-            "3. **力量对比已变**：事件序列显示了决定性变化（某方获得压倒性优势/对手被淘汰或屈服/格局已不可逆）\n\n"
-            "## 判定标准（任何一个满足即判定为未收敛）\n"
-            "1. 局势仍胶着：各方仅试探、表态、观察，无决定性行动\n"
-            "2. 答案依赖种子材料的背景信息而非推演中生成的事件\n"
-            "3. 核心问题涉及多方，但仅有1-2方的行动被覆盖\n"
-            "4. 答案模糊或使用了'可能/也许/倾向于'等不确定表述\n\n"
-            "## 核心问题\n"
-            f"{goals_text}\n\n"
+            "你是推演裁判。基于近期事件，判断推演核心问题是否已经可以给出明确、可辩护的答案。\n"
+            "只有当事件序列显示出决定性的力量对比变化（如某方掌握了压倒性筹码、对手被淘汰或屈服）时才判定为已收敛；"
+            "局势仍胶着、各方仅在试探或表态时判定为未收敛。\n\n"
+            "## 示例\n"
+            '已收敛：{"resolved": true, "verdict": "A公司通过价格战+收购完成市场垄断，竞争对手C已退出。关键依据：[事件5]的降价+[事件12]的收购"}\n'
+            '未收敛：{"resolved": false, "verdict": "各方仍在试探性外交，尚未出现决定性军事行动或实质性联盟破裂"}\n\n'
+            f"## 核心问题\n{goals_text}\n\n"
             "## 近期事件\n" + "\n".join(events[-40:]) + "\n\n"
             '## 输出 JSON（纯 JSON）\n'
-            '{"resolved": true或false, '
-            '"verdict": "若已收敛：[明确答案]+[关键事件编号作为证据](≤100字)；'
-            '若未收敛：缺失什么决定性事件(≤40字)"}'
+            '{"resolved": true或false, "verdict": "若已收敛：明确答案+关键依据(80字内)；'
+            '若未收敛：还缺什么决定性事件(40字内)"}'
         )
         try:
             client = LLMClient()
             resp = await client.chat_json(
                 [Message(role="user", content=prompt)],
-                system="你是推演收敛判定裁判，严格按三条件判定，只输出 JSON。",
-                schema_name="convergence", temperature=0.2, max_tokens=400)
+                system="你是推演收敛判定裁判，只输出 JSON。",
+                schema_name="convergence", temperature=0.2, max_tokens=300)
             data = extract_json(extract_text(resp))
             if isinstance(data, dict):
-                resolved = bool(data.get("resolved"))
-                verdict = str(data.get("verdict", ""))[:200]
-                if resolved and len(verdict) < 20:
-                    resolved = False
-                return resolved, verdict
+                return bool(data.get("resolved")), str(data.get("verdict", ""))[:200]
         except Exception as e:
             logger.debug("[Orchestrator] 目标收敛判定失败(忽略): %s", e)
         return False, ""
@@ -965,7 +843,6 @@ class DeductionOrchestrator:
             thresholds=self._rule_engine.pack.get("thresholds", {}) if self._rule_engine else None,
             goal_resolution=getattr(self, "_goal_resolution", ""),
             personality_log=getattr(self, "_personality_log", []),
-            domain=getattr(self, "_domain", "narrative"),
         )
         self.session.report = report
 

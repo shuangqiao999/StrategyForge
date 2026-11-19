@@ -8,8 +8,6 @@ import asyncio
 import json
 import logging
 import os
-import re
-import threading
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -70,10 +68,6 @@ class InterventionRequest(BaseModel):
     content: str = Field(default="", description="用户干预内容")
     scope: str = Field(default="during", description="pre | during")
     round_number: int | None = Field(None, description="指定生效轮次")
-    # 融合架构·盲点4：可选结构化事件字段。提供 event_type 时走规则包 event_impact 通道①
-    # 确定性冲击相关实体指标；仅 content 时保持原有文字提示行为。
-    event_type: str | None = Field(None, description="事件类型（匹配规则包 event_impact）")
-    target_id: str = Field(default="", description="冲击目标实体ID/名称（可选，默认发起者自身）")
 
 
 class FsmOverrideRequest(BaseModel):
@@ -142,7 +136,7 @@ async def create_session(req: CreateSessionRequest, request: Request):
 @router.get("/session/{session_id}")
 async def get_session(session_id: str, request: Request):
     engine = _get_engine(request)
-    session = await asyncio.to_thread(engine.get_session, session_id)
+    session = engine.get_session(session_id)
     if session is None:
         raise HTTPException(404, "Session not found")
     return {
@@ -156,9 +150,9 @@ async def get_session(session_id: str, request: Request):
 
 
 @router.get("/sessions")
-async def list_sessions(request: Request = None):
+async def list_sessions(limit: int = Query(50, ge=1, le=200), request: Request = None):
     engine = _get_engine(request)
-    return await asyncio.to_thread(engine.list_sessions)
+    return engine.list_sessions(limit=limit)
 
 
 @router.delete("/session/{session_id}")
@@ -256,11 +250,10 @@ async def resume_deduction(session_id: str, request: Request):
         raise HTTPException(404, "Session not found")
     if session.status != SessionStatus.PAUSED:
         raise HTTPException(409, f"无法继续：当前状态为 {session.status.value}")
-    cancels = _ded_cancel_state(request.app)
-    if session_id in cancels and not cancels[session_id].is_set():
-        raise HTTPException(409, "该会话的推演任务正在运行中")
     engine.log(session_id, "control", "用户继续推演")
+    # Re-use /start logic which handles paused→resume
     cancel_event = asyncio.Event()
+    cancels = _ded_cancel_state(request.app)
     cancels[session_id] = cancel_event
     asyncio.create_task(_run_deduction(engine, session_id, cancel_event, cancels))
     return {"session_id": session_id, "status": "resuming"}
@@ -426,32 +419,8 @@ async def intervene_session(session_id: str, req: InterventionRequest, request: 
             round_number=round_num,
             event_type="user_intervention", priority=1.0,
         )
-        # 融合架构·盲点4：可选结构化事件 → 走规则包 event_impact 通道①确定性冲击指标。
-        # 修复A：仅量化模式支持数值冲击；叙事模式忽略 event_type 并按文字提示处理，
-        # 避免"静默不生效"的误导（事件只作为决策提示，不冲击数值）。
-        quantified = engine.is_quantified_session(session_id)
-
-        if req.event_type and quantified:
-            engine.inject_system_event(session_id, {
-                "event_type": req.event_type,
-                "content": req.content,
-                "target_id": req.target_id,
-                "round": round_num,
-            })
-            engine.log(session_id, "intervene",
-                       f"注入系统事件(数值冲击): {req.event_type} → {req.target_id or session_id}")
-            return {"session_id": session_id, "injected": True, "round_number": round_num,
-                    "event_type": req.event_type, "mode": "quantified"}
-        if req.event_type and not quantified:
-            # 叙事模式：不注入数值冲击，仅作为文字提示（避免静默无效）
-            engine.log(session_id, "intervene",
-                       f"用户干预(叙事模式，event_type忽略): {req.content}")
-            return {"session_id": session_id, "injected": True, "round_number": round_num,
-                    "event_type": req.event_type, "mode": "narrative",
-                    "note": "叙事模式不支持数值冲击，已按文字提示注入"}
         engine.log(session_id, "intervene", f"用户干预: {req.content}")
-        return {"session_id": session_id, "injected": True, "round_number": round_num,
-                "event_type": "user_intervention", "mode": "narrative" if not quantified else "quantified"}
+        return {"session_id": session_id, "injected": True, "round_number": round_num}
     except Exception as e:
         raise HTTPException(500, f"干预注入失败: {e}")
 
@@ -534,8 +503,6 @@ async def upload_rules(body: RulesUpload, request: Request):
     dom = (body.domain or "").strip()
     if not dom:
         raise HTTPException(400, "domain 不能为空")
-    if not re.match(r'^[a-zA-Z0-9_\-]+$', dom):
-        raise HTTPException(400, "domain 只能包含字母、数字、下划线和连字符")
     try:
         rule = json.loads(body.content)
     except json.JSONDecodeError:
@@ -723,17 +690,12 @@ async def stream_deduction(session_id: str, request: Request):
     )
 
 
-_engine_lock = threading.Lock()
-
 def _get_engine(request: Request):
-    """Lazy-init the DeductionEngine on the FastAPI app state (thread-safe)."""
+    """Lazy-init the DeductionEngine on the FastAPI app state."""
     engine = getattr(request.app.state, "forge_engine", None)
     if engine is None:
-        with _engine_lock:
-            engine = getattr(request.app.state, "forge_engine", None)
-            if engine is None:
-                from strategy_forge.core.config import config
-                from strategy_forge.engine.engine import DeductionEngine
-                engine = DeductionEngine(config.project_root)
-                request.app.state.forge_engine = engine
+        from strategy_forge.core.config import config
+        from strategy_forge.engine.engine import DeductionEngine
+        engine = DeductionEngine(config.project_root)
+        request.app.state.forge_engine = engine
     return engine

@@ -49,8 +49,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ('data/rule/rules.json', 'data/rule'),
-        ('data/domain_adapters/*.yaml', 'data/domain_adapters'),
-        ('data/methodology.yaml', 'data'),
+        ('data/rule/domain_prompts.json', 'data/rule'),
+        ('data/rule/entity_alias.json', 'data/rule'),
+        ('data/rule/layer3_config.yaml', 'data/rule'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

@@ -60,18 +60,16 @@ $turning_points
 返回 JSON，包含四个字段：
 
 1. **"narrative"**：完整推演报告（800-2000字）。
-   - **开篇样式（强制，最高优先级）**：开篇是唯一的无标题段（`###` 之前），第一句话直接点明全局核心矛盾——如"当前，X与Y围绕Z的争夺已进入白热化，供应链危机与研发消耗正在改写既有格局"。现实中的战略报告开篇从不先写日期或环境铺陈，而是直接亮明核心判断。开篇**禁止**：任何日期/时间表述（年/月/日/季度/"今年"）、"报告显示""推演表明""第X轮推演中"等废话、任何环境/背景铺垫。
    - **硬性要求**：正文必须至少引用 3 条下方「关键事件序列」中的[事件N]编号，作为因果链锚点。
    - **硬性要求**：正文每个维度段落**必须**以 `### 维度名` 开头（如 `### 科技竞赛`、`### 区域安全`），禁止写成无标题的平铺段落。
-   - **全文禁日期**：全文（含正文各维度段）严禁出现任何日期/时间背景表述（如"2026年""7月""15日""第3季度""今年""当前月份"）——推演是方向性预估，不设定具体时间线，一律用"当前""现阶段""近期"等无时间词。
+   - 开篇（150字内）：作为全文第一个 `###` 段落之前的引入段，直接点明全局核心矛盾与主要博弈轴线。禁用"报告显示""推演表明""第X轮推演中"等废话。
    - 正文：按战略维度分段，每段以 `### ` 开头。因果句格式：`[事件N]中A的[动作] → B的[领域]发生[变化] → 迫使B[反制]`。
-    - 结尾（150字内）：总览系统级风险与胜负手临界点。
-    - **严禁输出任何具体数值/百分比/评分/指标读数**（如"62%""30%-60%""Δ15"）。推演是方向性预估，写精确数字会显得不专业且误导读者——就像真实战略报告不会声称"份额正好是62%"。表达程度只能用定性趋势词：高位/中位/偏低/低位承压/显著上升/下降/趋稳/逼近淘汰线/临界点/大幅/显著/承压。禁止编造任何现实中不存在的精确数字。
-    - 若确实需要强调某方优势或劣势，用"占据市场主导地位""份额优势明显""现金流吃紧""逼近淘汰线"等定性表述，不得附具体数字。
+   - 结尾（150字内）：总览系统级风险与胜负手临界点。
+   - 严禁输出任何具体数值/评分，不得出现 JSON、表格或项目符号列表。
 
    正确正文格式示例：
    ```
-   开篇引入段（无标题，直接进入分析，点明全局核心矛盾——"当前，X与Y围绕Z的争夺已进入白热化，供应链危机与研发消耗的双重压力正在改写既有格局"，不得出现时间词）...
+   开篇引入段（无标题，直接进入分析）...
 
    ### 核心博弈维度一
    [事件4]中A方的关键动作 → 直接导致B方的关键指标发生方向性变化 → 迫使B方转而采取反制策略（[事件7]），试图以优势对冲风险。B方虽在某领域占优，但在另一领域已逼近临界点，不得不承受调整的代价。
@@ -121,12 +119,10 @@ $immutable_goals
 8. $output_length 字左右。
 9. 避免宏大叙事词汇。禁止使用"胜利""灵魂""升华""永恒""神圣""注定""命运的齿轮"等过度拔高的词。保持克制、冷静的文学语调，像好的新闻特稿而非史诗。
 10. 同一角色最多出现 3~4 个关键场景。如果角色在多个轮次做了类似的事，只写最有张力的那一次，不要反复描述同一行为模式。
-11. **禁止虚构具体日期**：不要在故事中写"2026年X月X日""X月X日"等具体日期。用"深夜""周三下午""年初""季度末""数周后"等语境时间代替。
-12. **禁止虚构具体数值**：不要在故事中写"62%""30%-60%""150亿""1.2倍"等具体数字或百分比。推演是方向性预估，具体数字会误导读者。用"占据市场主导地位""大幅提价""巨额投入""份额优势明显""现金流吃紧"等定性表述代替。允许使用"数成""翻倍""过半"等模糊量词。
 
 ## 叙事风格示例
 好的叙事（具体场景，有人物，有情感落点）：
-  "深夜，Alex站在公司天台。手机上是刚签发的邮件——他同意了收购。三年前他在这里发誓要独立上市。现在楼下的路灯拉长了他的影子，比记忆中任何时刻都要孤独。"
+  "3月15日深夜，Alex站在公司天台。手机上是刚签发的邮件——他同意了收购。三年前他在这里发誓要独立上市。现在楼下的路灯拉长了他的影子，比记忆中任何时刻都要孤独。"
 不好的叙事（总结式，无场景，无情感）：
   "第5轮，Alex决定接受收购。这标志着竞争转折点的到来。经过多轮博弈，各方力量此消彼长。"
 ## 角色档案
@@ -160,7 +156,6 @@ _CONFLICT_KW = (
     "并购", "收购", "罢免", "起诉", "诉讼", "摊牌", "决裂", "反制", "曝光",
     "架空", "逼宫", "收买", "渗透", "通敌", "举报", "证据", "秘密资金",
     "情报交易", "联盟", "联合", "翻盘", "夺权", "继承权", "遗嘱",
-    "封锁", "制裁", "断交", "围堵", "禁令", "断供",
 )
 
 _TREND_KW = (
@@ -168,32 +163,16 @@ _TREND_KW = (
     "推动", "推进", "建设", "构建", "建立", "启动", "部署", "发布",
     "投资", "融资", "扩产", "招聘", "培训", "签约", "交付", "上线",
     "谈判", "协商", "提议", "建议", "申请", "批准", "授权", "签署",
-    "认证", "开源", "标准化", "减排", "修复", "再生",
 )
 
 
-def _get_domain_event_kw(domain: str, kw_type: str) -> tuple[str, ...]:
-    """从 DomainAdapter 读取域专属事件采样关键词，与通用默认合并。"""
-    extra: list[str] = []
-    try:
-        from strategy_forge.engine.domain_adapter import get_adapter
-        adapter = get_adapter(domain)
-        method = adapter.methodology or {}
-        raw = method.get(f"report_{kw_type}_kw", [])
-        if isinstance(raw, list):
-            extra = [str(x) for x in raw]
-    except Exception:
-        pass
-    base = _CONFLICT_KW if kw_type == "conflict" else _TREND_KW
-    return tuple(sorted(set(base + tuple(extra))))
-
-
 def _sample_arc_events(events: list[str], head_n: int = 5,
-                       conflict_n: int = 15, tail_n: int = 15,
-                       domain: str = "") -> list[str]:
-    """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。"""
-    conflict_kw = _get_domain_event_kw(domain, "conflict") if domain else _CONFLICT_KW
-    trend_kw = _get_domain_event_kw(domain, "trend") if domain else _TREND_KW
+                       conflict_n: int = 15, tail_n: int = 15) -> list[str]:
+    """全程弧线采样：开局锚点 + 高冲突事件 + 尾部近期事件。
+
+    事件总数 <= (head+conflict+tail) 时全量返回；超长推演（50轮+）自动
+    扩容比例——固定采样量在全本推演中会丢弃 95% 的事件，报告失去因果链。
+    """
     # 超长推演：conflict_n 随事件量线性扩容（取总数 15%，保底 15）
     total = len(events)
     if total > 200:
@@ -206,7 +185,7 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     middle = events[head_n:-tail_n]
     scored: list[tuple[int, int, str]] = []
     for idx, e in enumerate(middle):
-        hits = sum(1 for kw in conflict_kw if kw in e)
+        hits = sum(1 for kw in _CONFLICT_KW if kw in e)
         if hits > 0:
             scored.append((hits, idx, e))
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -215,7 +194,7 @@ def _sample_arc_events(events: list[str], head_n: int = 5,
     # 平缓事件采样通道：商业/科技推演缺少冲突关键词 → 补趋势型事件
     trend_scored: list[tuple[int, int, str]] = []
     for idx, e in enumerate(middle):
-        hits = sum(1 for kw in trend_kw if kw in e)
+        hits = sum(1 for kw in _TREND_KW if kw in e)
         if hits > 0:
             trend_scored.append((hits, idx, e))
     trend_scored.sort(key=lambda x: (-x[0], x[1]))
@@ -354,12 +333,7 @@ def _build_quantified_summary(
             segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh}{qualifier})")
 
         parts.append(f"{name}: {'; '.join(segs) if segs else '无关键指标'}")
-    return "\n".join(parts) + (
-        "\n\n【数值使用说明】以上为推演真实指标的趋势定性（档位/趋势/累计变化/淘汰线），"
-        "仅作你的分析依据。报告正文严禁引用任何具体数值/百分比/读数，只能使用定性词"
-        "（高位/中位/偏低/低位承压/显著上升/下降/趋稳/逼近淘汰线/临界点）。"
-        "Δ 等变化量仅用于你判断方向，不得写入报告。"
-    )
+    return "\n".join(parts)
 
 
 async def generate_report(
@@ -374,7 +348,6 @@ async def generate_report(
     goal_resolution: str = "",
     personality_log: list[dict[str, Any]] | None = None,
     entity_registry: Any = None,
-    domain: str = "",
 ) -> DeductionReport:
     from strategy_forge.core.config import config
     from strategy_forge.core.providers import registry as _reg
@@ -395,10 +368,6 @@ async def generate_report(
 
     for rnd in rounds:
         for action in rnd.actions:
-            # 消上帝视角F3/F4: 跳过私有事件，不暴露给报告读者
-            if hasattr(action, "metadata") and isinstance(action.metadata, dict):
-                if action.metadata.get("visibility", "public") in ("private", "alliance"):
-                    continue
             brief = action.content[:60].split("，")[0]
             key_events.append(f"[轮{rnd.round_number}] "
                                f"{_agent_name(action.agent_id)}: "
@@ -414,7 +383,7 @@ async def generate_report(
         try:
             query = (session.title or session.source_material[:200] or "关键转折与冲突").strip()
             recalled = preprocessor.retrieve_dynamic_events(query, max(_reg.retrieve_top_k, 10),
-                min_similarity=_reg.similarity_threshold, observer="__report__")
+                min_similarity=_reg.similarity_threshold)
             for c in recalled:
                 line = f"[语义召回] {c[:100]}"
                 if line not in key_events:
@@ -527,17 +496,8 @@ async def generate_report(
     if goal_resolution:
         immutable_goals += f"（收敛判定：{goal_resolution}）"
 
-    # ── 域标识（用于域专属事件采样）──
-    report_domain = str(domain or "").strip()
-    if not report_domain and states:
-        try:
-            first = next(iter(states.values()))
-            report_domain = getattr(first, "domain", "")
-        except (StopIteration, AttributeError):
-            pass
-
     # ── 统一弧线采样（head + conflict + tail + trend），量化/叙事双模式共用 ──
-    arc_events = _sample_arc_events(key_events, domain=report_domain)
+    arc_events = _sample_arc_events(key_events)
     if len(arc_events) < 5 and len(key_events) >= 5:
         # 采样不足5条时从原文均匀补齐，保证报告有最低锚点数
         step = max(1, len(key_events) // 5)
@@ -555,7 +515,7 @@ async def generate_report(
                            else "（用户未指定核心问题——结局需明确交代各主要角色的最终结局与格局归属，不得含糊收尾）")
         if goal_resolution:
             narrative_goals += f"\n推演中期裁判已判定收敛结果（结局必须与之一致）：{goal_resolution}"
-        arc_events = _sample_arc_events(non_recall, domain=report_domain)
+        arc_events = _sample_arc_events(non_recall)
         evolution_lines: list[str] = []
         for p in (personality_log or [])[-30:]:
             old = p.get("old_extra") or "（初始人格）"
@@ -576,7 +536,8 @@ async def generate_report(
         system = "你是叙事文学作家，撰写故事化推演叙事。只输出 JSON。"
         report_temp = 0.75
     else:
-        # 量化模式复用已采样的 arc_events（含 <5 补齐），避免冗余重采样
+        # 量化模式也使用弧线采样（与叙事模式一致），避免报告只引用尾轮事件
+        arc_events = _sample_arc_events(key_events)
         numbered = [f"[事件{i+1}] {e}" for i, e in enumerate(arc_events)]
         prompt_str = Template(_REPORT_PROMPT).substitute(
             title=session.title or "推演会话",
@@ -680,14 +641,6 @@ async def generate_report(
     narrative = str(narrative_raw) if not isinstance(narrative_raw, str) else narrative_raw
     conclusion = str(conclusion_raw) if not isinstance(conclusion_raw, str) else conclusion_raw
 
-    # 方案B：数值过滤兜底——把 LLM 可能自创的百分比/具体数字替换为定性趋势词，
-    # 防止"62%份额""提价30%-60%"等幻觉数字误导读者（推演是方向性预估）。
-    narrative = _strip_numeric_figures(narrative)
-    narrative = _dedup_paragraphs(narrative)
-    conclusion = _strip_numeric_figures(conclusion)
-    normalized_risks = [_strip_numeric_figures(r) for r in normalized_risks]
-    normalized_recs = [_strip_numeric_figures(r) for r in normalized_recs]
-
     return DeductionReport(
         session_id=session.id,
         summary=narrative,
@@ -701,35 +654,6 @@ async def generate_report(
         conclusion=conclusion,
         raw_graph_stats={"entities": session.entity_count, "relations": session.relation_count},
     )
-
-
-def _strip_numeric_figures(text: str) -> str:
-    """极简兜底：仅把 LLM 可能自创的百分比读数替换为定性词。
-
-    主防线是系统提示词（开篇明义、禁日期、禁精确数字）。
-    这里只处理最显眼的"数字+%"幻觉（如"62%份额"），防止个别漏网之鱼。
-    不处理日期、不处理普通数字——避免误伤（如"2026年""第3季度"等语境表述）。
-    保留 [事件N]、第N轮 等结构性引用。
-    """
-    import re as _re
-    if not text:
-        return text
-    # 保护 [事件N]、[轮N]、第N轮/期 等结构标记
-    _PLACEHOLDER = "\x00"
-    _protected: list[str] = []
-    def _hold(m):
-        _protected.append(m.group(0))
-        return _PLACEHOLDER
-    text = _re.sub(r'\[[^\]]*?\]', _hold, text)
-    text = _re.sub(r'第\d+(?:\.\d+)?(?:轮|期)', _hold, text)
-    # 百分比区间：30%-60% / 30~60%
-    text = _re.sub(r'[+-]?\d+(?:\.\d+)?\s*[%~－-]\s*[+-]?\d+(?:\.\d+)?\s*%?', '显著幅度', text)
-    # 单独百分比：62% / 8.5%
-    text = _re.sub(r'[+-]?\d+(?:\.\d+)?\s*%', '较大比例', text)
-    # 恢复受保护标记
-    for p in _protected:
-        text = text.replace(_PLACEHOLDER, p, 1)
-    return text
 
 
 def _parse_report_json(raw: str) -> dict[str, Any]:
@@ -746,42 +670,3 @@ def _parse_report_json(raw: str) -> dict[str, Any]:
                        type(data).__name__, (raw or "")[:200])
         return {}
     return data
-
-
-def _dedup_paragraphs(text: str) -> str:
-    """按段落（\\n\\n）分割，相邻段 trigram Jaccard > 0.7 视为重复，只保留第一段。
-
-    语言无关（中文/英文/混合均适用），解决 LLM 输出循环重复段落的顽疾。
-    """
-    if not text or len(text) < 50:
-        return text
-    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if len(paras) < 2:
-        return text
-
-    def _trigrams(s: str) -> set[str]:
-        return {s[i:i + 3] for i in range(len(s) - 2)}
-
-    result: list[str] = [paras[0]]
-    for i in range(1, len(paras)):
-        prev = result[-1]
-        curr = paras[i]
-        # 极短段落不过滤（可能是有意义的过渡句）
-        if len(curr) < 20:
-            result.append(curr)
-            continue
-        ps = _trigrams(prev)
-        cs = _trigrams(curr)
-        if not ps or not cs:
-            result.append(curr)
-            continue
-        union = len(ps | cs)
-        if union == 0:
-            result.append(curr)
-            continue
-        jaccard = len(ps & cs) / union
-        if jaccard > 0.7:
-            continue
-        result.append(curr)
-
-    return "\n\n".join(result)

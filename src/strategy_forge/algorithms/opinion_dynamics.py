@@ -8,11 +8,14 @@ Use cases: morale propagation, public trust erosion, alliance cohesion.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
 
 from .base import AlgorithmModule, ModuleContext
+
+logger = logging.getLogger(__name__)
 
 
 class OpinionDynamicsModule(AlgorithmModule):
@@ -64,13 +67,24 @@ class OpinionDynamicsModule(AlgorithmModule):
             return ctx
 
         # Build adjacency / similarity matrix
-        if self._graph_type == "social" and "social_graph" in ctx.metadata:
+        if self._graph_type == "from_metadata":
+            if "relation_graph" in ctx.metadata:
+                adj = np.array(ctx.metadata["relation_graph"], dtype=np.float64)
+            else:
+                logger.warning(
+                    "[OpinionDynamics] graph_type=from_metadata 但未提供 relation_graph，"
+                    "回退 complete graph（可能无差别趋同）"
+                )
+                adj = np.ones((n, n), dtype=np.float64)
+                np.fill_diagonal(adj, 0.0)
+        elif self._graph_type == "social" and "social_graph" in ctx.metadata:
             adj = np.array(ctx.metadata["social_graph"], dtype=np.float64)
         elif self._graph_type == "complete":
+            logger.warning(
+                "[OpinionDynamics] 使用 complete graph，所有实体互相影响，可能无差别趋同"
+            )
             adj = np.ones((n, n), dtype=np.float64)
             np.fill_diagonal(adj, 0.0)
-        elif self._graph_type == "from_metadata" and "relation_graph" in ctx.metadata:
-            adj = np.array(ctx.metadata["relation_graph"], dtype=np.float64)
         else:
             # Default "spatial": spatial-proximity based graph
             sp = ctx.spatial

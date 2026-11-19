@@ -95,7 +95,7 @@ def _build_causal_feedback(
         if items:
             parts.append("连锁反应 — " + "，".join(items[:3]))
     # 后续反应：从同一轮 event_history 中提取他人对 actor 或 target 的回应
-    reactions = _extract_reactions(actor_name, target_name, event_history, round_number, name_to_id, actor_id, actor_name)
+    reactions = _extract_reactions(actor_name, target_name, event_history, round_number, name_to_id)
     if reactions:
         parts.append("后续反应 — " + reactions)
     if not parts:
@@ -106,14 +106,12 @@ def _build_causal_feedback(
 def _extract_reactions(
     actor_name: str, target_name: str, event_history: list[dict],
     round_number: int, name_to_id: dict[str, str],
-    observer_id: str = "", observer_name: str = "",
 ) -> str:
-    """从当前轮事件历史中提取他人对 acter/target 的回应（消上帝视角L2：可见性过滤）。"""
+    """从当前轮事件历史中提取他人对 acter/target 的回应。"""
     reacting: list[str] = []
     target_events = [e for e in event_history
                      if e.get("round") == round_number
-                     and e.get("agent_name", "") not in (actor_name, "")
-                     and _is_event_visible_to(observer_id, observer_name, e)]
+                     and e.get("agent_name", "") not in (actor_name, "")]
     for e in target_events[-6:]:
         name = e.get("agent_name", "?")
         content = (e.get("content", "") or "")[:50]
@@ -169,49 +167,6 @@ def _distort_event_content(content_raw: str, distortion: float) -> str:
     return result
 
 
-# 受限可见性：这些级别的事件仅对参与者+发起者可见，不会全局广播
-_RESTRICTED_VIS = frozenset({"private", "alliance"})
-
-# 谍报暴露标记：rules.json 中 target_effects 使用此 key 表示情报获取成功
-_INTEL_EXPOSED_KEY = "_intel_exposed"
-
-
-def _is_event_visible_to(entity_id: str, entity_name: str, evt: dict) -> bool:
-    """事件可见性判定：public 全图可见，private/alliance 仅参与者/发起者可见。
-
-    供 _agent_decide 可见历史与 _dispatch_events 知识队列分发两处复用，
-    保证私密事件不会经任何途径泄漏给非参与者。
-    alliance 级别与 private 相同过滤逻辑——发起方创建事件时
-    将盟友名写入 participants 字段，即可实现盟友间情报共享。
-    """
-    vis = (evt.get("visibility", "") or "public").strip()
-    if vis not in _RESTRICTED_VIS:
-        return True
-    parts = evt.get("participants", "") or ""
-    if entity_name in parts or entity_id in parts:
-        return True
-    return evt.get("agent") == entity_id
-
-
-def _state_snapshot_sig(states: dict, alive_ids: list) -> int:
-    """计算量化状态快照的签名，用于 _other_ctxs 跨轮缓存失效判断。
-
-    仅对活体实体取 metrics（有序值元组）与 history 长度/末条哈希，成本 O(alive)。
-    """
-    parts = []
-    for eid in alive_ids:
-        st = states.get(eid)
-        if st is None:
-            continue
-        parts.append((eid, tuple(st.metrics.get(k, 0.0)
-                                 for k in sorted(st.metrics or {}))))
-        hist = getattr(st, "history", []) or []
-        if hist:
-            last = hist[-1]
-            parts.append((eid, len(hist), str(last)[:120]))
-    return hash(tuple(parts))
-
-
 class ConnectionFailureError(Exception):
     """连接故障导致推演中断（含原文，供界面日志展示）。"""
     pass
@@ -245,8 +200,6 @@ $recent_events
 - 不得重复近期动态事件中你已做过的相同行动（如果有）
 - observe 仅在没有明确威胁且局势不明时才使用——如核心目标未达成，应选择低风险主动行动而非观察
 - 行动内容必须是该角色在现实中可能采取的具体措施（30-100字）
-- 秘密行动（间谍/卧底/密谈/潜入/暗中交易等）必须在 metadata.visibility 标记为 "private"
-- 禁止在行动描述中透露其他角色不应知晓的私密信息（如他方的秘密计划/内部数据/私下布署）
 
 ## 正确示例
 {"action": "compete", "target": "竞品X", "content": "A公司宣布旗舰产品全系降价8%，同时开放核心设施给第三方合作伙伴，以价格优势和生态扩张挤压对手利润空间——这一举动与其'成本控制优先'的策略一脉相承。"}
@@ -266,9 +219,13 @@ $recent_events
 只返回 JSON，不要解释。"""
 
 
-# 关系→敌友的静态关键字表已迁移至 relation_polarity 模块（Layer B 兜底），
-# 结构化映射（Layer A）由 ontology/适配器提供并经 relation_polarity 参数注入。
-from strategy_forge.engine.relation_polarity import infer_polarity, merge_polarity_map
+# 关系→盟友/对手的关键词启发式（中英），用于从 Kuzu RELATES 关系反哺决策与信任。
+_REL_ALLY_KW = ("盟", "同盟", "结盟", "联盟", "支持", "合作", "友", "部下", "下属",
+                "效忠", "追随", "ally", "allied", "support", "friend", "cooperat",
+                "subordinate", "loyal")
+_REL_FOE_KW = ("敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛", "仇", "攻击",
+               "威胁", "rival", "enemy", "hostil", "oppos", "compet", "conflict",
+               "betray", "threat")
 
 
 class SimulationEngine:
@@ -304,9 +261,6 @@ class SimulationEngine:
         cancel_event: Any = None,
         algorithm_modules: list | None = None,
         fsm_override_store: dict | None = None,
-        domain: str = "",
-        relation_polarity: dict | None = None,
-        injected_events_store: dict | None = None,
     ) -> None:
         self.agents = agents
         self.graph = graph
@@ -332,19 +286,15 @@ class SimulationEngine:
         self._max_actions = max(1, int(max_actions))
         self._algorithm_modules: list = algorithm_modules or []
         self._fsm_override_store: dict = fsm_override_store if fsm_override_store is not None else {}
-        # 融合架构·盲点4：外部注入事件队列（按引用，供通道①每轮消费）
-        self._injected_events_store: dict = injected_events_store if injected_events_store is not None else {}
-        # 叙事模式环境变量（仅叙事模式使用）
-        self._narrative_env: dict[str, float] = self._init_narrative_env(domain)
-        self._domain = domain
-        self._reflection_thresholds = self._load_reflection_config(domain)
-        self._merged_triggers = self._merge_domain_triggers(domain)
-        self._severity_map = self._load_severity_map(domain)
+        # 叙事模式环境变量：舆论/抗议/媒体/国际压力/社会分裂（仅叙事模式使用）
+        self._narrative_env: dict[str, float] = {
+            "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
+            "抗议规模": 0.0,     # 0=无 50=局部 100=全城
+            "媒体关注": 20.0,    # 0=无人 50=全国 100=全球
+            "国际压力": 10.0,    # 0=无视 50=关注 100=干预
+            "社会分裂": 30.0,    # 0=团结 50=分歧 100=对立
+        }
         self._spatial_state = None   # cached SpatialState, updated after each module run
-        # 关系→敌友极性：Layer A 结构化映射（ontology+适配器）；None 时仅用 Layer B 关键字兜底
-        self._relation_polarity: dict[str, str] = merge_polarity_map(relation_polarity)
-        # Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 精判的缓存（relation → polarity）
-        self._relation_llm_overrides: dict[str, str] = {}
         from strategy_forge.core.config import config
         from strategy_forge.core.providers import registry as _reg
 
@@ -377,113 +327,20 @@ class SimulationEngine:
 
         # A. 关系反哺：开局一次性从 Kuzu 预取盟友/对手并播种信任(关系在一次推演内静态)
         self._rel_context: dict[str, dict] = {}
-        # P1#7: 量化 other_ctxs 跨轮缓存
-        self._other_ctxs_cache: dict = {}
-        self._other_ctxs_sig = None
         self._build_relationship_context()
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
 
         # ── B. 补全：无图谱关系的 agent 用 polarization 自动划分敌友 ──
         self._seed_polarization_relations(seeded)
 
-    def _init_narrative_env(self, domain: str = "") -> dict[str, float]:
-        """根据域类型初始化不同的叙事环境变量。"""
-        business_domains = {"business", "business_narrative"}
-        if domain in business_domains:
-            return {
-                "市场竞争烈度": 60.0,  # 0=垄断 50=充分竞争 100=恶性价格战
-                "资本流动性": 50.0,    # 0=枯竭 50=正常 100=过热
-                "技术壁垒高度": 40.0,  # 0=无壁垒 50=中等壁垒 100=极高壁垒
-                "监管压力": 30.0,      # 0=宽松 50=适度 100=高压
-                "消费者信心": 55.0,    # 0=恐慌 50=中性 100=狂热
-            }
-        return {
-            "舆论风向": 50.0,    # 0=批判 50=中性 100=支持
-            "抗议规模": 0.0,     # 0=无 50=局部 100=全城
-            "媒体关注": 20.0,    # 0=无人 50=全国 100=全球
-            "国际压力": 10.0,    # 0=无视 50=关注 100=干预
-            "社会分裂": 30.0,    # 0=团结 50=分歧 100=对立
-        }
-
-    def _load_reflection_config(self, domain: str) -> dict:
-        """从 methodology.yaml 加载域专属反思配置。"""
-        try:
-            from pathlib import Path
-            import yaml
-            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                thresholds = data.get("_reflection_thresholds", {}) or {}
-                domain_cfg = thresholds.get(domain, {})
-                if domain_cfg:
-                    return dict(domain_cfg)
-        except Exception:
-            pass
-        return {}
-
-    def _merge_domain_triggers(self, domain: str) -> dict[str, list[str]]:
-        """合并通用触发词与域专属触发词。"""
-        merged = dict(self._TRIGGER_RULES)
-        try:
-            from pathlib import Path
-            import yaml
-            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                domain_triggers = data.get("_domain_triggers", {}) or {}
-                extra = domain_triggers.get(domain, {})
-                if isinstance(extra, dict):
-                    for cat, kws in extra.items():
-                        if cat not in merged:
-                            merged[cat] = []
-                        merged[cat] = list(dict.fromkeys(merged[cat] + list(kws)))
-        except Exception:
-            pass
-        return merged
-
-    def _load_severity_map(self, domain: str) -> dict[str, set[str]]:
-        """加载域专属严重度映射，一次读取缓存（避免热路径反复解析 YAML）。"""
-        sev_map = {}
-        try:
-            from pathlib import Path
-            import yaml
-            path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                all_map = data.get("_severity_mapping", {}) or {}
-                domain_sev = all_map.get(domain, all_map.get("default", {}))
-                sev_map["heavy"] = set(domain_sev.get("heavy", []))
-                sev_map["medium"] = set(domain_sev.get("medium", []))
-                sev_map["light"] = set(domain_sev.get("light", []))
-        except Exception:
-            pass
-        if not sev_map:
-            sev_map = {
-                "heavy": {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"},
-                "medium": {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"},
-                "light": {"意外转折", "联盟变动", "意外成功"},
-            }
-        return sev_map
-
-    def _get_reflection_threshold(self, key: str, default: int | float) -> int | float:
-        """从 methodology 读取域专属反思阈值，无配置回退默认。"""
-        return self._reflection_thresholds.get(key, default)
-
-    def _max_persona_rules(self) -> int:
-        return int(self._get_reflection_threshold("max_persona_rules", 3))
-
-    def _classify_relation(self, relation: str) -> str:
-        # Layer A: 结构化映射（ontology + 适配器覆盖，确定性）
-        if relation in self._relation_polarity:
-            return self._relation_polarity[relation]
-        # Layer C: 单边 LLM 精判缓存（按 agent.entity_id 的邻居名索引）
-        if self._relation_llm_overrides and relation in self._relation_llm_overrides:
-            return self._relation_llm_overrides[relation]
-        # Layer B: 关键字兜底
-        return infer_polarity(relation)
+    @staticmethod
+    def _classify_relation(relation: str) -> str:
+        r = (relation or "").lower()
+        if any(k in r for k in _REL_FOE_KW):
+            return "foe"
+        if any(k in r for k in _REL_ALLY_KW):
+            return "ally"
+        return "neutral"
 
     def _build_relationship_context(self) -> None:
         """开局一次性从 Kuzu 预取各 agent 的盟友/对手(关系静态)，缓存并播种信任矩阵。
@@ -500,8 +357,6 @@ class SimulationEngine:
             return
         self._log("simulation", f"关系反哺开始: {len(self.agents)} 个智能体, 图状态={self.graph is not None}")
         total_neighbors = 0
-        # Layer C: 收集 A/B 均 neutral 的边，供开局异步精判（按关系名聚合，保留样本）
-        layer_c_pending: dict[str, list[tuple[str, str]]] = {}
         for a in self.agents:
             allies: list[str] = []
             foes: list[str] = []
@@ -516,15 +371,8 @@ class SimulationEngine:
                 nm = nb.get("name", "")
                 if not nm or nm == a.name:
                     continue
-                rel = nb.get("relation", "")
-                kind = self._classify_relation(rel)
-                if kind == "neutral":
-                    # 记录样本用于 Layer C；仅当关系名不在结构化映射且关键字也为 neutral 时
-                    if rel and rel not in self._relation_polarity:
-                        samples = layer_c_pending.setdefault(rel, [])
-                        if len(samples) < 4:
-                            samples.append((a.name, nm))
-                elif kind == "ally" and nm not in allies:
+                kind = self._classify_relation(nb.get("relation", ""))
+                if kind == "ally" and nm not in allies:
                     allies.append(nm)
                 elif kind == "foe" and nm not in foes:
                     foes.append(nm)
@@ -544,100 +392,12 @@ class SimulationEngine:
         seeded = sum(1 for v in self._rel_context.values() if v["summary"])
         if seeded:
             self._log("simulation", f"关系反哺：{seeded} 个智能体注入图谱盟友/对手并播种信任")
-        # Layer C 待精判集合（relation → 样本对），供 _run_layer_c_judgment 消费
-        self._layer_c_pending = layer_c_pending
-
-    async def _run_layer_c_judgment(self) -> None:
-        """Layer C: 对 A/B 均 neutral 的高频交互边做 LLM 批量精判，并重建关系上下文。
-
-        只执行一次（由 run_round 首次调用），失败静默回退（保持 A/B 结果）。
-        """
-        pending = getattr(self, "_layer_c_pending", {}) or {}
-        if not pending or getattr(self, "_layer_c_done", False):
-            return
-        self._layer_c_done = True
-        if self.graph is None:
-            return
-        # 过滤：精判所有出现过的 neutral 关系（>=1 样本，放宽阈值），
-        # 但设总候选数上限防一次性大量 LLM 调用（缺口5 修复）
-        candidates = {rel: samples for rel, samples in pending.items() if samples}
-        if len(candidates) > 12:
-            # 按样本数排序，优先精判出现更频繁的关系
-            candidates = dict(sorted(candidates.items(),
-                                     key=lambda kv: len(kv[1]), reverse=True)[:12])
-        if not candidates:
-            return
-        try:
-            from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
-            from strategy_forge.core.llm_client import Message
-            from strategy_forge.core.config import config
-            client = LLMClient()
-            judged: dict[str, str] = {}
-            for rel, samples in candidates.items():
-                sample_lines = "\n".join(
-                    f"- {a} → {b} 关系「{rel}」" for a, b in samples)
-                prompt = (
-                    "你是战略关系语义分析专家。判断以下实体间关系属于哪种利益极性。\n"
-                    "只输出 JSON：{\"polarity\": \"foe|ally|neutral\"}\n\n"
-                    f"{sample_lines}\n\n"
-                    "判定方法：\n"
-                    "- foe：零和/利益直接冲突/此消彼长\n"
-                    "- ally：共赢/协同/利益一致\n"
-                    "- neutral：无明确利益倾向\n"
-                    "若从样本无法判断，输出 neutral。"
-                )
-                resp = await client.chat_json(
-                    [Message(role="user", content=prompt)],
-                    system="你是战略关系语义分析专家，只输出 JSON。",
-                    schema_name="relation_polarity", temperature=0,
-                    max_tokens=min(config.deduction_intel_max_tokens, 200),
-                )
-                try:
-                    import json as _json
-                    from strategy_forge.engine._utils import extract_text as _et
-                    data = _json.loads(_et(resp))
-                    pol = str(data.get("polarity", "neutral")).strip().lower()
-                    if pol in ("foe", "ally"):
-                        judged[rel] = pol
-                except Exception:
-                    continue
-            if judged:
-                self._relation_llm_overrides.update(judged)
-                self._log("simulation",
-                          f"关系精判(Layer C): {len(judged)} 种关系升级 — "
-                          + ", ".join(f"{k}={v}" for k, v in judged.items()))
-                # 基于精判结果重建关系上下文与信任矩阵
-                self._rel_context = {}
-                self._build_relationship_context()
-        except Exception as e:
-            logger.warning("[Simulator] Layer C 关系精判失败，使用 A/B 结果: %s", e)
 
     def _seed_polarization_relations(self, graph_seeded: int) -> None:
         """对无图谱关系的 agent，按 polarization 指标自动划分敌友。
         
-        消上帝视角L3：仅扫描已知邻居（共享事件 / 图谱邻居），不遍历全体 agent 的 polarization。
+        此方法独立于 K-Graph，即使 graph=None 也会执行。
         """
-        # 构建已知邻居集合：图谱邻居 + 共享事件的 agent
-        known_neighbors: dict[str, set[str]] = {}
-        for a in self.agents:
-            kn = set()
-            # 图谱邻居
-            rel = self._rel_context.get(a.entity_id, {})
-            kn.update(rel.get("allies", []))
-            kn.update(rel.get("opponents", []))
-            # 共享事件的 agent（最近20条事件）
-            for evt in self._event_history[-20:]:
-                if evt.get("agent") == a.entity_id:
-                    tgt = evt.get("target", "")
-                    if tgt and tgt in {o.entity_id for o in self.agents}:
-                        kn.add(tgt)
-                parts = evt.get("participants", "") or ""
-                for p in parts.split(","):
-                    p = p.strip()
-                    if p and p in {o.entity_id for o in self.agents}:
-                        kn.add(p)
-            known_neighbors[a.entity_id] = kn
-
         for a in self.agents:
             if self._rel_context.get(a.entity_id, {}).get("summary"):
                 continue
@@ -647,12 +407,9 @@ class SimulationEngine:
             polar = state.metrics.get("polarization", 0)
             allies: list[str] = []
             foes: list[str] = []
-            kn = known_neighbors.get(a.entity_id, set())
             for other in self.agents:
                 if other.entity_id == a.entity_id:
                     continue
-                if other.entity_id not in kn:
-                    continue  # 仅扫描已知邻居
                 other_st = self._states.get(other.entity_id)
                 if other_st is None:
                     continue
@@ -718,18 +475,6 @@ class SimulationEngine:
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
                                   "opponents": list(v.get("opponents", []))}
                               for k, v in getattr(self, "_prev_rel_map", {}).items()},
-            # 融合架构：通道② 已触发的 (实体id, 事件名) 去重集合（list of list，JSON 可序列化）
-            "_event_trigger_fired": [
-                list(x) if isinstance(x, (tuple, list)) else [x]
-                for x in (getattr(self, "_event_trigger_fired", set()) or set())
-            ],
-            # 融合架构：已分发事件去重集合（缺陷6：纳入快照 + 有界）
-            "_dispatched_eids": list(getattr(self, "_dispatched_eids", set()) or set()),
-            # 反思机制动态塑造的行为准则：暂停恢复后不丢失（P0#2）
-            "_agent_extra_rules": {
-                a.entity_id: (a.system_prompt_extra or "")
-                for a in getattr(self, "agents", [])
-            },
         }
 
     def restore_state(self, saved: dict[str, Any]) -> None:
@@ -746,24 +491,6 @@ class SimulationEngine:
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
-        # 融合架构：恢复通道②去重集合（兼容 JSON 往返：元素可能是 tuple 或 list）
-        _fired = saved.get("_event_trigger_fired", [])
-        self._event_trigger_fired = set()
-        for _x in (_fired if isinstance(_fired, list) else []):
-            if isinstance(_x, (tuple, list)) and len(_x) == 2:
-                self._event_trigger_fired.add((str(_x[0]), str(_x[1])))
-            elif _x is not None:
-                self._event_trigger_fired.add(str(_x))
-        # 融合架构：恢复已分发事件去重集合（缺陷6）
-        _dsp = saved.get("_dispatched_eids", [])
-        self._dispatched_eids = set(_dsp) if isinstance(_dsp, list) else set()
-        # 恢复反思行为准则到 agent 对象（P0#2）
-        extra_rules = saved.get("_agent_extra_rules", {}) or {}
-        if extra_rules and getattr(self, "agents", None):
-            for a in self.agents:
-                extra = extra_rules.get(a.entity_id, "")
-                if extra:
-                    a.system_prompt_extra = extra
 
     # ── 用户强制 override ──
     def _pop_override(self, agent: Any) -> dict | None:
@@ -856,8 +583,7 @@ class SimulationEngine:
                 logger.warning("[Simulator] 动态召回失败 %s: %s", agent.name, e)
         elif not self._persist_events:
             mem = [e for e in self._event_history[-20:]
-                   if (agent.name in e.get("content", "") or e.get("agent") == agent.entity_id)
-                   and _is_event_visible_to(agent.entity_id, agent.name, e)]
+                   if agent.name in e.get("content", "") or e.get("agent") == agent.entity_id]
             if mem:
                 dynamic_text = "\n".join(f"- {e.get('content', '')[:80]}" for e in mem[-3:])
         return static_text or "无特定背景", dynamic_text or "无近期模拟事件"
@@ -921,26 +647,16 @@ class SimulationEngine:
         content = getattr(action, "content", "") or ""
         action_type = getattr(action, "action_type", "") or ""
         text = f"{action_type} {content}"
-        for category, keywords in self._merged_triggers.items():
+        for category, keywords in self._TRIGGER_RULES.items():
             for kw in keywords:
                 if kw in text:
                     severity = self._get_severity(category)
                     return category, kw, severity
         return None
 
-    def _get_severity(self, category: str) -> int:
-        """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。
-        优先使用 __init__ 缓存的 domain-specific severity mapping，无匹配回退通用默认。
-        """
-        sm = getattr(self, "_severity_map", None)
-        if sm:
-            if category in sm.get("heavy", set()):
-                return 3
-            if category in sm.get("medium", set()):
-                return 2
-            if category in sm.get("light", set()):
-                return 1
-        # 通用默认回退
+    @staticmethod
+    def _get_severity(category: str) -> int:
+        """D3: 事件权重分级。1=轻度 2=中度 3=重度 4=灾难。"""
         _heavy = {"遭攻击", "战败", "开战", "遭背叛", "关系恶化", "被胁迫", "内乱"}
         _medium = {"遭制裁", "资源危机", "情报泄露", "重大失败", "声誉危机"}
         _light = {"意外转折", "联盟变动", "意外成功"}
@@ -1092,52 +808,44 @@ class SimulationEngine:
                          state: Any = None, rule_engine: Any = None) -> str | None:
         """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
         叙事和量化模式统一调用，返回触发原因或 None。
-        阈值从 methodology.yaml 读取，无配置回退硬编码默认。
         """
         baseline = self._reflection_baselines.get(agent_id, dict(self._narrative_env))
         last_r = self._last_reflection_round_n.get(agent_id, 0)
-        drift_single = self._get_reflection_threshold("env_drift_single", 5)
-        drift_cumul = self._get_reflection_threshold("env_drift_cumulative", 12)
-        no_reflect_rounds = self._get_reflection_threshold("no_reflect_rounds", 4)
-        alarm_mult = self._get_reflection_threshold("metric_alarm_mult", 1.3)
-        self_interval = self._get_reflection_threshold("self_reflect_interval", 5)
-        pattern_cnt = self._get_reflection_threshold("pattern_warn_count", 8)
         # 条件1：环境累积剧变
         total_drift = 0.0
         for k in self._narrative_env:
             delta = self._narrative_env[k] - baseline.get(k, self._narrative_env[k])
             total_drift += abs(delta)
-            if abs(delta) > drift_single:
+            if abs(delta) > 5:
                 return f"环境剧变({k}{delta:+.0f})"
-        if total_drift > drift_cumul:
+        if total_drift > 12:
             return f"环境累计漂移({total_drift:.0f})"
-        # 条件2：关系网络变化（第1轮豁免——初始化过程中无真正"变化"可言）
-        if round_number > 1:
-            prev_rels = getattr(self, "_prev_rel_map", {})
-            curr_rels = self._rel_context.get(agent_id, {})
-            prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
-            curr_allies = set(curr_rels.get("allies", []))
-            prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
-            curr_opps = set(curr_rels.get("opponents", []))
-            if prev_allies != curr_allies or prev_opps != curr_opps:
-                return "关系网络变化"
-        # 条件3：长期无反思保护
-        if (round_number - last_r) > no_reflect_rounds:
+        # 条件2：关系网络变化
+        prev_rels = getattr(self, "_prev_rel_map", {})
+        curr_rels = self._rel_context.get(agent_id, {})
+        prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
+        curr_allies = set(curr_rels.get("allies", []))
+        prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
+        curr_opps = set(curr_rels.get("opponents", []))
+        if prev_allies != curr_allies or prev_opps != curr_opps:
+            return "关系网络变化"
+        # 条件3：长期无反思保护（超过 6 轮）
+        if (round_number - last_r) > 4:
             return "长期无反思保护"
         # 量化模式补充：指标告急触发反思
         if state is not None and rule_engine is not None:
             thr_map = getattr(rule_engine, "thresholds", lambda: {})()
             for m, v in getattr(state, "metrics", {}).items():
                 thr = thr_map.get(m, 0)
-                if thr > 0 and v <= thr * alarm_mult:
+                if thr > 0 and v <= thr * 1.3:
                     return f"指标告急({m}={v:.0f},阈={thr:.0f})"
-        # 条件5: 内源主动自省
-        if round_number > 0 and round_number % self_interval == 0:
+        # 条件5: 内源主动自省（每5轮强制触发一次）
+        if round_number > 0 and round_number % 5 == 0:
             return "内源主动自省"
-        # 条件6: D5 模式累积升级
+        # 条件6: D5 模式累积升级——同类事件 ≥5 次触发战略反思
         cat_log = self._event_category_log.get(agent_id, {})
         for cat, entries in cat_log.items():
-            if len(entries) >= pattern_cnt:
+            if len(entries) >= 5:
                 return f"模式预警({cat}×{len(entries)})"
         return None
 
@@ -1147,156 +855,7 @@ class SimulationEngine:
         if len(self._event_history) > 200:
             self._event_history = self._event_history[-200:]
 
-    def _apply_event_impacts(self, round_number: int) -> int:
-        """融合架构·通道①：本轮高优先级事件按规则包 event_impact 冲击相关实体指标。
-
-        仅量化模式（_rule_engine 非空）生效。事件只对发起者与目标实体生效，
-        一次性注入指标增量，使"制裁/并购"等事件确定性地改变局势而非仅作文字上下文。
-
-        关键（缺陷2 修复）：只处理【系统事件 / 外部注入事件】，跳过 agent 主动行动——
-        agent 主动行动的效果已由 rule_engine.compute_deltas 结算，再走事件冲击会造成双重扣减。
-        返回实际应用的事件数。
-        """
-        if not self._quantified or self._rule_engine is None:
-            return 0
-        impact_map = self._rule_engine.event_impact_map()
-        # 规则包内的 agent 可执行动作（其效果已由行动结算处理，事件冲击需跳过）
-        action_set = set(self._rule_engine.actions())
-        applied = 0
-        ranges = self._rule_engine.ranges()
-
-        # 融合架构·盲点4：消费外部注入的系统事件（注入为当前轮系统事件，随后走通道①）
-        pending = self._injected_events_store.get("pending", []) if self._injected_events_store else []
-        if pending:
-            # name→id 解析（修复缺陷4：target_id 传实体名时也能命中）
-            _name_to_id = {a.name: a.entity_id for a in getattr(self, "agents", [])}
-            for _ev in pending:
-                _et = _ev.get("event_type", "")
-                _imp = impact_map.get(_et)
-                # 自定义 impact 优先（修复缺陷5）：事件自带 impact 且未匹配规则包时使用
-                if not _imp:
-                    _imp = _ev.get("impact") if isinstance(_ev.get("impact"), dict) else None
-                _tid = str(_ev.get("target_id", "") or "").strip()
-                if _tid and _tid not in self._states and _tid in _name_to_id:
-                    _tid = _name_to_id[_tid]
-                self._append_event({
-                    "agent": "system",
-                    "agent_name": "系统",
-                    "action": "system_injected",
-                    "content": _ev.get("content", _et or "外部事件"),
-                    "round": round_number,
-                    "event_type": _et,
-                    "target_id": _tid,
-                    "is_system_event": True,
-                    "_injected_impact": _imp,
-                })
-            self._injected_events_store["pending"] = []
-
-        for evt in self._event_history:
-            if evt.get("round") != round_number:
-                continue
-            et = evt.get("event_type", "") or evt.get("action", "")
-            # 注入事件可携带自定义 impact（缺陷5）；否则查规则包映射
-            imp = evt.get("_injected_impact") or impact_map.get(et)
-            if not imp or not isinstance(imp, dict):
-                continue
-            # 跳过 agent 主动行动：避免"行动结算 + 事件冲击"双重扣减
-            if not evt.get("is_system_event") and et in action_set:
-                continue
-            targets = set()
-            if evt.get("is_system_event") and not evt.get("target_id"):
-                # 无目标指定 → 系统级事件作用于全部存活实体（修复缺陷4）
-                targets.update(eid for eid in self._states)
-            else:
-                if evt.get("agent") and evt.get("agent") in self._states:
-                    targets.add(evt["agent"])
-                if evt.get("target_id") and evt["target_id"] in self._states:
-                    targets.add(evt["target_id"])
-            for eid in targets:
-                st = self._states.get(eid)
-                if st is None:
-                    continue
-                # 修复缺陷7：不结算已出局实体（避免污染死后历史）
-                if self._rule_engine is not None and not self._rule_engine.is_alive(st):
-                    continue
-                st.apply_deltas({k: float(v) for k, v in imp.items()},
-                                round_number, ranges)
-            applied += 1
-        return applied
-
-    def _trigger_events_from_metrics(self, round_number: int) -> int:
-        """融合架构·通道②：指标越界自动生成系统事件，进入事件流反向影响决策。
-
-        仅量化模式生效。按规则包 event_triggers 对存活实体检查阈值，
-        越界则追加系统事件（is_system_event=True），事件自带冲击映射。
-        once 触发在单次推演内去重。
-        """
-        if not self._quantified or self._rule_engine is None:
-            return 0
-        triggers = self._rule_engine.event_triggers()
-        if not triggers:
-            return 0
-        if not hasattr(self, "_event_trigger_fired"):
-            self._event_trigger_fired: set = set()
-        fired = self._event_trigger_fired
-        generated = 0
-        # 不按全局 is_alive 过滤：指标越界触发的事件往往正是"濒死预警/崩溃"本身，
-        # 触发阈值可能高于死亡阈值（如 supply_chain<30 预警），过早跳过会漏掉关键转折。
-        for eid, st in self._states.items():
-            for trig in self._rule_engine.check_event_triggers(st, fired):
-                name = trig.get("event", "")
-                if not name:
-                    continue
-                if trig.get("once"):
-                    fired.add((st.id, name))
-                content = trig.get("content") or name
-                self._append_event({
-                    "agent": st.id, "agent_name": st.name,
-                    "action": "system_trigger",
-                    "content": content,
-                    "round": round_number,
-                    "event_type": name,
-                    "target_id": "",
-                    "is_system_event": True,
-                    "impact_map": trig.get("impact") or {},
-                })
-                # 事件自带冲击映射（可选）立即结算
-                imp = trig.get("impact")
-                if isinstance(imp, dict):
-                    st.apply_deltas({k: float(v) for k, v in imp.items()},
-                                    round_number, self._rule_engine.ranges())
-                # 系统事件持久化到 LanceDB（缺陷1 修复）：使其可被后续轮次语义召回，
-                # 而非仅停留在内存 _event_history 的最近几条。
-                if self._persist_events and self._preprocessor is not None:
-                    try:
-                        self._preprocessor.add_event_memory(
-                            content=content, agent_id=st.id,
-                            round_number=round_number,
-                            event_type=f"system_{name}", priority=0.9)
-                    except Exception as _e:
-                        logger.debug("[Simulator] 系统事件写入 LanceDB 失败: %s", _e)
-                # 系统事件写入 Kuzu Event 节点 + ACTED 边（缺陷2 修复）：
-                # 使系统事件在报告时间线/因果视图与暂停恢复中可见，而非仅存内存/向量库。
-                if self._persist_events and getattr(self, "graph", None) is not None:
-                    try:
-                        from datetime import datetime as _dt
-                        _eid = f"evt-{uuid.uuid4().hex[:8]}"
-                        _ts = _dt.now().isoformat()
-                        self.graph.add_event(_eid, content[:200], f"system_{name}",
-                                             _ts, st.id, round_number=round_number,
-                                             effect=", ".join(f"{k}{v:+.0f}" for k, v in (imp or {}).items()),
-                                             driver="system")
-                        self.graph.add_acted(st.id, _eid, f"system_{name}", _ts)
-                    except Exception as _e:
-                        logger.debug("[Simulator] 系统事件写入 Kuzu 失败: %s", _e)
-                generated += 1
-        return generated
-
     async def run_round(self, round_number: int) -> SimulationRound:
-        # Layer C: 首次开局精判 neutral 关系（幂等，仅一次）。
-        # 置于量化/叙事分支之前，保证两种模式都执行（Bug1 修复）。
-        await self._run_layer_c_judgment()
-
         if self._quantified:
             return await self._run_round_quantified(round_number)
 
@@ -1372,11 +931,9 @@ class SimulationEngine:
         if self._persist_events:
             for action in sim_round.actions:
                 event_id = f"evt-{uuid.uuid4().hex[:8]}"
-                _vis = (getattr(action, "metadata", {}) or {}).get("visibility", "public")
                 self.graph.add_event(
                     event_id, action.content[:200], action.action_type,
                     action.timestamp, action.agent_id,
-                    visibility=_vis,
                 )
                 self.graph.add_acted(action.agent_id, event_id, action.action_type, action.timestamp)
 
@@ -1569,7 +1126,6 @@ class SimulationEngine:
                 {"agent": e.get("agent_name", ""), "action": e.get("action", ""),
                  "content": e.get("content", "")[:80], "round": e.get("round", 0)}
                 for e in self._event_history[-8:]
-                if (e.get("visibility", "") or "public") not in _RESTRICTED_VIS
             ],
         }
 
@@ -1678,61 +1234,36 @@ class SimulationEngine:
         )
             _mt = 80
         try:
-            # P2#14: 结构化反思输出——统一约束为 JSON，替代自由文本字符串匹配。
-            # prompt 末尾追加 JSON 输出说明（不改动各 mode 模板主体）。
-            json_instruct = (
-                "\n\n## 输出（仅 JSON，无其他文字）\n"
-                '{"new_rule": "≤20字的新行为准则；无需调整时留空字符串", '
-                '"changed": true/false, "memory": "重要人际承诺/债务/背叛，无则空字符串"}'
-            )
-            resp = await client.chat_json(
-                [Message(role="user", content=prompt + json_instruct)],
-                system="你是潜意识分析师。输出结构化 JSON，new_rule 为 ≤20字中文行为准则；无需调整时 changed=false 且 new_rule 为空。",
-                schema_name="reflection_result",
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
                 temperature=0.3 if mode != "emotional" else 0.5,
                 max_tokens=_mt,
             )
             text = extract_text(resp).strip()
             if not text:
                 return False
-            try:
-                import json as _json
-                data = _json.loads(text)
-                changed = bool(data.get("changed", False))
-                rule_text = str(data.get("new_rule", "") or "").strip()
-                mem_text = str(data.get("memory", "") or "").strip()[:40]
-            except (ValueError, TypeError):
-                # 兼容：偶发非 JSON 回退自由文本解析
-                data = {}
-                changed = text not in ("", "无需调整")
-                rule_text = "" if "无需调整" in text else text
-                mem_text = ""
-            # 提取私人记忆行（结构化 memory 字段），与人格准则分离处理
-            if mem_text:
-                if not hasattr(self, "_character_journal"):
-                    self._character_journal: dict[str, list[str]] = {}
-                self._character_journal.setdefault(agent.entity_id, []).append(
-                    f"R{round_number}: {mem_text}")
-                if len(self._character_journal[agent.entity_id]) > 5:
-                    self._character_journal[agent.entity_id] = \
-                        self._character_journal[agent.entity_id][-5:]
-            if not changed or not rule_text or "无需调整" in rule_text or len(rule_text) < 2:
+            # 提取私人记忆行（"记忆：..."），与人格准则分离处理
+            if "记忆：" in text:
+                parts = text.split("记忆：", 1)
+                rule_text = parts[0].strip()
+                mem_text = parts[1].strip()[:40] if len(parts) > 1 else ""
+                if mem_text:
+                    if not hasattr(self, "_character_journal"):
+                        self._character_journal: dict[str, list[str]] = {}
+                    self._character_journal.setdefault(agent.entity_id, []).append(
+                        f"R{round_number}: {mem_text}")
+                    if len(self._character_journal[agent.entity_id]) > 5:
+                        self._character_journal[agent.entity_id] = \
+                            self._character_journal[agent.entity_id][-5:]
+                text = rule_text
+            if not text or "无需调整" in text or len(text) < 2:
                 return False
-            text = rule_text
             old_extra = agent.system_prompt_extra
-            # 去重：新准则与已有准则相似度 > 0.7 则跳过，避免反复生成近似内容
-            if old_extra:
-                existing_rules = old_extra.split("；")
-                for old in existing_rules:
-                    if old and text:
-                        common = len(set(old) & set(text))
-                        denom = max(len(set(old)), len(set(text)), 1)
-                        if common / denom > 0.7:
-                            return False
             if old_extra and text not in old_extra:
+                # 最多保留 3 条准则，超限时替换最旧
                 parts = old_extra.split("；")
-                max_rules = self._max_persona_rules()
-                if len(parts) >= max_rules:
+                if len(parts) >= 3:
                     parts = parts[1:]  # 丢弃最旧
                     agent.system_prompt_extra = "；".join(parts + [text])
                 else:
@@ -1946,15 +1477,6 @@ class SimulationEngine:
 
         total_deltas: dict[str, float] = {k: 0.0 for k in self._narrative_env}
         for action in sample:
-            # 消上帝视角L8：私有/秘密事件不应影响公众可观察的环境变量
-            action_events = [e for e in self._event_history[-50:]
-                            if e.get("agent") == action.agent_id
-                            and e.get("round") == round_number
-                            and e.get("content", "")[:30] in (action.content or "")[:30]]
-            if action_events and any(
-                (e.get("visibility", "") or "public") in _RESTRICTED_VIS for e in action_events
-            ):
-                continue
             agent_name = next((a.name for a in self.agents if a.entity_id == action.agent_id), action.agent_id[:8])
             prompt = (
                 f"你是环境观察者。角色「{agent_name}」执行了「{action.action_type}」：{action.content[:80]}\n\n"
@@ -1993,8 +1515,14 @@ class SimulationEngine:
     ) -> SimulationAction | None:
         from strategy_forge.core.config import config
         # ── 近期事件（可见性过滤：私密事件仅参与者可见）──
-        visible_history = [e for e in self._event_history
-                           if _is_event_visible_to(agent.entity_id, agent.name, e)]
+        def _visible_to_agent(e: dict) -> bool:
+            if (e.get("visibility", "") or "public") != "private":
+                return True
+            parts = e.get("participants", "") or ""
+            return (agent.name in parts or agent.entity_id in parts
+                    or e.get("agent") == agent.entity_id)
+
+        visible_history = [e for e in self._event_history if _visible_to_agent(e)]
         recent = visible_history[-max(1, config.deduction_sim_recent_events):]
         recent_text = "\n".join(
             f"- [{e.get('round', '?')}] {e.get('agent_name', e.get('agent', '?'))}: "
@@ -2030,15 +1558,9 @@ class SimulationEngine:
         from .narrative_actions import get_narrative_actions
         env_lines = [f"- {k}: {v:.0f}" for k, v in self._narrative_env.items()]
         env_text = "当前社会环境：\n" + "\n".join(env_lines) if not self._quantified else ""
-        bt = getattr(agent, "base_type", "Agent") or "Agent"
-        action_list = get_narrative_actions(agent.entity_type, base_type=bt) if not self._quantified else []
-        # 附加 base_type 能力提示
-        if bt != "Agent" and not self._quantified:
-            action_catalog_text = f"\n## 你的角色类型\n你是 {bt} 类型实体，决策范围受限于你的身份和资源。\n"
-        else:
-            action_catalog_text = ""
-        action_catalog_text += ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
-                                if action_list and not self._quantified else "")
+        action_list = get_narrative_actions(agent.entity_type) if not self._quantified else []
+        action_catalog_text = ("\n## 你可用的动作（按你的身份）\n" + "\n".join(f"- {a}" for a in action_list)
+                               if action_list and not self._quantified else "")
 
         # ── 共享双路 LanceDB 召回 ──
         static_text, dynamic_text = await self._shared_dual_recall(agent)
@@ -2071,18 +1593,17 @@ class SimulationEngine:
                     tgt = next((a for a in self.agents if a.entity_id == target_id), None)
                     if not tgt:
                         continue
-                    # 仅使用当前 agent 可见的目标事件（消上帝视角L1+L5）
                     tgt_events = [e for e in self._event_history[-10:]
-                                  if e.get("agent") == target_id
-                                  and _is_event_visible_to(agent.entity_id, agent.name, e)]
+                                  if e.get("agent") == target_id]
                     tgt_recent = "; ".join(e.get("content", "")[:50] for e in tgt_events[-3:]) or "无记录"
                     mirror_parts.append(
                         f"### {tgt.name}\n"
-                        f"近三轮可见行动: {tgt_recent}\n"
+                        f"人格: {tgt.persona[:80] if tgt.persona else '未知'}\n"
+                        f"行为准则: {tgt.system_prompt_extra or '未知'}\n"
+                        f"近三轮行动: {tgt_recent}\n"
                         f"→ 站在 {tgt.name} 的角度预判：如果 TA 推测到你的意图，TA 会如何反制？"
                     )
                 world["recent_events"] = context_text + "\n\n" + "\n".join(mirror_parts)
-        decision = None
         try:
             decision = await self.reasoner.reason(agent, world, round_number, client=client)
             sel = decision.get("selected", {})
@@ -2119,32 +1640,12 @@ class SimulationEngine:
                 return None
 
         from datetime import datetime
-        _vis = (action_data.get("visibility") or "").strip() or "public"
-        # 存储落选候选方案（供反思日志和报告复盘使用）
-        meta = {"visibility": _vis}
-        if decision and decision.get("candidates"):
-            all_cands = decision["candidates"]
-            rejected = []
-            for c in all_cands:
-                if c.get("content") != action_data.get("content"):
-                    rejected.append({
-                        "action": c.get("action", ""),
-                        "target": c.get("target", ""),
-                        "content": c.get("content", "")[:120],
-                        "rationale": c.get("rationale", "")[:80],
-                        "risk_level": c.get("risk_level", ""),
-                        "score": c.get("_score", 0),
-                        "blind_spots": c.get("blind_spots", ""),
-                    })
-            if rejected:
-                meta["_rejected_candidates"] = rejected
         return SimulationAction(
             agent_id=agent.entity_id,
             action_type=action_data.get("action", "observe"),
             target_id=action_data.get("target", ""),
             content=action_data.get("content", f"{agent.name}观察着周围环境"),
             timestamp=datetime.now().isoformat(),
-            metadata=meta,
         )
 
     # ── 量化模式：决策 → 快照交互解算 → 批量应用 → 阈值淘汰 → 可选解读 ──
@@ -2338,20 +1839,11 @@ class SimulationEngine:
             text = extract_text(resp).strip()
             if not text or "无需调整" in text or len(text) < 2:
                 return None
+            # 更新 agent 的行为准则（最多 3 条，满时替换最旧）
             old_extra = agent.system_prompt_extra
-            # 去重：新准则与已有准则相似度 > 0.7 则跳过
-            if old_extra:
-                existing_rules = old_extra.split("；")
-                for old in existing_rules:
-                    if old and text:
-                        common = len(set(old) & set(text))
-                        denom = max(len(set(old)), len(set(text)), 1)
-                        if common / denom > 0.7:
-                            return None
             if old_extra and text not in old_extra:
                 parts = old_extra.split("；")
-                max_rules = self._max_persona_rules()
-                if len(parts) >= max_rules:
+                if len(parts) >= 3:
                     parts = parts[1:]
                 agent.system_prompt_extra = "；".join(parts + [text])
             elif not old_extra:
@@ -2372,17 +1864,10 @@ class SimulationEngine:
             return None
 
     def _dispatch_events(self, round_number: int) -> None:
-        """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。
-
-        缺陷3 修复：事件带唯一 _eid，已分发的事件记录在 _dispatched_eids 中，
-        避免通道②二次分发时重复注入知识队列。
-        """
+        """将本轮 _event_history 中新事件按信任度分发至各 agent 知识队列。"""
         from uuid import uuid4
         alive_ids = [a.entity_id for a in self.agents if a.entity_id in self._states]
         name_to_id = self._name_to_id
-        if not hasattr(self, "_dispatched_eids"):
-            self._dispatched_eids: set = set()
-        dispatched = self._dispatched_eids
         for evt in self._event_history:
             if evt.get("round") != round_number:
                 continue
@@ -2391,18 +1876,8 @@ class SimulationEngine:
             content = evt.get("content", "")
             if not actor_id or not content:
                 continue
-            _eid = evt.get("_eid")
-            if _eid is None:
-                _eid = evt["_eid"] = f"eid-{uuid4().hex[:8]}"
-            if _eid in dispatched:
-                continue
             for a_id in alive_ids:
                 if a_id == actor_id:
-                    continue
-                # 可见性过滤：私密事件仅分发给参与者/发起者，避免信息不对称泄漏
-                a_name = name_to_id and next(
-                    (k for k, v in name_to_id.items() if v == a_id), actor_name)
-                if not _is_event_visible_to(a_id, a_name, evt):
                     continue
                 # Trust lookup: matrix is indexed by [entity_id][name]; seed_trust stores
                 # by source entity_id → target name. We need observer's entity_id (a_id)
@@ -2429,12 +1904,6 @@ class SimulationEngine:
                 queue = self._agent_knowledge[a_id]
                 if len(queue) > 500:
                     self._agent_knowledge[a_id] = queue[-500:]
-            # 事件分发完成，标记去重（缺陷3 修复）
-            dispatched.add(_eid)
-        # 缺陷6：有界化去重集合——只保留最近 ~400 条，防止长期推演内存无界膨胀
-        if len(dispatched) > 400:
-            for _old in list(dispatched)[: len(dispatched) - 400]:
-                dispatched.discard(_old)
 
     def _deliver_ripe_knowledge(self, agent_id: str, current_round: int) -> list[dict[str, Any]]:
         """交付该 agent 的已熟事件（deliver_round <= 当前轮），从队列中移除。"""
@@ -2494,15 +1963,7 @@ class SimulationEngine:
                         if a.entity_id in states and re_engine.is_alive(states[a.entity_id])]
         alive_ids = [a.entity_id for a in alive_agents]
         if not alive_agents:
-            # 缺陷8：全灭后无实体可结算，清空待处理注入事件，避免滞留内存
-            if getattr(self, "_injected_events_store", None):
-                self._injected_events_store["pending"] = []
             return sim_round
-
-        # 融合架构·通道①：本轮高优先级事件冲击相关实体指标（在决策前结算）
-        _n_impacts = self._apply_event_impacts(round_number)
-        if _n_impacts:
-            self._log("simulation", f"事件冲击(融合): {_n_impacts} 个事件影响实体指标")
 
         ordered = list(alive_agents)
         self._rng.shuffle(ordered)
@@ -2512,8 +1973,7 @@ class SimulationEngine:
 
         def others_ctx(self_id: str) -> str:
             # B1: 只渲染 Top-K 最相关他方(盟友/对手>最近>最危急)，其余合并为全局摘要，
-            # 把每 agent  prompt 的他方块从 O(N) 降到 O(K)，消除 O(N^2) 与逐轮膨胀。
-            # 消上帝视角F1: 详细指标仅限"已知邻居"（盟友/对手 + 共享事件），其余仅汇总。
+            # 把每 agent prompt 的他方块从 O(N) 降到 O(K)，消除 O(N^2) 与逐轮膨胀。
             from strategy_forge.core.config import config as _c
             topk = max(1, int(getattr(_c, "deduction_sim_others_topk", 10)))
             metrics_list = re_engine.metrics()
@@ -2521,20 +1981,6 @@ class SimulationEngine:
             sp = self._spatial_state
             rel = getattr(self, "_rel_context", {}).get(self_id, {}) or {}
             important = set(rel.get("allies", []) or []) | set(rel.get("opponents", []) or [])
-
-            # 构建已知邻居集合：关系上下文 + 共享事件
-            known_set: set[str] = set(important)
-            for evt in self._event_history[-30:]:
-                if evt.get("agent") == self_id:
-                    tgt = evt.get("target", "")
-                    if tgt:
-                        known_set.add(tgt)
-                parts_s = evt.get("participants", "") or ""
-                if self_id in parts_s:
-                    for p in parts_s.split(","):
-                        p = p.strip()
-                        if p:
-                            known_set.add(p)
 
             def _dist(a) -> float | None:
                 if sp is not None and idx_self is not None:
@@ -2547,10 +1993,18 @@ class SimulationEngine:
             if not others:
                 return "（无其他参与方）"
 
+            def _salience(a):
+                st = states[a.entity_id]
+                rel_pri = 0 if st.name in important else 1
+                d = _dist(a)
+                mtot = sum(st.metrics.values()) if st.metrics else 0.0
+                return (rel_pri, d if d is not None else 1e9, mtot)
+
+            ranked = sorted(others, key=_salience)
+            shown, rest = ranked[:topk], ranked[topk:]
+
             def _detail(a) -> str:
                 st = states[a.entity_id]
-                if a.entity_id not in known_set:
-                    return f"{st.name}: 信息不足（未直接接触）"
                 line = st.to_prompt_context()
                 hist = getattr(st, "history", []) or []
                 if len(hist) >= 6:
@@ -2577,19 +2031,18 @@ class SimulationEngine:
                     line += f"  距离: {d:.0f}m"
                 return line
 
-            def _salience(a):
-                st = states[a.entity_id]
-                rel_pri = 0 if a.entity_id in known_set else 2
-                d = _dist(a)
-                mtot = sum(st.metrics.values()) if st.metrics else 0.0
-                return (rel_pri, d if d is not None else 1e9, mtot)
-
-            ranked = sorted(others, key=_salience)
-            shown, rest = ranked[:topk], ranked[topk:]
-
             lines = [_detail(a) for a in shown]
             if rest:
-                lines.append(f"其余 {len(rest)} 方（未直接接触，态势未知）")
+                arr = np.stack([
+                    np.array([states[a.entity_id].metrics.get(m, 0.0) for m in metrics_list],
+                             dtype=np.float64) for a in rest]) if metrics_list else None
+                if arr is not None and arr.size:
+                    avgs, mins, maxs = arr.mean(0), arr.min(0), arr.max(0)
+                    stat = ", ".join(f"{m}: avg={avgs[i]:.0f} [{mins[i]:.0f}-{maxs[i]:.0f}]"
+                                     for i, m in enumerate(metrics_list))
+                    lines.append(f"其余 {len(rest)} 方（全局）: {stat}")
+                else:
+                    lines.append(f"其余 {len(rest)} 方")
             return "\n".join(lines) or "（无其他参与方）"
 
         def env_context() -> str:
@@ -2647,17 +2100,8 @@ class SimulationEngine:
             _rc = max(200, _cfg.deduction_sim_recall_chars)
             return await self._shared_dual_recall(agent, _rk, _rc)
 
-        # P1#7: _other_ctxs 跨轮缓存——仅当各实体 metrics/history 快照变化时重建，
-        # 避免数千实体下每轮全量 O(N) 字符串构建。
-        sig = hash((_state_snapshot_sig(states, alive_ids),))
-        if getattr(self, "_other_ctxs_cache", None) is None:
-            self._other_ctxs_cache = {}
-        if self._other_ctxs_sig == sig and self._other_ctxs_cache:
-            _other_ctxs = self._other_ctxs_cache
-        else:
-            _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
-            self._other_ctxs_cache = _other_ctxs
-            self._other_ctxs_sig = sig
+        # Pre-compute per-agent contexts once before concurrent execution
+        _other_ctxs = {a.entity_id: others_ctx(a.entity_id) for a in alive_agents}
         _spatial_ctxs = {a.entity_id: spatial_self_ctx(a.entity_id) for a in alive_agents}
         _env_ctx = env_context()
         # ── 增强因果反馈：per-agent 上次行动复盘 ──
@@ -2672,29 +2116,12 @@ class SimulationEngine:
             items: list[str] = []
             for k in ripe[-8:]:
                 items.append(f"• [{k['round_occurred']}] {k['content_delivered']}")
-            # 补充 agent 自身相关的事件 + 全部系统事件（融合架构：系统事件全局可见）。
-            # 噪音防御（措施1）：系统事件每轮每 agent 限幅，防止多实体同时触发时淹没自身事件。
-            # 同时按 (round, event_type) 去重，避免同一系统事件重复展示。
-            sys_seen = 0
-            _sys_limit = 2  # 每轮每个 agent 最多注入 2 条系统事件
-            own_events = [e for e in self._event_history[-8:]
-                          if e.get("is_system_event")
-                          or (_is_event_visible_to(a.entity_id, a.name, e) and
-                              (e.get("agent") == a.entity_id
-                               or a.name in e.get("content", "")))]
-            _shown_sys = set()
+            # 补充 agent 自身相关的事件（来自 _event_history）
+            own_events = [e for e in self._event_history[-5:]
+                          if e.get("agent") == a.entity_id or a.name in e.get("content", "")]
             for e in own_events:
-                if e.get("is_system_event"):
-                    _sig = (e.get("round"), e.get("event_type"))
-                    if _sig in _shown_sys:
-                        continue
-                    if sys_seen >= _sys_limit:
-                        continue
-                    _shown_sys.add(_sig)
-                    sys_seen += 1
                 text = e.get("content", "")[:80]
-                prefix = "【系统事件】" if e.get("is_system_event") else ""
-                items.append(f"• [R{e.get('round','?')}] {prefix}{text}")
+                items.append(f"• [R{e.get('round','?')}] {text}")
             _recent_ctxs[a.entity_id] = "\n".join(items[-8:]) or "（无近期事件）"
 
         async def decide(agent: DeductionAgentProfile) -> dict[str, Any] | None:
@@ -2896,7 +2323,7 @@ class SimulationEngine:
                 inter = next((it for it in inter_by_actor.get(actor, [])
                               if it.get("target") == tgt), None)
                 if inter and any(
-                    _INTEL_EXPOSED_KEY in d or _INTEL_EXPOSED_KEY in k.lower()
+                    "_intel_exposed" in d or "intel" in k.lower()
                     for k, d in inter.get("deltas", {}).items()
                     if isinstance(d, dict)
                 ):
@@ -2904,23 +2331,23 @@ class SimulationEngine:
                     pass
                 if inter:
                     for k in inter.get("deltas", {}):
-                        if _INTEL_EXPOSED_KEY in str(k).lower():
+                        if "_intel_exposed" in str(k).lower() or "intel" in str(k).lower():
                             bonus = self._intel_bonuses.setdefault(actor, {}).get(tgt, 0.0)
                             self._intel_bonuses.setdefault(actor, {})[tgt] = min(5.0, bonus + 2.0)
                             self._log("simulation", f"[谍报] {actor} 对 {tgt} 获得信息优势 (+2.0, 总和={bonus+2.0:.1f})")
                             break
 
         # ── Algorithm module chain (ODE + Physics) ──
-        # 模块顺序已由 build_pipeline() 内置排序（IS_FINALIZER 自动置末），
-        # 此处直接遍历，未来可迁移至 PipelineEngine.run() 以启用条件执行与信号验证。
         if self._algorithm_modules and self._rule_engine is not None:
             from strategy_forge.algorithms.module_utils import (
                 apply_context_results,
                 build_context,
+                rekey_fsm_blob,
             )
             entity_ids = [a.entity_id for a in self.agents if a.entity_id in states]
             ctx = build_context(states, self._rule_engine, entity_ids, round_number,
-                                prev_spatial=getattr(self, "_spatial_state", None))
+                                prev_spatial=getattr(self, "_spatial_state", None),
+                                prev_fsm_state=getattr(self, "_last_fsm_state_blob", None))
             for mod in self._algorithm_modules:
                 try:
                     ctx = mod.execute(ctx)
@@ -2930,6 +2357,10 @@ class SimulationEngine:
             # Cache spatial state for next round's decision prompts
             if hasattr(ctx, "spatial"):
                 self._spatial_state = ctx.spatial
+            # Cache FSM 跨轮状态（streak/observe 计数），供下一轮 build_context 回注
+            fsm_blob = ctx.metadata.get("fsm.state_blob")
+            if fsm_blob is not None:
+                self._last_fsm_state_blob = rekey_fsm_blob(fsm_blob, entity_ids)
             # Save FSM state for next round's agent decision split
             if "fsm.agent_states" in ctx.metadata:
                 raw_states = list(ctx.metadata["fsm.agent_states"])
@@ -2973,17 +2404,6 @@ class SimulationEngine:
             if alloc:
                 meta["budget"] = dec.get("budget", dec.get("intensity", 0.5))
                 meta["allocation"] = alloc
-            _vis = (dec.get("visibility") or "").strip() or "public"
-            # 关键词兜底：若 LLM 未输出 visibility，检查行动类型/理由是否暗示秘密行动
-            if _vis == "public":
-                from .narrative_actions import is_secret_action
-                _rationale = dec.get("rationale", "")
-                _act_type = dec.get("action_type", "")
-                if is_secret_action(_act_type, _rationale):
-                    _vis = "private"
-            meta["visibility"] = _vis
-            # 参与者：发起方 + 目标方，供 _is_event_visible_to 使用
-            _participants = "|".join(filter(None, [nm, actor, str(dec.get("target", ""))]))
             sim_round.actions.append(SimulationAction(
                 agent_id=actor, action_type=dec["action_type"],
                 target_id=dec.get("target", ""), content=content,
@@ -2999,8 +2419,7 @@ class SimulationEngine:
                     self._preprocessor.add_event_memory(
                         content=content, agent_id=actor,
                         round_number=round_number,
-                        event_type=dec["action_type"], priority=0.5,
-                        visibility=_vis, participants=_participants)
+                        event_type=dec["action_type"], priority=0.5)
                 except Exception as e:
                     logger.debug("[Simulator] 量化事件写入 LanceDB 失败: %s", e)
             # B+因果链: 量化轮写 Event 节点 + ACTED 边 + TARGETS/CAUSED(确定性数值归因)
@@ -3025,22 +2444,10 @@ class SimulationEngine:
                 "agent": actor, "agent_name": nm, "action": dec["action_type"],
                 "content": content + evt_suffix,
                 "round": round_number,
-                "event_type": dec["action_type"],
-                "target_id": _primary_tid if _inters else "",
-                "is_system_event": False,
-                "visibility": _vis,
-                "participants": _participants,
             })
 
         # ── 信息传播：将本轮事件按信任度分发至各 agent 知识队列 ──
         self._dispatch_events(round_number)
-
-        # 融合架构·通道②：指标越界自动生成系统事件（在本轮结算后，进入事件流）
-        _n_triggers = self._trigger_events_from_metrics(round_number)
-        if _n_triggers:
-            self._log("simulation",
-                      f"指标触发事件(融合): {_n_triggers} 个系统事件生成")
-            self._dispatch_events(round_number)
 
         # ── 共享反思闸门（量化模式：完整 P0-P2 六维反思）──
         if not hasattr(self, "_reflection_baselines"):
@@ -3253,11 +2660,9 @@ def _build_state_snapshot(states: dict, thresholds: dict, event_history: list,
             "count": len(data["names"]),
             "metrics": {m: round(np.mean(vals), 1) for m, vals in data["metrics"].items() if vals},
         }
-    # Recent events（消上帝视角R2：仅公开事件）
+    # Recent events
     recent = []
     for e in event_history[-3:]:
-        if (e.get("visibility", "") or "public") in _RESTRICTED_VIS:
-            continue
         recent.append({
             "agent": e.get("agent_name", "?"),
             "action": e.get("action", ""),

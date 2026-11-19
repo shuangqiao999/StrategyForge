@@ -20,41 +20,14 @@ from .preprocessor import DeductionPreprocessor
 
 logger = logging.getLogger(__name__)
 
-
-def _load_reasoner_methodology() -> dict:
-    try:
-        from pathlib import Path
-        import yaml
-        path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "methodology.yaml"
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-    except Exception:
-        pass
-    return {}
-
-_STRATEGY_METHOD = _load_reasoner_methodology()
-_SENTIMENT_GUIDE = _STRATEGY_METHOD.get("_sentiment_inference", "") or ""
-_TRUST_GUIDE = _STRATEGY_METHOD.get("_trust_action_mapping", "") or ""
-
-
-_POSITIVE_KW = frozenset({
-    "support", "help", "cooperate", "praise", "agree", "ally", "invest",
-    "支持", "帮助", "合作", "赞扬", "同意", "援助", "联盟", "签约", "投资", "开放", "妥协",
-})
-_NEGATIVE_KW = frozenset({
-    "oppose", "attack", "betray", "insult", "threaten", "block", "sanction",
-    "反对", "攻击", "背叛", "侮辱", "威胁", "封锁", "制裁", "打压", "抵制", "围堵", "打破",
-})
+_POSITIVE_KW = frozenset({"support", "help", "cooperate", "praise", "agree"})
+_NEGATIVE_KW = frozenset({"oppose", "attack", "betray", "insult", "threaten", "block"})
 
 
 _CANDIDATE_PROMPT = """你是一个战略顾问。为 $agent_name 生成 $candidate_count 个不同的行动策略。
 
 ## 不可变目标（最高优先级，贯穿整个模拟）
 $immutable_goals
-
-## 你的层级定位
-$tier_constraint
 
 ## 外部指令（最高优先级，必须影响每个候选）
 $user_intervention
@@ -77,16 +50,6 @@ $trust_summary
 ## 关系网络（来自知识图谱：盟友 / 对手）
 $relationship_context
 
-## 候选多样性要求（强制执行）
-- $candidate_count 个候选必须代表根本不同的策略方向，禁止仅是力度微调的变体；
-- 必须同时包含：至少一个保守稳妥的选择、至少一个高风险高回报的激进选择；
-- 如果角色存在信息盲区或认知偏差，至少一个候选应体现"角色基于不完整信息做出的误判"——该候选在当前角色视角是合理的，但客观上风险被低估或关键信息被遗漏。
-
-## 角色视角约束（铁律）
-- 写 content 和 rationale 时必须严格站在 $agent_name 本人的视角：写角色自己看到的信息、自己相信的判断，不必是客观事实；
-- 如果某个风险是角色意识不到的盲区，不要在 rationale 中提及——只写角色认为存在的风险；
-- 同一个事件，不同角色可以而且应该有不同的解读和反应，不要做全知叙述者。
-
 ## 现实性约束（硬性规则）
 - 行动手段必须限于你当前身份在现实中可用的手段（职权、人脉、资金、信息），禁止超现实桥段：黑客奇迹、凭空巨额资金、一夜掌控他人系统等。
 - 行动只能表达"你做了什么"，不能宣称单方面完成需要多方配合的结果（如接管、罢免、收购需经程序，只能"推动/发起"）。
@@ -98,16 +61,13 @@ $strategic_context
   1. 你的核心目标未达成 → 必须选择主动行动（collaborate/compete/respond/initiate）
   2. 近期事件中有涉及你的行动 → 必须做出回应
   3. 你有明确的对手或盟友 → 必须对其采取行动
-
-$trust_methodology
-$sentiment_methodology
   4. 即使没有明确对手，也应通过 diplomatic_statement/initiate 主动塑造局势、测试对手意图或巩固自身地位
 - 无事可做时的最优策略不是"观察"——而是"主动制造事件获取信息"或"巩固盟友确保安全"
 
 ## 行动示例
-正确（具体、有因果逻辑、与人格相关，且包含盲区分析）：
-  {"action": "compete", "target": "竞品Y", "content": "X企业宣布开源核心训练框架，同步将商用API价格下调60%——以开源+降价双重施压对手客户迁移", "rationale": "利用对手服务稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium", "blind_spots": "降价可能引发全行业价格战，竞品可能联合反制或向监管投诉倾销"}
-错误（模糊、模板化，缺失字段）：
+正确（具体、有因果逻辑、与人格相关）：
+  {"action": "compete", "target": "竞品Y", "content": "X企业宣布开源核心训练框架，同步将商用API价格下调60%——以开源+降价双重施压对手客户迁移", "rationale": "利用对手服务稳定性争议，用价格和技术优势抢占市场", "risk_level": "medium"}
+错误（模糊、模板化）：
   {"action": "compete", "target": "对手", "content": "继续加大研发投入，推出新产品，提升核心竞争力", "rationale": "为了发展", "risk_level": "low"}
 
 ## 输出 — 纯 JSON 数组
@@ -117,8 +77,7 @@ $sentiment_methodology
     "target": "目标实体名或留空",
     "content": "行动描述 (30-100字)",
     "rationale": "行动理由 (20-60字)",
-    "risk_level": "low|medium|high",
-    "blind_spots": "本角色未察觉的潜在风险（必填，至少10字，写客观存在的隐患，不是写'无'或'未知'）"
+    "risk_level": "low|medium|high"
   }
 ]
 
@@ -150,32 +109,26 @@ class StrategicReasoner:
         self._recent_actions: dict[str, list[str]] = defaultdict(list)
 
     def _cached_intervention(self, round_number: int) -> str:
-        """Fetch latest intervention, cached per round.
-
-        P2#12: 检索异常时不更新 _intervention_round，保留旧缓存并允许下轮重试，
-        避免暂时性故障导致整轮干预信息永久丢失。
-        """
+        """Fetch latest intervention, cached per round."""
         if self._intervention_round == round_number and self._intervention_cache is not None:
             return self._intervention_cache
+        self._intervention_round = round_number
         if self._preprocessor is not None:
             try:
                 iv = self._preprocessor.retrieve_latest_intervention()
                 if iv:
-                    self._intervention_round = round_number
                     self._intervention_cache = iv.get("content", "")
                     return self._intervention_cache
             except Exception:
-                # 检索失败：不消费本轮，保留旧缓存，允许下轮重试
-                return self._intervention_cache if self._intervention_cache is not None else ""
-        self._intervention_round = round_number
+                pass
         self._intervention_cache = ""
         return ""
 
-    def _cached_action_catalog(self, rule_engine: Any, base_type: str = "Agent") -> str:
+    def _cached_action_catalog(self, rule_engine: Any) -> str:
         domain = getattr(rule_engine, "domain", "default")
-        key = f"{domain}_{self._enable_multi_action}_{self._max_actions}_{base_type}"
+        key = f"{domain}_{self._enable_multi_action}_{self._max_actions}"
         if key not in self._action_catalog_cache:
-            self._action_catalog_cache[key] = rule_engine.action_catalog(base_type)
+            self._action_catalog_cache[key] = rule_engine.action_catalog()
         return self._action_catalog_cache[key]
 
     def record_interaction(
@@ -235,15 +188,10 @@ class StrategicReasoner:
         "talent_war", "poach_talent", "compete", "attack_opponent",
         "electronic_warfare", "military_offensive", "trade_warfare",
         "propaganda", "leak_info", "framing_battle",
-        "sanction", "boycott", "undercut", "blockade", "poach_customers",
-        "背叛同盟", "撕毁协议", "技术封锁", "恶意收购", "打压对手",
     })
     _TRUST_FRIENDLY_ACTIONS = frozenset({
         "diplomacy", "partner", "invest", "invest_rnd", "welfare",
         "diplomatic_engagement", "fact_check", "conserve", "restoration",
-        "collaborate", "trade", "support", "aid", "mediate", "ceasefire",
-        "结盟", "投资", "援助", "贸易合作", "技术转让", "市场开放",
-        "联合声明", "情报共享",
     })
 
     @staticmethod
@@ -316,19 +264,12 @@ class StrategicReasoner:
         recent_own = self._recent_actions.get(agent.entity_id, [])
         recent_own_text = ("\n".join(f"- {a}" for a in recent_own)
                            if recent_own else "（无——这是你的首轮行动）")
-        system = "你是战略顾问，只输出 JSON 数组。每个候选必须包含 blind_spots 字段，写清楚角色未察觉的潜在风险，禁止填'无'或'未知'。"
-        bt = getattr(agent, "base_type", "Agent") or "Agent"
-        tier_map = {
-            "Agent": "你是一级决策主体，优先选择高阶战略、阵营博弈、全局布局类动作。可执行全量行动。",
-            "Subordinate": "你是二级附属主体，优先选择联动博弈、跟随策略、局部对抗类动作。禁止选择主权级战略/军事动作。",
-        }
-        tier_constraint = tier_map.get(bt, "根据你的身份自主选择行动。")
+        system = "你是战略顾问，只输出 JSON 数组。"
         llm = client if client is not None else LLMClient()
         messages = [Message(role="user", content=Template(_CANDIDATE_PROMPT).substitute(
             candidate_count=self.candidate_count,
             agent_name=agent.name,
             immutable_goals=goals_block,
-            tier_constraint=tier_constraint,
             user_intervention=user_cmd,
             persona=self._persona_with_evolution(agent),
             background=agent.background,
@@ -339,8 +280,6 @@ class StrategicReasoner:
             trust_summary=trust,
             relationship_context=world_state.get("relationship_context", "") or "（无已知关系）",
             strategic_context="根据你的角色和人格自主决策。",
-            trust_methodology=_TRUST_GUIDE,
-            sentiment_methodology=_SENTIMENT_GUIDE,
         ))]
 
         candidates: list[dict[str, Any]] = []
@@ -373,8 +312,7 @@ class StrategicReasoner:
                 score += 0.1
             # User intervention bonus: match actual intervention keywords
             if intervention_text:
-                keywords = [w for w in re.findall(r"[\u4e00-\u9fff]{2,4}|[A-Za-z]{3,}", intervention_text[:40])
-                            if len(w) >= 2]
+                keywords = [w for w in intervention_text[:40].split() if len(w) >= 2]
                 if any(kw in c.get("content", "") or kw in c.get("rationale", "")
                        for kw in keywords):
                     score += 0.5
@@ -415,17 +353,6 @@ class StrategicReasoner:
         candidates.sort(key=lambda c: c.get("_score", 0), reverse=True)
         selected = candidates[0]
         selected["action"] = self._normalize_action(selected.get("action", "observe"))
-        
-        # 兜底：若 LLM 未输出 blind_spots（小模型常见），根据 risk_level 推断一个占位值
-        for c in candidates:
-            if not c.get("blind_spots"):
-                risk = c.get("risk_level", "medium")
-                if risk == "high":
-                    c["blind_spots"] = "风险未充分评估（可能低估连锁反应）"
-                elif risk == "low":
-                    c["blind_spots"] = "过于保守可能错失战略窗口"
-                else:
-                    c["blind_spots"] = "信息不完整，可能存在未认知的第三方干预"
 
         # 记录本轮选中行动，供后续轮次去重（每 agent 保留最近 5 条）
         hist = self._recent_actions[agent.entity_id]
@@ -476,58 +403,49 @@ class StrategicReasoner:
         if self._enable_multi_action:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
-                '{"budget": 0.0到1.0, "visibility": "public", "actions": ['
+                '{"budget": 0.0到1.0, "actions": ['
                 '{"action_type": "上面之一", "weight": 0.0到1.0, '
                 '"target": "目标方名称(进攻/竞争/外交时填，否则留空)"}], '
                 '"rationale": "20-50字理由"}\n'
                 f"- 最多 {self._max_actions} 个动作，可同时分配资源（如同时进攻与防守，或对不同对手施压）\n"
                 "- budget：本轮总投入力度，0.1=保守，0.5=常规，1.0=倾尽全力\n"
                 "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0\n"
-                '- visibility：事件可见性，默认"public"（全图可见）。秘密行动填"private"（仅参与方可见），盟友间共享填"alliance"（盟友可见）。间谍/卧底/秘密交易/保密研发必须标记为"private"\n'
                 '## 正确示例\n'
-                '{"budget": 0.7, "visibility": "public", "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
+                '{"budget": 0.7, "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
                 '{"action_type": "defend", "weight": 0.4, "target": ""}], '
                 '"rationale": "主力进攻，预留防守余力防止被反制"}\n'
                 '## 错误示例\n'
                 '{"budget": 0.8, "actions": [{"action_type": "attack", "weight": 0.5, "target": "敌方A"}], '
-                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短；秘密行动缺失visibility字段'
+                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短'
             )
         else:
             output_spec = (
                 '## 输出 JSON（仅 JSON，无解释）\n'
                 '{"action_type": "上面之一", "target": "目标方名称(进攻/竞争/外交时填，否则留空)", '
-                '"intensity": 0.0到1.0, "visibility": "public", "rationale": "20-50字理由"}\n'
+                '"intensity": 0.0到1.0, "rationale": "20-50字理由"}\n'
                 "- intensity：投入力度，0.1=试探，0.5=常规，1.0=倾尽全力\n"
-                '- visibility：事件可见性，默认"public"（全图可见）。秘密行动填"private"（仅参与方可见），盟友间共享填"alliance"（盟友可见）。间谍/卧底/秘密交易/保密研发必须标记为"private"\n'
                 '## 正确示例\n'
-                '{"action_type": "attack", "target": "敌方A", "intensity": 0.7, "visibility": "public", "rationale": "敌方军力削弱过半，抓住战机全力出击以扩大战果"}\n'
+                '{"action_type": "attack", "target": "敌方A", "intensity": 0.7, "rationale": "敌方军力削弱过半，抓住战机全力出击以扩大战果"}\n'
                 '## 错误示例\n'
                 '{"action_type": "observe", "target": "", "intensity": 0.3, "rationale": "看看情况"}\n'
-                '← 若核心目标未达成，observe往往不是最优选择；rationale应说明策略依据而非模糊表态；秘密行动缺失visibility字段'
+                '← 若核心目标未达成，observe往往不是最优选择；rationale应说明策略依据而非模糊表态'
             )
             if multi_candidate:
                 output_spec += (
                     '\n\n## 多候选模式（输出3个不同的候选策略）\n'
                     '{"candidates": ['
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由1"},'
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由2"},'
-                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "visibility": "public", "rationale": "理由3"}'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由1"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由2"},'
+                    '{"action_type": "...", "target": "...", "intensity": 0.0~1.0, "rationale": "理由3"}'
                     ']}\n'
-                    "- 3个候选应包含不同策略方向（如进攻/防守/外交），不是同一方向的微调\n"
-                    "- 若某候选为秘密行动，将 visibility 设为 private"
+                    "- 3个候选应包含不同策略方向（如进攻/防守/外交），不是同一方向的微调"
                 )
 
         # ── 共享前缀（同轮所有 agent 一致，利于云端前缀缓存）──
-        bt = getattr(agent, "base_type", "Agent") or "Agent"
         prefix_parts: list[str] = []
         if imm != "无":
             prefix_parts.append(f"## 核心战略问题（你必须回答，贯穿所有轮次）\n{imm}\n")
-        prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine, bt)}\n")
-        # 非 Agent 实体能力说明
-        if bt != "Agent":
-            cap = rule_engine.get_capability(bt)
-            prefix_parts.append(f"## 角色限制\n你是 {bt} 类型实体，仅能执行上述可选行动列表中的动作。"
-                                f"禁止选择列表外的任何动作。\n")
+        prefix_parts.append(f"## 可选行动\n{self._cached_action_catalog(rule_engine)}\n")
         # 合作目标约束：partner 必须从关系网络中的已知合作方或同行业实体中选择
         if relationship_context and "（无" not in relationship_context:
             prefix_parts.append(f"## 合作目标约束\npartner 动作的目标必须从你的关系网络中选择已知合作方，"
@@ -545,11 +463,6 @@ class StrategicReasoner:
             f"你是「{agent.name}」，正处于一场量化推演的第 {round_number} 轮。"
             f"请基于战略问题、你的人格、目标与当前数值状态，{select_hint}{diversity_hint}。\n",
         ]
-        # 层级指引：从 entity_capabilities 读取 tier_hint
-        cap = rule_engine.get_capability(bt)
-        tier_hint_text = cap.get("tier_hint", "")
-        if tier_hint_text:
-            agent_parts.append(f"## 层级指引\n{tier_hint_text}\n")
         if causal_feedback:
             agent_parts.append(f"{causal_feedback}\n")
         agent_parts.extend([
@@ -568,17 +481,13 @@ class StrategicReasoner:
             agent_parts.append(f"## 空间环境\n{spatial_context}\n")
         domain = getattr(rule_engine, "domain", "")
         if domain:
-            sc = ""
-            try:
-                from strategy_forge.engine.domain_adapter import get_adapter
-                sc = get_adapter(domain).prompts.strategic_context or ""
-            except Exception:
-                pass
+            from strategy_forge.core.rule_templates import get_domain_prompt
+            sc = get_domain_prompt(domain, "strategic_context")
             if sc:
                 agent_parts.append(f"## 领域行动指引\n{sc}\n")
 
         prompt = shared_prefix + "".join(agent_parts) + "\n" + output_spec
-        system = "你是量化推演中的战略决策者，只输出 JSON。必须严格遵守 visibility 字段标记秘密行动，不得在 rationale 中泄露其他实体的私密信息。"
+        system = "你是量化推演中的战略决策者，只输出 JSON。"
         llm = client if client is not None else LLMClient()
         try:
             if self._chat_fn is not None:
@@ -586,10 +495,7 @@ class StrategicReasoner:
                     self._chat_fn, [Message(role="user", content=prompt)], system, self._temperature)
             else:
                 resp = await llm.chat_json([Message(role="user", content=prompt)],
-                                      system=system,
-                                      schema_name=("strategy_multi" if self._enable_multi_action
-                                                   else "strategy_single"),
-                                      temperature=self._temperature)
+                                      system=system, schema_name="strategy_single", temperature=self._temperature)
                 content = extract_text(resp)
             data = extract_json(content)
             if not isinstance(data, dict):
@@ -693,21 +599,15 @@ def _parse_candidates(raw: str) -> list[dict[str, Any]]:
     raw = raw.strip()
     cleaned = re.sub(r'```(?:json)?\s*\n?', '', raw)
     cleaned = re.sub(r'\n?```', '', cleaned).strip()
-    for pat in (r'\{[\s\S]*\}', r'\[[\s\S]*\]'):
+    for pat in (r'\[[\s\S]*\]', r'\{[\s\S]*\}'):
         m = re.search(pat, cleaned)
         if m:
             try:
                 data = json.loads(m.group(0))
-                # 新 schema: {"candidates": [...]}
-                if isinstance(data, dict):
-                    cands = data.get("candidates")
-                    if isinstance(cands, list):
-                        return [c for c in cands if isinstance(c, dict) and "action" in c]
-                    if "action" in data:
-                        return [data]
-                # 兼容旧输出: 裸数组
                 if isinstance(data, list):
                     return [c for c in data if isinstance(c, dict) and "action" in c]
+                if isinstance(data, dict) and "action" in data:
+                    return [data]
             except (json.JSONDecodeError, ValueError):
                 continue
     return []

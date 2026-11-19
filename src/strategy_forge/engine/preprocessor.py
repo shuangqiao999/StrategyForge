@@ -120,7 +120,7 @@ class DeductionPreprocessor:
             try:
                 return self._db.open_table(name)
             except Exception as e2:
-                logger.error("[Preprocessor] open '%s' 也失败 (%s)，覆盖重建 — 旧表数据将不可逆丢失!", name, e2)
+                logger.warning("[Preprocessor] open '%s' 也失败 (%s)，覆盖重建", name, e2)
                 return self._db.create_table(name, schema=schema, mode="overwrite")
 
     def _ensure_table(self, dim: int) -> None:
@@ -163,31 +163,15 @@ class DeductionPreprocessor:
             if cached is not None:
                 self.embed_cache_hits += 1
                 return cached
-        # 指数退避重试：嵌入服务短暂抖动/超时不再导致预处理整体失败（P1#6）
-        import time as _t
-        import random as _r
-        max_retries = 3
-        last_exc: Exception | None = None
-        for attempt in range(max_retries + 1):
-            try:
-                r = self._http.post(self._embed_url, json={
-                    "input": key,
-                    "model": self._embed_model,
-                }, timeout=60)
-                r.raise_for_status()
-                vec = r.json()["data"][0]["embedding"]
-                with self._cache_lock:
-                    self._embed_cache[key] = vec
-                return vec
-            except (requests.RequestException, KeyError, ValueError) as e:
-                last_exc = e
-                if attempt >= max_retries:
-                    break
-                backoff = 0.5 * (2 ** attempt) + _r.uniform(0, 0.3)
-                logger.warning("[Preprocessor] 嵌入调用失败(第%d次)，%.1fs 后重试: %s",
-                               attempt + 1, backoff, e)
-                _t.sleep(backoff)
-        raise last_exc if last_exc else RuntimeError("embedding call failed")
+        r = self._http.post(self._embed_url, json={
+            "input": key,
+            "model": self._embed_model,
+        }, timeout=60)
+        r.raise_for_status()
+        vec = r.json()["data"][0]["embedding"]
+        with self._cache_lock:
+            self._embed_cache[key] = vec
+        return vec
 
     def _sync_embed_batch(self, texts: list[str]) -> list[list[float]]:
         r = self._http.post(self._embed_url, json={
@@ -232,8 +216,7 @@ class DeductionPreprocessor:
                 "visibility": visibility or "public",
                 "participants": participants or "",
             }])
-        except Exception as e1:
-            logger.warning("[Preprocessor] event add failed (full schema): %s, trying reduced schema", e1)
+        except Exception:
             try:
                 # Fallback for tables without visibility/participants columns
                 self._event_table.add([{
@@ -243,21 +226,16 @@ class DeductionPreprocessor:
                     "session_id": self.session_id,
                     "priority": priority, "event_type": event_type,
                 }])
-            except Exception as e2:
-                logger.warning("[Preprocessor] event add failed (reduced schema): %s, trying minimal schema", e2)
-                try:
-                    # Fallback for old tables without priority/event_type columns
-                    self._event_table.add([{
-                        "event_id": str(uuid.uuid4()),
-                        "vector": vec, "content": content,
-                        "agent_id": agent_id, "round_number": round_number,
-                        "session_id": self.session_id,
-                    }])
-                except Exception as e3:
-                    logger.error("[Preprocessor] event add failed (all schemas): %s — event data lost", e3)
+            except Exception:
+                # Fallback for old tables without priority/event_type columns
+                self._event_table.add([{
+                    "event_id": str(uuid.uuid4()),
+                    "vector": vec, "content": content,
+                    "agent_id": agent_id, "round_number": round_number,
+                    "session_id": self.session_id,
+                }])
         # 事件表已变更，标记 FTS 索引需在下次检索前重建（每轮至多一次）
-        with self._cache_lock:
-            self._event_fts_dirty = True
+        self._event_fts_dirty = True
 
     def retrieve_latest_intervention(self) -> dict | None:
         """检索最近的用户干预或不可变目标指令。
@@ -283,25 +261,21 @@ class DeductionPreprocessor:
             return self._intervention_scan()
 
     def _intervention_scan(self) -> dict | None:
-        """回退路径：分页扫描筛选干预/目标（限制加载行数，避免整表内存爆炸）。"""
+        """回退路径：全表扫描筛选干预/目标（旧实现，兼容不支持 where 的环境）。"""
         try:
-            _CAP = 5000
-            rows = self._event_table.to_arrow().to_pydict()
-            has_priority = "priority" in rows
-            has_etype = "event_type" in rows
+            raw = self._event_table.to_arrow().to_pydict()
+            has_priority = "priority" in raw
+            has_etype = "event_type" in raw
             interventions = []
-            n = len(rows.get("event_id", []))
-            for i in range(n):
-                p = rows.get("priority", [0])[i] if has_priority else 0
-                et = rows.get("event_type", [""])[i] if has_etype else ""
+            for i in range(len(raw["event_id"])):
+                p = raw.get("priority", [0])[i] if has_priority else 0
+                et = raw.get("event_type", [""])[i] if has_etype else ""
                 if p >= 0.9 or et in ("user_intervention", "immutable_goal"):
                     interventions.append({
-                        "content": rows["content"][i],
-                        "round_number": rows["round_number"][i],
+                        "content": raw["content"][i],
+                        "round_number": raw["round_number"][i],
                         "priority": p,
                     })
-                    if len(interventions) >= _CAP:
-                        break
             if interventions:
                 interventions.sort(key=lambda x: (-x["priority"], -x.get("round_number", 0)))
                 return interventions[0]
@@ -319,19 +293,15 @@ class DeductionPreprocessor:
         """
         if self._event_table is None:
             return
-        with self._cache_lock:
-            _dirty = self._event_fts_dirty
-        if self._event_fts_ready and not _dirty:
+        if self._event_fts_ready and not self._event_fts_dirty:
             return
         try:
             self._event_table.create_fts_index("content", replace=True)
-            with self._cache_lock:
-                self._event_fts_ready = True
-                self._event_fts_dirty = False
+            self._event_fts_ready = True
+            self._event_fts_dirty = False
             logger.debug("[Preprocessor] Rebuilt event FTS index (hybrid enabled)")
         except Exception as e:
-            with self._cache_lock:
-                self._event_fts_ready = False
+            self._event_fts_ready = False
             logger.debug("[Preprocessor] event FTS skipped (vector-only): %s", e)
 
     def retrieve_dynamic_events(
@@ -392,7 +362,7 @@ class DeductionPreprocessor:
             if r.get("event_type", "") in self._EVENT_EXCLUDED_TYPES:
                 continue
             # 可见性过滤：私密事件只有参与者可见（信息差是博弈资源）
-            if observer and (r.get("visibility", "") or "public") in ("private", "alliance"):
+            if observer and (r.get("visibility", "") or "public") == "private":
                 parts = r.get("participants", "") or ""
                 if observer not in parts and observer != (r.get("agent_id", "") or ""):
                     continue
@@ -431,11 +401,7 @@ class DeductionPreprocessor:
         except Exception:
             return []
         results: list[str] = []
-        min_dist = getattr(config, "deduction_similarity_threshold", 0.3)
         for r in raw:
-            dist = r.get("_distance", 0.0)
-            if dist > min_dist:
-                continue
             content = r.get("content", "")
             if not content:
                 continue
@@ -481,19 +447,10 @@ class DeductionPreprocessor:
         entity_freq: dict[str, int] = {}
         entity_chunk_cov: dict[str, int] = {}
         for std_name, aliases in all_entities.items():
-            # 单字实体加词边界（避免 "中" 匹配 "中心/其中/中国"）；多字实体直接子串计数
-            if len(std_name) == 1 and re.match(r'[\u4e00-\u9fff]', std_name):
-                pat = re.compile(r'(?<![\u4e00-\u9fff])' + re.escape(std_name) + r'(?![\u4e00-\u9fff])')
-                count = len(pat.findall(source))
-            else:
-                count = len(re.findall(re.escape(std_name), source))
+            count = len(re.findall(re.escape(std_name), source))
             for alias in aliases:
                 if alias != std_name and alias not in std_name:
-                    if len(alias) == 1 and re.match(r'[\u4e00-\u9fff]', alias):
-                        apat = re.compile(r'(?<![\u4e00-\u9fff])' + re.escape(alias) + r'(?![\u4e00-\u9fff])')
-                        count += len(apat.findall(source))
-                    else:
-                        count += len(re.findall(re.escape(alias), source))
+                    count += len(re.findall(re.escape(alias), source))
             entity_freq[std_name] = count
             entity_chunk_cov[std_name] = sum(
                 1 for ct in chunk_texts
@@ -525,7 +482,7 @@ class DeductionPreprocessor:
         try:
             vecs = self._sync_embed_batch(chunk_prefixes)
         except Exception as e:
-            logger.error("[Preprocessor] Batch embed failed，LanceDB 向量索引跳过（仅纯文本检索）: %s", e)
+            logger.warning("[Preprocessor] Batch embed failed: %s", e)
             self._result = PreprocessResult(
                 session_id=self.session_id, chunks=list(chunks),
                 high_freq_entities=high_freq, low_freq_entities=low_freq,

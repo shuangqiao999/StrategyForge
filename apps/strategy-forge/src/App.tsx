@@ -3,7 +3,13 @@ import ForceGraph3D from "react-force-graph-3d";
 
 const API_BASE = import.meta.env.DEV
   ? "/api/forge"
-  : "http://127.0.0.1:8000/api/forge";
+  : isTauri()
+    ? "http://127.0.0.1:8000/api/forge"
+    : "/api/forge";
+
+function isTauri(): boolean {
+  return !!(window as any).__TAURI_INTERNALS__;
+}
 
 const lbl: React.CSSProperties = { fontSize: 13, color: "#cbd5e1", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: "0 8px", fontSize: 13 };
@@ -139,7 +145,6 @@ export default function App() {
   const [rounds, setRounds] = useState(10);
   const [roundMode, setRoundMode] = useState<"preset" | "custom">("preset");
   const [domains, setDomains] = useState<Array<{domain:string;name:string}>>([]);
-  const [graphMinNeighbors, setGraphMinNeighbors] = useState(1);
 
   // ── 策略优化器 ──
   const [optEnabled, setOptEnabled] = useState(false);
@@ -172,7 +177,6 @@ export default function App() {
   const graphRef = useRef<any>(null);
   const causalGraphRef = useRef<any>(null);
   const sseSidRef = useRef<string | null>(null);
-  const sseRef = useRef<{ sid: string; es: EventSource } | null>(null);
 
   const zoomGraph = (rf: React.RefObject<any>, factor: number) => {
     const fg = rf.current; if (!fg) return;
@@ -241,7 +245,7 @@ export default function App() {
         setCfgChunkSize(eng.chunk_size ?? 1000);
       }
       return !!(pr && (pr.providers || []).length);
-    } catch (e: any) { console.error("fetchConfig failed:", e?.message); return false; }
+    } catch { return false; }
   }, []);
 
   // 后端 exe 由 Tauri 启动需数秒就绪，挂载时轮询重试直到服务商加载成功。
@@ -253,7 +257,6 @@ export default function App() {
       const ok = await fetchConfig();
       attempts += 1;
       if (!ok && attempts < 20 && !cancelled) setTimeout(tick, 1500);
-      else if (!ok && attempts >= 20 && !cancelled) alert("无法连接后端服务，请检查后端是否启动");
     };
     tick();
     return () => { cancelled = true; };
@@ -311,15 +314,15 @@ export default function App() {
   const saveConfig = useCallback(async () => {
     setCfgSaving(true);
     try {
-      const r1 = await fetch(`${API_BASE}/config/llm`, {
+      await fetch(`${API_BASE}/config/llm`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ llm_base_url: cfgLLMBase, llm_api_key: cfgLLMKey, llm_model: cfgLLMModel, provider_slug: cfgLLMProvider, llm_temperature: cfgLLMTemp }),
       });
-      const r2 = await fetch(`${API_BASE}/config/embedding`, {
+      await fetch(`${API_BASE}/config/embedding`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ embedding_api_base: cfgEmbedBase, embedding_api_key: cfgEmbedKey, embedding_model_name: cfgEmbedModel, provider_slug: cfgEmbedProvider }),
       });
-      const r3 = await fetch(`${API_BASE}/config/engine`, {
+      await fetch(`${API_BASE}/config/engine`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           default_rounds: cfgDefaultRounds, max_agents: cfgMaxAgents, candidate_count: cfgCandidateCount,
@@ -330,13 +333,9 @@ export default function App() {
           chunk_size: cfgChunkSize,
         }),
       });
-      if (!r1.ok || !r2.ok || !r3.ok) {
-        alert("配置保存失败，请检查后端连接");
-        return;
-      }
       await fetchConfig();
       setShowSettings(false);
-    } catch { alert("配置保存失败: 网络错误"); }
+    } catch { /* ignore */ }
     setCfgSaving(false);
   }, [cfgLLMBase, cfgLLMKey, cfgLLMModel, cfgLLMProvider, cfgLLMTemp, cfgEmbedBase, cfgEmbedKey, cfgEmbedModel, cfgEmbedProvider,
       cfgDefaultRounds, cfgMaxAgents, cfgCandidateCount, cfgMaxConcurrent, cfgRetrieveTopK, cfgSimilarity,
@@ -347,9 +346,8 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/sessions`);
       if (r.ok) { setSessions(await r.json()); return true; }
-      console.error("fetchSessions failed:", r.statusText);
       return false;
-    } catch (e: any) { console.error("fetchSessions failed:", e.message); return false; }
+    } catch { return false; }
   }, []);
 
   // 冷启动时后端可能尚未就绪，轮询重试直到会话列表加载成功。
@@ -361,7 +359,6 @@ export default function App() {
       const ok = await fetchSessions();
       attempts += 1;
       if (!ok && attempts < 20 && !cancelled) setTimeout(tick, 1500);
-      else if (!ok && attempts >= 20 && !cancelled) alert("无法连接后端服务，请检查后端是否启动");
     };
     tick();
     return () => { cancelled = true; };
@@ -371,24 +368,21 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/session/${sessionId}/graph`);
       if (r.ok) setGraphData(await r.json());
-      else console.error("fetchGraph failed:", r.statusText);
-    } catch (e: any) { console.error("fetchGraph failed:", e.message); }
+    } catch { /* ignore */ }
   }, []);
 
   const fetchTimeline = useCallback(async (sessionId: string) => {
     try {
       const r = await fetch(`${API_BASE}/session/${sessionId}/timeline`);
       if (r.ok) setTimeline(await r.json());
-      else console.error("fetchTimeline failed:", r.statusText);
-    } catch (e: any) { console.error("fetchTimeline failed:", e.message); }
+    } catch { /* ignore */ }
   }, []);
 
   const fetchCausal = useCallback(async (sessionId: string) => {
     try {
       const r = await fetch(`${API_BASE}/session/${sessionId}/causal`);
       if (r.ok) setCausal(await r.json());
-      else console.error("fetchCausal failed:", r.statusText);
-    } catch (e: any) { console.error("fetchCausal failed:", e.message); }
+    } catch { /* ignore */ }
   }, []);
 
   const fetchTokens = useCallback(async (sessionId: string) => {
@@ -405,27 +399,24 @@ export default function App() {
     try {
       const r = await fetch(`${API_BASE}/domains`);
       if (r.ok) setDomains((await r.json()).domains || []);
-      else console.error("fetchDomains failed:", r.statusText);
-    } catch (e: any) { console.error("fetchDomains failed:", e.message); }
+    } catch { /* ignore */ }
   }, []);
 
   // 运行前把多动作设置写入会话 config_json（普通推演与优化器统一读取）
   const persistSettings = useCallback(async (sessionId: string) => {
     try {
-      const r = await fetch(`${API_BASE}/session/${sessionId}/settings`, {
+      await fetch(`${API_BASE}/session/${sessionId}/settings`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enable_multi_action: optMultiAction, max_actions: optMaxActions }),
       });
-      if (!r.ok) console.error("Settings persist failed:", r.statusText);
-    } catch (e: any) { console.error("Settings persist failed:", e.message); }
+    } catch { /* ignore */ }
   }, [optMultiAction, optMaxActions]);
 
   const fetchLogs = useCallback(async (sessionId: string) => {
     try {
       const r = await fetch(`${API_BASE}/session/${sessionId}/logs?limit=0`);
       if (r.ok) setLogs(await r.json());
-      else console.error("fetchLogs failed:", r.statusText);
-    } catch (e: any) { console.error("fetchLogs failed:", e.message); }
+    } catch { /* ignore */ }
   }, []);
 
   const fetchReport = useCallback(async (sessionId: string) => {
@@ -457,16 +448,14 @@ export default function App() {
       const r = await fetch(`${API_BASE}/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, total_rounds: rounds, graph_min_neighbors: graphMinNeighbors } }),
+        body: JSON.stringify({ title, source_material: sourceMaterial, config: { domain, total_rounds: rounds } }),
       });
       if (r.ok) {
         const data = await r.json();
         setSelectedId(data.id);
         setSessions(prev => [{ id: data.id, title: data.title, status: data.status, phase: "", entity_count: 0, relation_count: 0, agent_count: 0, current_round: 0, total_rounds: rounds, created_at: data.created_at }, ...prev]);
-      } else {
-        alert("会话创建失败: " + ((await r.text()) || r.statusText));
       }
-    } catch (e: any) { alert("会话创建失败: " + (e.message || "网络错误")); }
+    } catch { /* ignore */ }
     setCreating(false);
   }, [title, sourceMaterial, domain, rounds]);
 
@@ -609,20 +598,19 @@ export default function App() {
 
   const cancelOptimize = useCallback(async () => {
     if (!selectedId) return;
-    try { const r = await fetch(`${API_BASE}/session/${selectedId}/optimize/cancel`, { method: "POST" }); if (!r.ok) alert("取消优化失败: " + r.statusText); } catch (e: any) { alert("取消优化失败: " + (e.message || "网络错误")); }
+    try { await fetch(`${API_BASE}/session/${selectedId}/optimize/cancel`, { method: "POST" }); } catch { /* ignore */ }
   }, [selectedId]);
 
   const sendPreGoal = useCallback(async () => {
     if (!selectedId || !preGoal.trim()) return;
     try {
-      const r = await fetch(`${API_BASE}/session/${selectedId}/pre-goal`, {
+      await fetch(`${API_BASE}/session/${selectedId}/pre-goal`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: preGoal }),
       });
-      if (!r.ok) { alert("目标注入失败: " + (await r.text())); return; }
       setPreGoal("");
-    } catch (e: any) { alert("目标注入失败: " + (e.message || "网络错误")); }
+    } catch { /* ignore */ }
   }, [selectedId, preGoal]);
 
   const sendIntervention = useCallback(async () => {
@@ -663,26 +651,12 @@ export default function App() {
     const selected = sessions.find(s => s.id === selectedId);
     if (!selected) return;
     const runningSet = new Set(["ontology_running","graph_running","agents_running","simulating","reporting","optimizing"]);
-    if (!runningSet.has(selected.status)) {
-      // 会话不再运行：关闭当前 SSE，避免连接泄漏
-      if (sseRef.current) { sseRef.current.es.close(); sseRef.current = null; }
-      sseSidRef.current = null;
-      return;
-    }
-    if (sseRef.current?.sid === selectedId) return; // already connected to this session
-    // 切换会话：先关闭旧连接的 SSE，再建立新连接
-    if (sseRef.current) { sseRef.current.es.close(); sseRef.current = null; }
+    if (!runningSet.has(selected.status)) { sseSidRef.current = null; return; }
+    if (sseSidRef.current === selectedId) return; // already connected
     sseSidRef.current = selectedId;
     const es = new EventSource(`${API_BASE}/session/${selectedId}/stream`);
-    sseRef.current = { sid: selectedId, es };
     es.onmessage = (ev: MessageEvent) => {
-      if (ev.data === "[DONE]") {
-        es.close();
-        if (sseRef.current?.sid === selectedId) sseRef.current = null;
-        sseSidRef.current = null;
-        fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); fetchTokens(selectedId);
-        return;
-      }
+      if (ev.data === "[DONE]") { es.close(); sseSidRef.current = null; fetchSessions(); fetchGraph(selectedId); fetchReport(selectedId); fetchTimeline(selectedId); fetchCausal(selectedId); fetchTokens(selectedId); return; }
       try {
         const d = JSON.parse(ev.data);
         if (d.type === "round") {
@@ -710,14 +684,8 @@ export default function App() {
         }
       } catch { /* ignore */ }
     };
-    es.onerror = () => {
-      es.close();
-      if (sseRef.current?.sid === selectedId) sseRef.current = null;
-      sseSidRef.current = null;
-      fetchSessions();
-    };
-    // 清理函数：此 es 仅在仍为当前连接时保持；切换会话时由 effect 主体关闭旧连接
-    return () => { /* 连接生命周期由 effect 主体管理 */ };
+    es.onerror = () => { es.close(); sseSidRef.current = null; fetchSessions(); };
+    return () => { if (sseSidRef.current !== selectedId) es.close(); };  // do NOT clear sseSidRef here; session still connected
   }, [selectedId, sessions]);
 
   // Token 统计：前 3 次每 10 秒拉取，之后每 2 分钟
@@ -821,16 +789,6 @@ export default function App() {
             }
             <option value="narrative">📖 纯叙事（不量化）</option>
           </select>
-          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 52 }}>图谱补全</span>
-            <input
-              type="range" min={0} max={3} value={graphMinNeighbors}
-              onChange={e => setGraphMinNeighbors(Number(e.target.value))}
-              style={{ flex: 1, accentColor: "#22c55e", marginRight: 4 }}
-              title="孤立实体最小邻居数：0=不补全 1=极保守(推荐) 3=最激进"
-            />
-            <span style={{ fontSize: 12, color: "#e2e8f0", width: 16, textAlign: "center" }}>{graphMinNeighbors}</span>
-          </div>
           {domain !== "narrative" && (
             <div style={{ marginBottom: 6 }}>
               <input type="file" accept=".json" style={{ display: "none" }} onChange={async e => {
