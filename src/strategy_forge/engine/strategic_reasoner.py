@@ -244,8 +244,29 @@ class StrategicReasoner:
 
     @staticmethod
     def _persona_with_evolution(agent: Any) -> str:
-        """人格 = 原始人格（不可变） + 推演中演化出的行为准则（信念增量层）。"""
+        """人格 = 原始人格（不可变） + 推演中演化出的行为准则（信念增量层）。
+
+        优先读取 _rule_registry（按情绪电荷降序、带前缀）；否则回退 system_prompt_extra。
+        """
         base = agent.persona or "（无）"
+        rules = getattr(agent, "_rule_registry", None)
+        parts = [base]
+        if rules:
+            sorted_rules = sorted(rules, key=lambda r: r.get("charge", 0) or 0, reverse=True)
+            for r in sorted_rules:
+                text = (r.get("text") or "").strip()
+                if not text:
+                    continue
+                charge = float(r.get("charge", 0) or 0)
+                if charge > 0.5:
+                    prefix = "【当前强烈倾向】"
+                elif charge > 0.1:
+                    prefix = "【近期倾向】"
+                else:
+                    prefix = "【长期原则】"
+                parts.append(f"{prefix} {text}")
+            if len(parts) > 1:
+                return "\n".join(parts)
         extra = getattr(agent, "system_prompt_extra", "") or ""
         if extra:
             return f"{base}\n【行为准则·由推演经历塑造，影响你的决策】{extra}"
@@ -444,13 +465,16 @@ class StrategicReasoner:
                 f"- 最多 {self._max_actions} 个动作，可同时分配资源（如同时进攻与防守，或对不同对手施压）\n"
                 "- budget：本轮总投入力度，0.1=保守，0.5=常规，1.0=倾尽全力\n"
                 "- weight：各动作占总投入的比例，所有 weight 之和应约等于 1.0\n"
+                "- **action_type 必须是「可选行动」列表中的某个名字，不得用 observe 代替实质行动**："
+                "只要你采取的是主动行动（进攻/投资/外交/贸易/技术/能源/军事等），就必须选对应的具体 action_type，"
+                "rationale 描述的行动必须与 action_type 一致。observe 仅可在真正无事可做时使用。\n"
                 '## 正确示例\n'
-                '{"budget": 0.7, "actions": [{"action_type": "attack", "weight": 0.6, "target": "敌方A"}, '
-                '{"action_type": "defend", "weight": 0.4, "target": ""}], '
+                '{"budget": 0.7, "actions": [{"action_type": "military_offensive", "weight": 0.6, "target": "对手A"}, '
+                '{"action_type": "defensive_buildup", "weight": 0.4, "target": ""}], '
                 '"rationale": "主力进攻，预留防守余力防止被反制"}\n'
                 '## 错误示例\n'
-                '{"budget": 0.8, "actions": [{"action_type": "attack", "weight": 0.5, "target": "敌方A"}], '
-                '"rationale": "进攻"}  ← weight之和应约等于1.0，且rationale过于简短'
+                '{"budget": 0.8, "actions": [{"action_type": "observe", "weight": 1.0, "target": ""}], '
+                '"rationale": "强化技术壁垒"}  ← rationale 是实质行动却标成 observe，action_type 必须与之一致'
             )
         else:
             output_spec = (
@@ -528,8 +552,9 @@ class StrategicReasoner:
                 content = await asyncio.to_thread(
                     self._chat_fn, [Message(role="user", content=prompt)], system, self._temperature)
             else:
+                _schema = "strategy_multi" if self._enable_multi_action else "strategy_single"
                 resp = await llm.chat_json([Message(role="user", content=prompt)],
-                                      system=system, schema_name="strategy_single", temperature=self._temperature)
+                                      system=system, schema_name=_schema, temperature=self._temperature)
                 content = extract_text(resp)
             data = extract_json(content)
             if not isinstance(data, dict):

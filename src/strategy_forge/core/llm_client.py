@@ -305,6 +305,26 @@ _JSON_SCHEMAS: dict[str, dict] = {
         },
         "required": ["action_type"]
     },
+    "strategy_multi": {
+        "type": "object",
+        "properties": {
+            "budget": {"type": "number"},
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action_type": {"type": "string"},
+                        "weight": {"type": "number"},
+                        "target": {"type": "string"},
+                    },
+                    "required": ["action_type", "weight"]
+                }
+            },
+            "rationale": {"type": "string"},
+        },
+        "required": ["actions"]
+    },
     "strategy_candidates": {
         "type": "array",
         "items": {

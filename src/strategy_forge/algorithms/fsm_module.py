@@ -249,6 +249,10 @@ class FiniteStateMachineModule(AlgorithmModule):
                     others = [j for j in range(n) if j != idx]
                     enemy_ids = [j for j in others if polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0]
                     ally_ids = [j for j in others if abs(float(polar[j]) - own_pol) <= 3.0]
+                    # polarization 均匀导致无法划分出对手 → 兜底把其他实体都视为对手
+                    if not enemy_ids:
+                        enemy_ids = [j for j in range(n) if j != idx]
+                        ally_ids = []
                 else:
                     # Fallback: treat all other entities as enemies
                     enemy_ids = [j for j in range(n) if j != idx]
@@ -278,6 +282,8 @@ class FiniteStateMachineModule(AlgorithmModule):
                 own_pol = float(polar[idx])
                 enemy_ids = [j for j in range(n) if j != idx and
                             (polar[j] * own_pol < 0 or abs(float(polar[j]) - own_pol) > 3.0)]
+                if not enemy_ids:
+                    enemy_ids = [j for j in range(n) if j != idx]
             else:
                 enemy_ids = [j for j in range(n) if j != idx]
         if not enemy_ids:

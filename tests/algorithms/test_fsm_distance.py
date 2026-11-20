@@ -48,3 +48,12 @@ def test_distance_to_enemy_no_targets_returns_none():
 def test_distance_out_of_bounds_returns_none():
     ctx = _make_ctx([[0, 0, 0], [10, 0, 0]], enemy_ids=[5])
     assert FiniteStateMachineModule._resolve_metric(ctx, 0, "distance_to_enemy") is None
+
+
+def test_distance_to_enemy_uniform_polarization_falls_back_to_all_others():
+    # enemy_ids/ally_ids 未配置且 polarization 均匀 → 兜底把所有其他实体视为对手
+    ctx = _make_ctx([[0, 0, 0], [10, 0, 0], [30, 0, 0]])
+    ctx.arrays["polarization"] = np.array([50.0, 50.0, 50.0])
+    assert FiniteStateMachineModule._resolve_metric(ctx, 0, "distance_to_enemy") == pytest.approx(10.0)
+    assert FiniteStateMachineModule._match_condition(ctx, 0, {"distance_to_enemy": ["<", 200]}) is True
+

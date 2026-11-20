@@ -313,6 +313,10 @@ class SimulationEngine:
         self._intel_bonuses: dict[str, dict[str, float]] = {}  # {source_id: {target_name: bonus}}
         # ── 人格动态化：每 agent 的反思轮次追踪 ──
         self._personality_log: list[dict[str, Any]] = []  # [{round, agent, old_extra, new_extra}]
+        # ── 心智理论：每 agent 对目标角色的认知判断 ──
+        self._target_models: dict[str, dict[str, str]] = {}
+        # ── 待处理的关系变化目标（供 ToM 更新，跨同步/异步边界传递）──
+        self._pending_tom_updates: dict[str, list[str]] = {}
 
         from .strategic_reasoner import StrategicReasoner
         self.reasoner = StrategicReasoner(
@@ -475,6 +479,9 @@ class SimulationEngine:
             "_prev_rel_map": {k: {"allies": list(v.get("allies", [])),
                                   "opponents": list(v.get("opponents", []))}
                               for k, v in getattr(self, "_prev_rel_map", {}).items()},
+            "_rule_registry": {a.entity_id: [dict(r) for r in getattr(a, "_rule_registry", [])]
+                               for a in self.agents},
+            "_target_models": {k: dict(v) for k, v in getattr(self, "_target_models", {}).items()},
         }
 
     def restore_state(self, saved: dict[str, Any]) -> None:
@@ -491,6 +498,12 @@ class SimulationEngine:
         self._last_reflection_round_n = saved.get("_last_reflection_round_n", {})
         self._last_round_outcomes = saved.get("_last_round_outcomes", {})
         self._prev_rel_map = saved.get("_prev_rel_map", {})
+        # 恢复规则注册表（含同步影子）
+        registry = saved.get("_rule_registry", {})
+        for a in self.agents:
+            a._rule_registry = [dict(r) for r in registry.get(a.entity_id, [])]
+            self._rebuild_shadow(a)
+        self._target_models = saved.get("_target_models", {})
 
     # ── 用户强制 override ──
     def _pop_override(self, agent: Any) -> dict | None:
@@ -804,6 +817,55 @@ class SimulationEngine:
   修正：<旧准则> → <新准则>
 无变化输出"无需调整"。"""
 
+    # ── 量化模式专用 Prompt 模板 ──
+    _QPROMPT_EMOTIONAL = """你是 {name} 的本能反应层。你的核心指标正在急剧恶化。
+
+## 核心人格（不可撼动）
+{persona}
+
+## 当前告急指标
+{critical_metrics}
+
+## 近期趋势
+{recent_trends}
+
+## 任务
+输出一行≤15字的本能应激准则（允许激进、防卫过当、非理性）。
+只输出准则本身。"""
+
+    _QPROMPT_STRATEGIC = """你是 {name} 的理性分析层。基于量化指标趋势做全局判断。
+
+## 核心人格
+{persona}
+
+## 当前指标状态
+{metric_status}
+
+## 趋势分析
+{trend_summary}
+
+## 现有准则
+{current_rules}
+
+## 任务
+输出一行≤20字的战略修正准则。如果当前战略正确输出"无需调整"。
+只输出准则本身。"""
+
+    _QPROMPT_DEEP = """你是 {name} 的深度重构层。多个核心指标同时告急，触发全盘重思。
+
+## 核心人格（不可撼动）
+{persona}
+
+## 告急指标详情
+{critical_metrics}
+
+## 现有准则（将被替换）
+{current_rules}
+
+## 任务
+输出一条≤25字的根本性新准则，完全替代旧准则。
+只输出准则本身。"""
+
     def _should_reflect(self, agent_id: str, round_number: int,
                          state: Any = None, rule_engine: Any = None) -> str | None:
         """共享反思闸门：环境漂移 + 关系变化 + 长期无反思保护。
@@ -811,6 +873,11 @@ class SimulationEngine:
         """
         baseline = self._reflection_baselines.get(agent_id, dict(self._narrative_env))
         last_r = self._last_reflection_round_n.get(agent_id, 0)
+
+        def _own_active_events() -> list:
+            return [e for e in self._event_history[-10:]
+                    if e.get("agent") == agent_id and e.get("action", "") != "observe"]
+
         # 条件1：环境累积剧变
         total_drift = 0.0
         for k in self._narrative_env:
@@ -820,7 +887,7 @@ class SimulationEngine:
                 return f"环境剧变({k}{delta:+.0f})"
         if total_drift > 12:
             return f"环境累计漂移({total_drift:.0f})"
-        # 条件2：关系网络变化
+        # 条件2：关系网络变化（→ 心智理论更新，非自我反思）
         prev_rels = getattr(self, "_prev_rel_map", {})
         curr_rels = self._rel_context.get(agent_id, {})
         prev_allies = set(prev_rels.get(agent_id, {}).get("allies", []))
@@ -828,9 +895,11 @@ class SimulationEngine:
         prev_opps = set(prev_rels.get(agent_id, {}).get("opponents", []))
         curr_opps = set(curr_rels.get("opponents", []))
         if prev_allies != curr_allies or prev_opps != curr_opps:
+            changed = sorted((prev_allies ^ curr_allies) | (prev_opps ^ curr_opps))
+            self._pending_tom_updates[agent_id] = changed
             return "关系网络变化"
-        # 条件3：长期无反思保护（超过 6 轮）
-        if (round_number - last_r) > 4:
+        # 条件3：长期无反思保护（超过 4 轮，但要有自身主动行动素材才触发）
+        if (round_number - last_r) > 4 and len(_own_active_events()) >= 1:
             return "长期无反思保护"
         # 量化模式补充：指标告急触发反思
         if state is not None and rule_engine is not None:
@@ -839,8 +908,8 @@ class SimulationEngine:
                 thr = thr_map.get(m, 0)
                 if thr > 0 and v <= thr * 1.3:
                     return f"指标告急({m}={v:.0f},阈={thr:.0f})"
-        # 条件5: 内源主动自省（每5轮强制触发一次）
-        if round_number > 0 and round_number % 5 == 0:
+        # 条件5: 内源主动自省（每5轮，但要有足够自身素材才触发）
+        if round_number > 0 and round_number % 5 == 0 and len(_own_active_events()) >= 2:
             return "内源主动自省"
         # 条件6: D5 模式累积升级——同类事件 ≥5 次触发战略反思
         cat_log = self._event_category_log.get(agent_id, {})
@@ -1023,6 +1092,9 @@ class SimulationEngine:
             self._narrative_env[key] = max(0.0, min(100.0,
                 round(self._narrative_env[key] * 0.95, 1)))
 
+        # ── 情绪准则衰减 ──
+        self._decay_rules(round_number)
+
         # ── 共享反思闸门（叙事模式调用 _reflect_narrative）──
         if not hasattr(self, "_reflection_baselines"):
             self._reflection_baselines: dict[str, dict[str, float]] = {}
@@ -1043,12 +1115,8 @@ class SimulationEngine:
                 for snap in snapshots:
                     if round_number - snap["round"] >= 1:
                         corrected = await self._reflect_correct(agent, snap, round_number, _rc)
-                        if corrected and agent.system_prompt_extra:
-                            old_rules = agent.system_prompt_extra.split("；")
-                            if snap["raw_rule"] in old_rules:
-                                new_rules = [r for r in old_rules if r != snap["raw_rule"]]
-                                new_rules.append(corrected)
-                                agent.system_prompt_extra = "；".join(new_rules)
+                        if corrected:
+                            self._replace_rule(agent, snap["raw_rule"], corrected)
                             self._log("simulation",
                                 f"[D4纠错] {agent.name}: {snap['trigger']} 冲动准则已修正 (R{round_number})")
                     else:
@@ -1072,22 +1140,26 @@ class SimulationEngine:
             async with _sem:
                 eid = agent.entity_id
                 reason = self._should_reflect(eid, round_number)
-                if reason:
-                    if "内源" in reason:
-                        rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
-                        tag = "[内源自省]"
-                    elif "环境" in reason or "累计" in reason or "模式" in reason:
-                        rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
-                        tag = "[D2数值复盘]" if "模式" not in reason else "[模式预警]"
-                    else:
-                        rule_added = await self._reflect_narrative(agent, round_number, _rc)
-                        tag = "[反思]"
-                    if rule_added:
-                        self._reflection_baselines[eid] = dict(self._narrative_env)
-                        self._last_reflection_round_n[eid] = round_number
-                    self._log("simulation",
-                        f"{tag} {agent.name}: {reason} → "
-                        f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
+                if not reason:
+                    return
+                if reason == "关系网络变化":
+                    await self._handle_relationship_change(agent, round_number, _rc)
+                    return
+                if "内源" in reason:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="internal")
+                    tag = "[内源自省]"
+                elif "环境" in reason or "累计" in reason or "模式" in reason:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc, mode="strategic")
+                    tag = "[D2数值复盘]" if "模式" not in reason else "[模式预警]"
+                else:
+                    rule_added = await self._reflect_narrative(agent, round_number, _rc)
+                    tag = "[反思]"
+                if rule_added:
+                    self._reflection_baselines[eid] = dict(self._narrative_env)
+                    self._last_reflection_round_n[eid] = round_number
+                self._log("simulation",
+                    f"{tag} {agent.name}: {reason} → "
+                    f"{'新增准则' if rule_added else '无需调整'} (R{round_number})")
 
         reflect_tasks = [_reflect_one(a) for a in self.agents]
         await asyncio.gather(*reflect_tasks)
@@ -1260,24 +1332,20 @@ class SimulationEngine:
             if not text or "无需调整" in text or len(text) < 2:
                 return False
             old_extra = agent.system_prompt_extra
-            if old_extra and text not in old_extra:
-                # 最多保留 3 条准则，超限时替换最旧
-                parts = old_extra.split("；")
-                if len(parts) >= 3:
-                    parts = parts[1:]  # 丢弃最旧
-                    agent.system_prompt_extra = "；".join(parts + [text])
-                else:
-                    agent.system_prompt_extra = f"{old_extra}；{text}"
-            elif not old_extra:
-                agent.system_prompt_extra = text
-            else:
+            _src_map = {"emotional": "emotional", "deep": "deep", "reconstruct": "deep",
+                        "internal": "internal"}
+            _source = _src_map.get(mode, "strategic")
+            added = self._append_rule(agent, text, _source, round_number,
+                                      charge=(1.0 if _source == "emotional" else 0.0),
+                                      mode="narrative")
+            if not added:
                 return False
             self._personality_log.append({
                 "round": round_number, "agent": agent.name,
                 "old_extra": old_extra, "new_extra": agent.system_prompt_extra,
             })
             self._log("simulation",
-                       f"[叙事人格演化] {agent.name} 新增准则: {text} (R{round_number})")
+                       f"[叙事人格演化] {agent.name} 新增准则[{_source}]: {text} (R{round_number})")
             return True
         except Exception as e:
             logger.debug("[Simulator] 叙事反思失败: %s", e)
@@ -1397,12 +1465,22 @@ class SimulationEngine:
         self, agent: DeductionAgentProfile, round_number: int, client: Any,
     ) -> int:
         """D6.2: 回溯悔悟。检查当前全部准则，删除过时项。返回被删除数。"""
+        self._ensure_rule_registry(agent)
         current = agent.system_prompt_extra
         if not current:
             return 0
         from strategy_forge.core.llm_client import Message
         from ._utils import extract_text
         history_patterns = self._get_history_patterns(agent.entity_id)
+        # 先做效果评估：给每条准则累计 effectiveness
+        for rule in agent._rule_registry:
+            delta = self._evaluate_rule_effectiveness(agent.entity_id, rule, round_number)
+            rule["effectiveness"] = int(rule.get("effectiveness", 0)) + delta
+        # 把有效性信息注入现有准则列表
+        rules_text = "\n".join(
+            f"- {r.get('text','')}（验证{'有效' if r.get('effectiveness',0) > 0 else '有害' if r.get('effectiveness',0) < 0 else '未验证'}）"
+            for r in agent._rule_registry
+        ) or current
         # 最近自身事件上下文
         my_events = [
             e for e in self._event_history[-15:]
@@ -1413,7 +1491,7 @@ class SimulationEngine:
             for e in my_events[-5:]
         ) or "无近期事件"
         prompt = self._PROMPT_RETROSPECT.format(
-            name=agent.name, current_rules=current,
+            name=agent.name, current_rules=rules_text,
             history_patterns=history_patterns or "无历史模式记录",
             recent_events=recent_context,
         )
@@ -1431,24 +1509,15 @@ class SimulationEngine:
                 line = line.strip()
                 if line.startswith("删除：") or line.startswith("删除:"):
                     old_rule = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if old_rule and old_rule in current:
-                        current = current.replace("；" + old_rule, "")
-                        current = current.replace(old_rule + "；", "")
-                        current = current.replace(old_rule, "")
+                    if old_rule and self._remove_rule(agent, old_rule):
                         deleted += 1
                 elif line.startswith("修正：") or line.startswith("修正:"):
                     mapping = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                     if "→" in mapping:
                         old_str, new_str = mapping.split("→", 1)
                         old_str, new_str = old_str.strip(), new_str.strip()
-                        if old_str in current and new_str:
-                            current = current.replace(old_str, new_str)
+                        if old_str and new_str and self._replace_rule(agent, old_str, new_str):
                             deleted += 1
-            # Clean up double semicolons
-            while "；；" in current:
-                current = "；".join(p for p in current.split("；") if p)
-            current = current.strip("；")
-            agent.system_prompt_extra = current or None
             if deleted:
                 self._log("simulation",
                     f"[回溯悔悟] {agent.name}: 清理了 {deleted} 条过时准则 (R{round_number})")
@@ -1564,6 +1633,9 @@ class SimulationEngine:
 
         # ── 共享双路 LanceDB 召回 ──
         static_text, dynamic_text = await self._shared_dual_recall(agent)
+        _tom = self._tom_context(agent.entity_id)
+        if _tom:
+            dynamic_text = _tom + "\n" + (dynamic_text or "")
 
         # ── Strategic Reasoning (primary path) ──
         context_text = recent_text
@@ -1743,55 +1815,216 @@ class SimulationEngine:
 
         return candidates
 
-    async def _reflect_and_adapt(self, agent: Any, round_number: int,
-                                   client: Any, mode: str = None) -> str | None:
-        """人格动态化：根据近期经历微调 agent 的行为准则（量化模式）。
-        mode: None=默认, "strategic"=D2长期理性, "internal"=D6.1内源自省。
+    # ── 规则注册表工具 ──
+    def _ensure_rule_registry(self, agent: Any) -> None:
+        """若 _rule_registry 为空但 system_prompt_extra 有旧数据，则惰性迁移。"""
+        reg = getattr(agent, "_rule_registry", None)
+        if reg is None:
+            agent._rule_registry = []
+        if not agent._rule_registry and agent.system_prompt_extra:
+            for rule_text in agent.system_prompt_extra.split("；"):
+                rule_text = rule_text.strip()
+                if rule_text:
+                    agent._rule_registry.append({
+                        "text": rule_text, "source": "strategic", "charge": 0.0,
+                        "round_added": 0, "effectiveness": 0, "target": "", "mode": "legacy",
+                    })
 
-        仅修改 system_prompt_extra，不覆盖原始 persona/background。
+    def _rebuild_shadow(self, agent: Any) -> None:
+        """用 _rule_registry 重建 system_prompt_extra 影子字符串。"""
+        agent.system_prompt_extra = "；".join(
+            r.get("text", "") for r in agent._rule_registry if r.get("text"))
+
+    def _append_rule(self, agent: Any, text: str, source: str, round_number: int,
+                     charge: float = 0.0, target: str = "", mode: str = "") -> bool:
+        """追加规则并同步影子。最多保留 3 条，满则替换最旧。返回是否新增。"""
+        self._ensure_rule_registry(agent)
+        text = text.strip()
+        if not text:
+            return False
+        if any(r.get("text") == text for r in agent._rule_registry):
+            return False
+        agent._rule_registry.append({
+            "text": text, "source": source, "charge": charge,
+            "round_added": round_number, "effectiveness": 0,
+            "target": target, "mode": mode,
+        })
+        if len(agent._rule_registry) > 3:
+            agent._rule_registry = agent._rule_registry[-3:]
+        self._rebuild_shadow(agent)
+        return True
+
+    def _count_alarmed_metrics(self, state: Any, rule_engine: Any) -> int:
+        """统计处于告急线内（<=阈值×1.3）的指标数量。"""
+        if state is None or rule_engine is None:
+            return 0
+        thr_map = getattr(rule_engine, "thresholds", lambda: {})()
+        n = 0
+        for m, v in getattr(state, "metrics", {}).items():
+            thr = thr_map.get(m, 0)
+            if thr > 0 and v <= thr * 1.3:
+                n += 1
+        return n
+
+    def _replace_rule(self, agent: Any, old_text: str, new_text: str) -> bool:
+        """把旧准则文本替换为新文本（source→corrected），并同步影子。"""
+        self._ensure_rule_registry(agent)
+        for r in agent._rule_registry:
+            if r.get("text") == old_text:
+                r["text"] = new_text.strip()
+                r["source"] = "corrected"
+                r["charge"] = 0.0
+                self._rebuild_shadow(agent)
+                return True
+        return False
+
+    def _remove_rule(self, agent: Any, text: str) -> bool:
+        """删除指定文本的准则，并同步影子。"""
+        self._ensure_rule_registry(agent)
+        for i, r in enumerate(agent._rule_registry):
+            if r.get("text") == text:
+                del agent._rule_registry[i]
+                self._rebuild_shadow(agent)
+                return True
+        return False
+
+    def _decay_rules(self, round_number: int) -> None:
+        """每轮调用：情绪准则按指数衰减，电荷归零后固化为理性原则。"""
+        for agent in self.agents:
+            self._ensure_rule_registry(agent)
+            for rule in agent._rule_registry:
+                if rule.get("source") != "emotional" or rule.get("charge", 0) <= 0:
+                    continue
+                elapsed = round_number - int(rule.get("round_added", round_number) or round_number)
+                if elapsed <= 0:
+                    continue
+                rule["charge"] = float(rule["charge"]) * (0.7 ** elapsed)
+                if rule["charge"] < 0.1:
+                    rule["charge"] = 0.0
+                    rule["source"] = "strategic"
+                    self._log("simulation",
+                        f"[衰减] {agent.name} 的情绪准则已固化为理性原则: {rule.get('text', '')[:20]}")
+
+    def _evaluate_rule_effectiveness(self, agent_id: str, rule: dict, current_round: int) -> int:
+        """评估准则有效性。返回 +1 改善 / -1 恶化 / 0 无结论。"""
+        added = int(rule.get("round_added", 0) or 0)
+        if current_round - added < 3:
+            return 0
+        state = self._states.get(agent_id)
+        if state is None:
+            return 0
+        deltas_by_metric: dict[str, float] = {}
+        for h in (getattr(state, "history", []) or []):
+            if int(h.get("round", 0) or 0) >= added:
+                m = h.get("metric", "")
+                if m:
+                    deltas_by_metric[m] = deltas_by_metric.get(m, 0.0) + float(h.get("delta", 0))
+        if not deltas_by_metric:
+            return 0
+        improved = sum(1 for d in deltas_by_metric.values() if d > 0.5)
+        worsened = sum(1 for d in deltas_by_metric.values() if d < -0.5)
+        if improved > worsened:
+            return 1
+        if worsened > improved:
+            return -1
+        return 0
+
+    # ── 心智理论（ToM）──
+    async def _handle_relationship_change(self, agent: Any, round_number: int, client: Any) -> None:
+        """关系网络变化 → 更新对目标角色的认知判断（而非自我反思）。"""
+        changed = self._pending_tom_updates.pop(agent.entity_id, [])
+        for target in changed[:2]:
+            await self._update_target_mental_model(agent, target, round_number, client)
+
+    async def _update_target_mental_model(
+        self, agent: Any, target_name: str, round_number: int, client: Any,
+    ) -> None:
+        """更新 agent 对 target_name 的认知判断。"""
+        from strategy_forge.core.llm_client import Message
+        from ._utils import extract_text
+        recent = self._get_recent_interactions(agent.entity_id, target_name)
+        prompt = (
+            f"你是 {agent.name}。你与 {target_name} 的关系刚刚发生变化。\n\n"
+            f"## 你的核心人格\n{agent.persona or '（无）'}\n\n"
+            f"## 近期与该目标的交互\n{recent or '（无记录）'}\n\n"
+            f"## 任务\n输出一行≤30字的对该目标的认知判断"
+            f"（例如：'该角色反复背叛，所有合作提议视为陷阱'）。\n只输出认知本身。"
+        )
+        try:
+            resp = await client.chat(
+                [Message(role="user", content=prompt)],
+                system="你是心智分析师。",
+                temperature=0.3, max_tokens=100,
+            )
+            judgment = extract_text(resp).strip()
+            if judgment and "无" not in judgment:
+                self._target_models.setdefault(agent.entity_id, {})[target_name] = judgment[:30]
+                self._log("simulation", f"[ToM] {agent.name} 对 {target_name}: {judgment[:30]}")
+        except Exception as e:
+            logger.warning("[Simulator] ToM 更新失败 %s→%s: %s", agent.name, target_name, e)
+
+    def _get_recent_interactions(self, agent_id: str, target_name: str) -> str:
+        """取 agent 与 target 最近的交互记录（供 ToM）。"""
+        items = []
+        for e in self._event_history[-20:]:
+            content = e.get("content", "")
+            if e.get("agent") == agent_id and target_name in content:
+                items.append(f"- [R{e.get('round','?')}] {content[:60]}")
+            elif e.get("agent_name") == target_name and str(e.get("agent", "")) != agent_id:
+                items.append(f"- [R{e.get('round','?')}] {target_name}: {content[:60]}")
+        return "\n".join(items[-4:])
+
+    def _tom_context(self, agent_id: str) -> str:
+        """生成心智模型注入片段（对各角色的认知判断）。"""
+        models = getattr(self, "_target_models", {}).get(agent_id, {})
+        if not models:
+            return ""
+        lines = [f"- 你对{target}的认知：{judgment}" for target, judgment in models.items()]
+        return "## 你对各角色的认知\n" + "\n".join(lines) + "\n"
+
+    async def _reflect_and_adapt(self, agent: Any, round_number: int,
+                                   client: Any, mode: str = "strategic") -> str | None:
+        """人格动态化（量化模式）：根据 mode 分层选择模板（emotional/strategic/deep/internal）。
+
+        仅修改 _rule_registry（并同步 system_prompt_extra 影子），不覆盖 persona。
         返回新 system_prompt_extra 字符串，或 None（无变化）。
         """
         from strategy_forge.core.llm_client import Message
+        from ._utils import extract_text
+        self._ensure_rule_registry(agent)
         state = self._states.get(agent.entity_id)
         if state is None:
             return None
-        history = getattr(state, "history", []) or []
-        recent_history = history[-20:]  # 最近20条变化记录
+        recent_history = (getattr(state, "history", []) or [])[-20:]
         if not recent_history:
             return None
 
-        # 计算各指标累计变化
-        delta_summary: list[str] = []
-        deltas_by_metric: dict[str, float] = {}
-        for h in recent_history:
-            m = h.get("metric", "")
-            d = h.get("delta", 0)
-            if m:
-                deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
-        for m, d in deltas_by_metric.items():
-            label = _METRIC_NAME.get(m, m)
-            direction = "↑" if d > 0 else "↓"
-            delta_summary.append(f"{label}{direction}{abs(d):.0f}")
+        persona = agent.persona or "（无）"
+        current_rules = agent.system_prompt_extra or "（无）"
 
-        # 因果反馈摘要
-        causal = getattr(self, "_last_round_outcomes", {}).get(agent.entity_id, "")
-        causal_short = (causal[:200] + "...") if len(causal) > 200 else causal
+        # 指标状态 + 告急指标
+        metric_lines: list[str] = []
+        critical_lines: list[str] = []
+        metrics = getattr(state, "metrics", {})
+        thr_map = getattr(self._rule_engine, "thresholds", lambda: {})() if self._rule_engine else {}
+        for m, v in metrics.items():
+            label = _mn(m, m)
+            metric_lines.append(f"- {label}: {v:.0f}")
+            thr = thr_map.get(m, 0)
+            if thr > 0 and v <= thr * 1.3:
+                critical_lines.append(f"- {label}: {v:.0f}（阈值{thr:.0f}）")
+        metric_status = "\n".join(metric_lines) or "无指标数据"
+        critical_metrics = "\n".join(critical_lines) or "无明显告急指标"
 
-        # D5 历史模式
-        history_patterns = self._get_history_patterns(agent.entity_id)
-        patterns_text = history_patterns or "无重复模式记录"
-
-        # D2 趋势增强：最近指标变化的方向是加速还是减缓
-        trend_parts = []
+        # 趋势（基于 state.history 的 D2 趋势）
+        trend_parts: list[str] = []
         if len(recent_history) >= 6:
-            early = sum(float(h.get("delta", 0)) for h in recent_history[-10:-5])
-            late = sum(float(h.get("delta", 0)) for h in recent_history[-5:])
-            for m in set(h.get("metric","") for h in recent_history if h.get("metric")):
+            for m in set(h.get("metric", "") for h in recent_history if h.get("metric")):
                 e = sum(float(h.get("delta", 0)) for h in recent_history[-10:-5] if h.get("metric") == m)
                 l = sum(float(h.get("delta", 0)) for h in recent_history[-5:] if h.get("metric") == m)
                 if abs(e) < 0.5 and abs(l) < 0.5:
                     continue
-                label = _METRIC_NAME.get(m, m)
+                label = _mn(m, m)
                 if e < -1 and l < -1:
                     trend_parts.append(f"{label}持续恶化")
                 elif e > 1 and l > 1:
@@ -1800,67 +2033,60 @@ class SimulationEngine:
                     trend_parts.append(f"{label}触底反弹")
                 elif e > 1 and l < 0:
                     trend_parts.append(f"{label}由升转跌")
-        trend_line = "；".join(trend_parts) if trend_parts else "无显著趋势"
+        trend_summary = "；".join(trend_parts) if trend_parts else "无显著趋势"
 
-        # 当前状态快照
-        metrics = getattr(state, "metrics", {})
-        status_summary: list[str] = []
-        for m, v in metrics.items():
-            if v < 30:
-                status_summary.append(f"{_METRIC_NAME.get(m,m)}告急({v:.0f})")
-
-        prompt = (
-            f"你是 {agent.name} 的潜意识。回顾你近期的经历，判断你的性格是否需要微调。\n\n"
-            f"## 你的核心人格（不可改动）\n{agent.persona or '（无）'}\n\n"
-            f"## 你现有的行为准则\n{agent.system_prompt_extra or '（无，完全依据核心人格）'}\n\n"
-            f"## 近期指标变化\n{', '.join(delta_summary) if delta_summary else '无显著变化'}\n\n"
-            f"## 趋势判断\n{trend_line}\n\n"
-            f"## 历史遭遇模式\n{patterns_text}\n\n"
-            f"## 风险信号\n{'; '.join(status_summary) if status_summary else '无告急指标'}\n\n"
-            f"## 近期行动复盘\n{causal_short if causal_short else '无'}\n\n"
-            f"## 任务\n"
-            f"根据以上经历，判断是否需要添加一条新的行为准则（或修正旧准则），"
-            f"使你的行为更符合当前的处境。\n"
-            f"- 输出格式：一行简短中文准则（20字以内），直接陈述。\n"
-            f"- 如果当前人格已足够应对，输出\"无需调整\"。\n"
-            f"- 仅添加/修正，不删除原有准则。\n"
-            f"- 示例：\"资源持续消耗时应优先补充而非扩张\" \"连续成功后应警惕过度自信\" \"核心关系需定期维护\"\n"
-            f"- 何时输出\"无需调整\"：指标稳定、现有准则已覆盖所有风险信号、近期无方向性变化\n"
-            f"\n只输出准则本身或\"无需调整\"，不要解释。"
-        )
+        # 路由模板
+        if mode == "emotional":
+            prompt = self._QPROMPT_EMOTIONAL.format(
+                name=agent.name, persona=persona,
+                critical_metrics=critical_metrics, recent_trends=trend_summary,
+            )
+            _mt, _temp, _charge, _source = 80, 0.5, 1.0, "emotional"
+        elif mode == "deep":
+            prompt = self._QPROMPT_DEEP.format(
+                name=agent.name, persona=persona,
+                critical_metrics=critical_metrics, current_rules=current_rules,
+            )
+            _mt, _temp, _charge, _source = 250, 0.3, 1.0, "deep"
+        elif mode == "internal":
+            prompt = self._QPROMPT_STRATEGIC.format(
+                name=agent.name, persona=persona,
+                metric_status=metric_status, trend_summary=trend_summary,
+                current_rules=current_rules,
+            )
+            _mt, _temp, _charge, _source = 120, 0.3, 0.0, "internal"
+        else:  # strategic / default
+            prompt = self._QPROMPT_STRATEGIC.format(
+                name=agent.name, persona=persona,
+                metric_status=metric_status, trend_summary=trend_summary,
+                current_rules=current_rules,
+            )
+            _mt, _temp, _charge, _source = 120, 0.3, 0.0, "strategic"
 
         try:
             resp = await client.chat(
                 [Message(role="user", content=prompt)],
                 system="你是潜意识分析师，输出简短行为准则或'无需调整'。",
-                temperature=0.3,
-                max_tokens=80,
+                temperature=_temp, max_tokens=_mt,
             )
             text = extract_text(resp).strip()
-            if not text or "无需调整" in text or len(text) < 2:
+            if not text or "无需调整" in text or "保留" in text or len(text) < 2:
                 return None
-            # 更新 agent 的行为准则（最多 3 条，满时替换最旧）
             old_extra = agent.system_prompt_extra
-            if old_extra and text not in old_extra:
-                parts = old_extra.split("；")
-                if len(parts) >= 3:
-                    parts = parts[1:]
-                agent.system_prompt_extra = "；".join(parts + [text])
-            elif not old_extra:
-                agent.system_prompt_extra = text
-            else:
-                return None  # 重复准则，不更新
-            # 记录日志
+            added = self._append_rule(agent, text, _source, round_number,
+                                      charge=_charge, mode="quantified")
+            if not added:
+                return None
             self._personality_log.append({
                 "round": round_number, "agent": agent.name,
                 "old_extra": old_extra, "new_extra": agent.system_prompt_extra,
             })
             self._log("simulation",
-                       f"[人格演化] {agent.name} 新增准则: {text} (R{round_number})")
+                       f"[人格演化] {agent.name} 新增准则[{_source}]: {text} (R{round_number})")
             return agent.system_prompt_extra
         except Exception as e:
-            logger.debug("[Simulator] _reflect_and_adapt failed for %s: %s",
-                         agent.name, e)
+            logger.warning("[Simulator] _reflect_and_adapt failed for %s (mode=%s): %s",
+                           agent.name, mode, e)
             return None
 
     def _dispatch_events(self, round_number: int) -> None:
@@ -2135,6 +2361,9 @@ class SimulationEngine:
                     if self._cancel is not None and self._cancel.is_set():
                         return None
                     static_text, dynamic_text = await _recall(agent)
+                    _tom = self._tom_context(agent.entity_id)
+                    if _tom:
+                        dynamic_text = _tom + "\n" + (dynamic_text or "")
                     rel_ctx = self._rel_context.get(agent.entity_id, {}).get("summary", "")
                     causal = _causal_ctxs.get(agent.entity_id, "")
                     agent_recent = _recent_ctxs.get(agent.entity_id, "（无近期事件）")
@@ -2466,12 +2695,8 @@ class SimulationEngine:
                 for snap in snapshots:
                     if round_number - snap["round"] >= 1:
                         corrected = await self._reflect_correct(agent, snap, round_number, _rc)
-                        if corrected and agent.system_prompt_extra:
-                            old_rules = agent.system_prompt_extra.split("；")
-                            if snap["raw_rule"] in old_rules:
-                                new_rules = [r for r in old_rules if r != snap["raw_rule"]]
-                                new_rules.append(corrected)
-                                agent.system_prompt_extra = "；".join(new_rules)
+                        if corrected:
+                            self._replace_rule(agent, snap["raw_rule"], corrected)
                         self._log("simulation",
                             f"[D4纠错] {agent.name}: {snap['trigger']} (R{round_number})")
                     else:
@@ -2496,21 +2721,30 @@ class SimulationEngine:
                 eid = agent.entity_id
                 state = states.get(eid)
                 reason = self._should_reflect(eid, round_number, state, re_engine)
-                if reason is not None:
-                    result = await self._reflect_and_adapt(agent, round_number, _rc,
-                                                            mode="strategic" if ("环境" in reason or "累计" in reason or "模式" in reason)
-                                                            else "internal" if "内源" in reason else None)
-                    tag = (
-                        "[D2数值复盘]" if "环境" in reason or "累计" in reason
-                        else "[模式预警]" if "模式" in reason
-                        else "[内源自省]" if "内源" in reason
-                        else "[反思]")
-                    if result and "无需调整" not in result:
-                        self._reflection_baselines[eid] = dict(self._narrative_env)
-                        self._last_reflection_round_n[eid] = round_number
-                    self._log("simulation",
-                        f"{tag} {agent.name}: {reason} → "
-                        f"{'新增准则' if (result and '无需调整' not in result) else '无需调整'} (R{round_number})")
+                if reason is None:
+                    return
+                if reason == "关系网络变化":
+                    await self._handle_relationship_change(agent, round_number, _rc)
+                    return
+                if "指标告急" in reason:
+                    mode = "deep" if self._count_alarmed_metrics(state, re_engine) >= 2 else "emotional"
+                    tag = "[深度重构]" if mode == "deep" else "[指标应激]"
+                elif "内源" in reason:
+                    mode = "internal"
+                    tag = "[内源自省]"
+                elif "模式" in reason:
+                    mode = "strategic"
+                    tag = "[模式预警]"
+                else:
+                    mode = "strategic"
+                    tag = "[D2数值复盘]"
+                result = await self._reflect_and_adapt(agent, round_number, _rc, mode=mode)
+                if result:
+                    self._reflection_baselines[eid] = dict(self._narrative_env)
+                    self._last_reflection_round_n[eid] = round_number
+                self._log("simulation",
+                    f"{tag} {agent.name}: {reason} → "
+                    f"{'新增准则' if result else '无需调整'} (R{round_number})")
 
         reflect_tasks = [_q_reflect_one(a) for a in self.agents]
         await asyncio.gather(*reflect_tasks)
@@ -2522,6 +2756,9 @@ class SimulationEngine:
                     await self._reflect_retrospect(agent, round_number, _rc)
             retro_tasks = [_q_retrospect_one(a) for a in self.agents]
             await asyncio.gather(*retro_tasks)
+
+        # ── 情绪准则衰减 ──
+        self._decay_rules(round_number)
 
         # 保存本轮关系网络快照供下轮对比
         self._prev_rel_map = dict(getattr(self, "_rel_context", {}))

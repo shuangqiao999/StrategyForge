@@ -80,6 +80,9 @@ class DeductionAgentProfile:
     relationships: dict[str, str] = field(default_factory=dict)
     system_prompt_extra: str = ""
     entity_type: str = ""
+    # 规则注册表：每条反思规则带 source/charge/effectiveness 等生命周期信息。
+    # system_prompt_extra 保留为其派生影子字符串（join 的 rule.text），向后兼容旧读写点。
+    _rule_registry: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
