@@ -31,7 +31,7 @@ class ProviderDef:
 
 PROVIDER_CATALOG: dict[str, ProviderDef] = {
     "openai": ProviderDef("openai", "OpenAI", "openai",
-                          "https://api.openai.com/v1", "gpt-4o", "", "text-embedding-3-small"),
+                          "https://api.openai.com/v1", "", "", ""),
     "anthropic": ProviderDef("anthropic", "Anthropic (Claude)", "anthropic",
                              "https://api.anthropic.com"),
     "dashscope": ProviderDef("dashscope", "阿里云 DashScope", "openai",
@@ -47,7 +47,7 @@ PROVIDER_CATALOG: dict[str, ProviderDef] = {
     "minimax-int": ProviderDef("minimax-int", "MiniMax (International)", "openai",
                                "https://api.minimax.io/v1"),
     "deepseek": ProviderDef("deepseek", "DeepSeek", "openai",
-                            "https://api.deepseek.com/v1", "deepseek-chat"),
+                            "https://api.deepseek.com/v1"),
     "openrouter": ProviderDef("openrouter", "OpenRouter", "openai",
                               "https://openrouter.ai/api/v1"),
     "siliconflow": ProviderDef("siliconflow", "硅基流动 (SiliconFlow·中国)", "openai",
@@ -92,7 +92,7 @@ PROVIDER_CATALOG: dict[str, ProviderDef] = {
                           "http://localhost:11434/v1", is_local=True, note="本地运行，无需API Key"),
     "lmstudio": ProviderDef("lmstudio", "LM Studio (本地)", "openai",
                             "http://127.0.0.1:1234/v1", "",
-                            "", "text-embedding-embeddinggemma-300m-qat",
+                            "", "",
                             is_local=True, note="本地运行，无需API Key"),
     "custom": ProviderDef("custom", "自定义 OpenAI 兼容", "openai"),
 }

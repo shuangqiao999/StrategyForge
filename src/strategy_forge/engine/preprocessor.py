@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import threading
 import uuid
@@ -32,15 +33,18 @@ class PreprocessResult:
 
 
 class DeductionPreprocessor:
-    # 嵌入文本前缀长度：适配 2048-token 上下文窗口的嵌入模型（如 text-embedding-embeddinggemma-300m-qat）。
-    # 中文最坏情况下 ~2 tokens/char，1000 字 ≈ 2000 tokens，安全余量内。
-    _INDEX_PREFIX_LEN = 1000
-
     def __init__(self, workspace_root: str | Path, session_id: str) -> None:
+        from strategy_forge.core.config import config
+
         ws = Path(workspace_root)
         self.workspace_root = ws
         self.session_id = session_id
         self.table_name = f"deduction_chunks_{session_id}"
+        # 嵌入文本前缀长度：默认跟随 chunk_size（覆盖整块）；可用 FORGE_INDEX_PREFIX_LEN 显式覆盖。
+        # 注意：前缀需适配嵌入模型上下文窗口——大上下文模型（如 qwen3-embedding）可覆盖整块。
+        self._INDEX_PREFIX_LEN = int(os.getenv("FORGE_INDEX_PREFIX_LEN", "") or config.deduction_chunk_size)
+        # 召回时按实体名定位的片段宽度（决策期每片段带回的字符数）。
+        self._recall_snippet_chars = int(os.getenv("FORGE_RECALL_SNIPPET_CHARS", "600"))
 
         self._db: Any = None
         self._table: Any = None
@@ -372,7 +376,7 @@ class DeductionPreprocessor:
                 continue
             content = r.get("content", "")
             if content and content not in results:
-                results.append(content[:300])
+                results.append(content[:600])
             if len(results) >= top_k:
                 break
         self._dynamic_cache[cache_key] = results
@@ -401,19 +405,28 @@ class DeductionPreprocessor:
         except Exception:
             return []
         results: list[str] = []
+        seen: set[str] = set()
         for r in raw:
             content = r.get("content", "")
-            if not content:
+            if not content or content in seen:
                 continue
             if must_contain and not any(kw in content for kw in must_contain):
                 continue
-            if content not in results:
-                results.append(content)
+            seen.add(content)
+            results.append(self._snippet_around(content, entity_name, self._recall_snippet_chars))
             if len(results) >= top_k:
                 break
         with self._cache_lock:
             self._recall_cache[cache_key] = list(results)
         return results
+
+    def _snippet_around(self, content: str, name: str, width: int) -> str:
+        """返回实体名附近的一段文本（width 字，实体名位于前 1/3 处）；找不到则取开头。"""
+        idx = content.find(name)
+        if idx < 0:
+            return content[:width]
+        start = max(0, idx - width // 3)
+        return content[start:start + width]
 
     def _hybrid_or_vector_search(self, table, query_vec, query_text, fetch_k):
         if self._fts_ready and query_text:

@@ -78,13 +78,15 @@ class DeductionConfig:
         self.deduction_sim_others_topk = int(os.getenv("FORGE_SIM_OTHERS_TOPK", "10"))
         # 模拟召回(原著/事件)片段上限 + 单块字符预算。
         self.deduction_sim_recall_topk = int(os.getenv("FORGE_SIM_RECALL_TOPK", "4"))
-        self.deduction_sim_recall_chars = int(os.getenv("FORGE_SIM_RECALL_CHARS", "1200"))
+        self.deduction_sim_recall_chars = int(os.getenv("FORGE_SIM_RECALL_CHARS", "2400"))
         # 注入决策 prompt 的近期事件条数。
         self.deduction_sim_recent_events = int(os.getenv("FORGE_SIM_RECENT_EVENTS", "4"))
         # 种子/情报 LLM 调用的输出上限（防多实体长 JSON 被服务端默认上限截断；
         # 需 prompt+max_tokens <= 模型 n_ctx，故值较大时确保上下文窗口足够）。
         self.deduction_seed_max_tokens = int(os.getenv("FORGE_SEED_MAX_TOKENS", "20000"))
         self.deduction_intel_max_tokens = int(os.getenv("FORGE_INTEL_MAX_TOKENS", "28000"))
+        # 图抽取单块输出上限（大语义块内实体/关系更多，防被服务端默认上限截断丢尾）。
+        self.deduction_graph_max_tokens = int(os.getenv("FORGE_GRAPH_MAX_TOKENS", "12000"))
         # 报告 LLM 输出上限（防长报告被服务端默认上限截断丢整份）。
         self.deduction_report_max_tokens = int(os.getenv("FORGE_REPORT_MAX_TOKENS", "30000"))
         # 动态事件召回：用 Kuzu 关系邻居(盟友/对手)增强 query，聚焦"与我有关系者"的事件。

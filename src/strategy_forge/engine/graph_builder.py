@@ -150,9 +150,11 @@ async def _extract_from_chunks(
 
     async def _chunk_call(text: str) -> str | None:
         try:
+            _cap = max(5000, config.deduction_chunk_size)
             resp = await client.chat_json(
-                [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:5000]))],
-                system=system, schema_name="graph_extract", temperature=0)
+                [Message(role="user", content=_chunk_base.replace("__TEXT__", text[:_cap]))],
+                system=system, schema_name="graph_extract", temperature=0,
+                max_tokens=config.deduction_graph_max_tokens)
             return _extract_text(resp)
         except LLMConnectionError:
             raise

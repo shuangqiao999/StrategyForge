@@ -576,7 +576,7 @@ class SimulationEngine:
                     pp.retrieve_for_entity, agent.name, rk,
                     {agent.name} if agent.name else None)
                 if frags:
-                    static_text = "\n---\n".join(f[:300] for f in frags[:rk])[:rc]
+                    static_text = "\n---\n".join(f[:600] for f in frags[:rk])[:rc]
             except Exception as e:
                 logger.warning("[Simulator] 静态召回失败 %s: %s", agent.name, e)
         if self._persist_events and pp is not None:
