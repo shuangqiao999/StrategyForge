@@ -2198,20 +2198,17 @@ class SimulationEngine:
                 continue
             # Check if FSM should drive this agent (entity_id based lookup, not index)
             state = fsm_state_map.get(agent.entity_id) if fsm_state_map else None
-            if state is not None and state not in fsm_command:
-                # FSM deterministic action — skip LLM
-                act = fsm_action_map.get(agent.entity_id) if fsm_action_map else None
-                if act is not None:
-                    act = dict(act)
-                if act is None:
-                    act = {"action_type": "observe", "intensity": 0.3, "target": ""}
+            act = fsm_action_map.get(agent.entity_id) if fsm_action_map else None
+            if state is not None and state not in fsm_command and act is not None:
+                # FSM deterministic action — skip LLM（仅当确有确定性动作；None 表示交还 LLM）
+                act = dict(act)
                 # 数据差异化描述：结合当前指标最危险项，避免"[FSM] observe"千篇一律
                 act["rationale"] = self._describe_fsm_action(agent, state, act.get("action_type", "observe"))
                 act["driver"] = "fsm"
                 act["actor_id"] = agent.entity_id
                 plan.append(act)
                 continue
-            plan.append(None)  # command 态 → 待并发 LLM 决策
+            plan.append(None)  # command 态 / observe 交还 / 无状态 → 待并发 LLM 决策
 
         # 第二遍：command 态 agent 并发 LLM 决策（上限 = FORGE_MAX_CONCURRENT），按索引回填保序
         llm_idx = [i for i, p in enumerate(plan) if p is None]

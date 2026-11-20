@@ -2264,7 +2264,7 @@
         "polarization": 4
       },
       "defensive_buildup": {
-        "strength": -3,
+        "strength": 3,
         "supply": -5,
         "fatigue": -2,
         "morale": 5,

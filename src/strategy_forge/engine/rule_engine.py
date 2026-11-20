@@ -125,6 +125,18 @@ class RuleEngine:
             lines.append(line)
         return "\n".join(lines)
 
+    def action_lookup(self) -> dict[str, str]:
+        """返回 {name/description → name} 映射，供 action_type 归一化（容忍 LLM 输出中文描述等变体）。"""
+        m: dict[str, str] = {}
+        for a in self.pack["actions"]:
+            name = _normalize_action(a)
+            m[name] = name
+            if isinstance(a, dict):
+                desc = str(a.get("description", "") or "").strip()
+                if desc and desc not in m:
+                    m[desc] = name
+        return m
+
     # ── 状态初始化 ──
     def init_state(self, entity_id: str, name: str) -> EntityState:
         return EntityState(id=entity_id, name=name, domain=self.domain,

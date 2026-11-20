@@ -83,3 +83,35 @@ def test_agent_factory_without_registry_fallback():
 
     agents = asyncio.run(_run())
     assert {a.name for a in agents} == {"A国", "B国"}
+
+
+# ── P0-1：action_type 归一化不再静默 observe ──
+
+def test_action_lookup_maps_description_to_name():
+    from strategy_forge.engine.rule_engine import RuleEngine
+    re = RuleEngine.from_domain("geo_strategy")
+    lookup = re.action_lookup()
+    assert "military_deterrence_with_diplomacy" in lookup
+    assert lookup.get("military_deterrence_with_diplomacy") == "military_deterrence_with_diplomacy"
+
+
+def test_coerce_action_description_variant():
+    from strategy_forge.engine.rule_engine import RuleEngine
+    from strategy_forge.engine.strategic_reasoner import StrategicReasoner
+    re = RuleEngine.from_domain("geo_strategy")
+    actions = re.actions()
+    lookup = re.action_lookup()
+    # 中文描述（子串）应归一到英文名，而非 observe
+    assert StrategicReasoner._coerce_action("军事威慑+外交", actions, lookup) == "military_deterrence_with_diplomacy"
+    assert StrategicReasoner._coerce_action("tech_investment", actions, lookup) == "tech_investment"
+    assert StrategicReasoner._coerce_action("TECH_INVESTMENT", actions, lookup) == "tech_investment"
+
+
+def test_coerce_action_unknown_falls_back_neutral_not_observe():
+    from strategy_forge.engine.rule_engine import RuleEngine
+    from strategy_forge.engine.strategic_reasoner import StrategicReasoner
+    re = RuleEngine.from_domain("geo_strategy")
+    actions = re.actions()
+    lookup = re.action_lookup()
+    # 未知动作回退到 intel_gather（中性），而不是 observe
+    assert StrategicReasoner._coerce_action("totally_bogus_action", actions, lookup) == "intel_gather"

@@ -107,6 +107,8 @@ class StrategicReasoner:
         self._intervention_round: int = -1
         # 叙事模式行动去重：每 agent 最近 5 轮已执行行动摘要
         self._recent_actions: dict[str, list[str]] = defaultdict(list)
+        # 量化模式行动去重：每 agent 最近若干轮已选 action_type
+        self._recent_action_types: dict[str, list[str]] = defaultdict(list)
 
     def _cached_intervention(self, round_number: int) -> str:
         """Fetch latest intervention, cached per round."""
@@ -213,6 +215,32 @@ class StrategicReasoner:
             first = act.split("|")[0].strip()
             return first if first else "observe"
         return act
+
+    @staticmethod
+    def _coerce_action(action: Any, actions: list[str], lookup: dict[str, str]) -> str:
+        """把 LLM 输出的 action_type 归一到目录内的动作名，尽量避免静默回落 observe。
+
+        顺序：精确 → 大小写不敏感 → 描述映射 → 子串 → 中性兜底(intel_gather/diplomatic_engagement)。
+        """
+        act = str(action or "").strip()
+        if not act:
+            return "observe"
+        if act in actions:
+            return act
+        low = act.lower()
+        for a in actions:
+            if a.lower() == low:
+                return a
+        if act in lookup:
+            return lookup[act]
+        for desc, name in lookup.items():
+            if desc and (desc in act or act in desc):
+                return name
+        for a in actions:
+            if low in a.lower() or a.lower() in low:
+                return a
+        logger.warning("[Reasoner] 无法归一 action_type '%s'，回退中性动作", act)
+        return "intel_gather" if "intel_gather" in actions else ("diplomatic_engagement" if "diplomatic_engagement" in actions else "observe")
 
     @staticmethod
     def _persona_with_evolution(agent: Any) -> str:
@@ -388,14 +416,20 @@ class StrategicReasoner:
         from strategy_forge.core.llm_client import Message
 
         actions = rule_engine.actions()
+        lookup = rule_engine.action_lookup()
         user_cmd = self._cached_intervention(round_number)
 
         goals = ", ".join(agent.goals) if agent.goals else "依据人格自主行动"
         imm = "；".join(self._immutable_goals) if self._immutable_goals else "无"
+        recent_types = self._recent_action_types.get(agent.entity_id, [])
+        recent_types_text = "、".join(recent_types[-4:]) if recent_types else "（无）"
         select_hint = ("从可选行动中分配资源给一个或多个动作"
                        if self._enable_multi_action else "从可选行动中选择一个并给出投入力度")
         diversity_hint = ("。避免连续3轮以上重复相同策略，结合当前局势变化探索多元行动"
                           if round_number > 3 else "")
+        if recent_types:
+            diversity_hint += (f"。你最近几轮已执行的动作类型：{recent_types_text}；"
+                               "若其中某类型已连续重复，本轮务必换一个不同类型的动作")
         if round_number > 5:
             diversity_hint += "。注意：你已连续多轮执行相同类型的行动，这可能导致策略僵化和对手预判。请认真考虑在当前轮选择一个不同类型的行动。"
         # B4: 云端 prompt 缓存友好排序 —— 同一轮所有 agent 相同的"共享前缀"放最前
@@ -469,12 +503,12 @@ class StrategicReasoner:
             f"## 你的人格\n{self._persona_with_evolution(agent)}\n",
             f"## 你的目标\n{goals}\n",
             f"## 你的当前状态\n{state.to_prompt_context()}\n",
-            f"## 其他参与方状态\n{other_context or '（暂无）'}\n",
+            f"## 其他参与方状态（仅供你参考，切勿张冠李戴——他人的状态、身份与行动与你无关）\n{other_context or '（暂无）'}\n",
         ])
         if relationship_context:
             agent_parts.append(f"## 关系网络（盟友/对手）\n{relationship_context}\n")
         if static_knowledge:
-            agent_parts.append(f"## 原著背景（语义召回）\n{static_knowledge}\n")
+            agent_parts.append(f"## 原著背景（语义召回，仅与「{agent.name}」相关的片段）\n{static_knowledge}\n")
         if dynamic_memory:
             agent_parts.append(f"## 历史记忆（语义召回）\n{dynamic_memory}\n")
         if spatial_context:
@@ -517,9 +551,7 @@ class StrategicReasoner:
                 for a in raw_actions:
                     if not isinstance(a, dict):
                         continue
-                    act = str(a.get("action_type", "")).strip()
-                    if act not in actions:
-                        continue
+                    act = self._coerce_action(a.get("action_type", ""), actions, lookup)
                     try:
                         w = float(a.get("weight", 0.0))
                     except (TypeError, ValueError):
@@ -529,6 +561,7 @@ class StrategicReasoner:
                     subs.append({"action_type": act, "weight": w,
                                  "target": str(a.get("target", "") or "").strip()})
             if not subs:
+                self._record_action_type(agent.entity_id, "observe")
                 return {"action_type": "observe", "target": "", "intensity": budget,
                         "budget": budget,
                         "actions": [{"action_type": "observe", "weight": 1.0, "target": ""}],
@@ -539,6 +572,7 @@ class StrategicReasoner:
             for s in subs:
                 s["weight"] = round(s["weight"] / total, 4)
             primary = subs[0]
+            self._record_action_type(agent.entity_id, primary["action_type"])
             return {
                 "action_type": primary["action_type"],
                 "target": primary["target"],
@@ -548,9 +582,7 @@ class StrategicReasoner:
                 "rationale": rationale,
             }
 
-        action = str(data.get("action_type", "observe"))
-        if action not in actions:
-            action = "observe"
+        action = self._coerce_action(data.get("action_type", ""), actions, lookup)
         try:
             intensity = max(0.0, min(1.0, float(data.get("intensity", 0.5))))
         except (TypeError, ValueError):
@@ -568,9 +600,7 @@ class StrategicReasoner:
             for c in cands_raw:
                 if not isinstance(c, dict):
                     continue
-                act = str(c.get("action_type", "")).strip()
-                if act not in actions:
-                    continue
+                act = self._coerce_action(c.get("action_type", ""), actions, lookup)
                 try:
                     ci = max(0.0, min(1.0, float(c.get("intensity", 0.5))))
                 except (TypeError, ValueError):
@@ -592,7 +622,15 @@ class StrategicReasoner:
                     "rationale": first.get("rationale", str(rationale)[:120]),
                     "_candidates": cands,
                 }
+        self._record_action_type(agent.entity_id, result.get("action_type", "observe"))
         return result
+
+    def _record_action_type(self, agent_id: str, action_type: str) -> None:
+        """记录量化模式每轮选中的 action_type，供跨轮去重提示使用。"""
+        hist = self._recent_action_types[agent_id]
+        hist.append(str(action_type))
+        if len(hist) > 5:
+            del hist[:-5]
 
 
 def _parse_candidates(raw: str) -> list[dict[str, Any]]:
