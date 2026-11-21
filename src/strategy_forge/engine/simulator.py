@@ -221,11 +221,13 @@ $recent_events
 
 # 关系→盟友/对手的关键词启发式（中英），用于从 Kuzu RELATES 关系反哺决策与信任。
 _REL_ALLY_KW = ("盟", "同盟", "结盟", "联盟", "支持", "合作", "友", "部下", "下属",
-                "效忠", "追随", "ally", "allied", "support", "friend", "cooperat",
-                "subordinate", "loyal")
+                "效忠", "追随", "援助", "联合", "拉拢", "伙伴", "携手", "团结", "盟友",
+                "ally", "allied", "support", "friend", "cooperat",
+                "subordinate", "loyal", "partner", "aid")
 _REL_FOE_KW = ("敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛", "仇", "攻击",
-               "威胁", "rival", "enemy", "hostil", "oppos", "compet", "conflict",
-               "betray", "threat")
+               "威胁", "制裁", "封锁", "遏制", "打压", "矛盾", "施压", "挑战", "争夺",
+               "rival", "enemy", "hostil", "oppos", "compet", "conflict",
+               "betray", "threat", "sanction", "blockade", "contain", "attack")
 
 
 class SimulationEngine:
@@ -829,6 +831,10 @@ class SimulationEngine:
 ## 近期趋势
 {recent_trends}
 
+## 指标可行性约束（硬性）
+- 准则必须与当前指标可行空间一致：若 strength/supply/energy_resource 等已归零或枯竭，禁止输出「全面动员/核威慑/全域进攻/大规模战争」等需要高强度资源支撑的准则，应改为收缩/谈判/自保/求和等可行策略。
+- 只有相关指标充裕时，才可输出高强度对抗类准则。
+
 ## 任务
 输出一行≤15字的本能应激准则（允许激进、防卫过当、非理性）。
 只输出准则本身。"""
@@ -847,6 +853,9 @@ class SimulationEngine:
 ## 现有准则
 {current_rules}
 
+## 指标可行性约束（硬性）
+- 准则必须与当前指标可行空间一致：若 strength/supply/energy_resource 等已归零或枯竭，禁止输出「全面动员/核威慑/全域进攻」等需要高强度资源支撑的准则，应改为收缩/谈判/自保等可行策略。
+
 ## 任务
 输出一行≤20字的战略修正准则。如果当前战略正确输出"无需调整"。
 只输出准则本身。"""
@@ -861,6 +870,9 @@ class SimulationEngine:
 
 ## 现有准则（将被替换）
 {current_rules}
+
+## 指标可行性约束（硬性）
+- 准则必须与当前指标可行空间一致：若 strength/supply/energy_resource 等已归零或枯竭，禁止输出「全面动员/核威慑/全域进攻」等需要高强度资源支撑的准则。
 
 ## 任务
 输出一条≤25字的根本性新准则，完全替代旧准则。
@@ -1835,15 +1847,36 @@ class SimulationEngine:
         agent.system_prompt_extra = "；".join(
             r.get("text", "") for r in agent._rule_registry if r.get("text"))
 
+    @staticmethod
+    def _char_jaccard(a: str, b: str) -> float:
+        """字符 2-gram Jaccard 相似度（用于准则去重）。"""
+        def _grams(s: str):
+            s = (s or "").strip()
+            if len(s) < 2:
+                return {s}
+            return {s[i:i + 2] for i in range(len(s) - 1)}
+        ga, gb = _grams(a), _grams(b)
+        if not ga or not gb:
+            return 0.0
+        return len(ga & gb) / len(ga | gb)
+
     def _append_rule(self, agent: Any, text: str, source: str, round_number: int,
                      charge: float = 0.0, target: str = "", mode: str = "") -> bool:
-        """追加规则并同步影子。最多保留 3 条，满则替换最旧。返回是否新增。"""
+        """追加规则并同步影子。最多保留 3 条，满则替换最旧。
+
+        去重：精确文本相同，或与现有准则 Jaccard(2-gram)>0.8 视为重复，不新增。
+        """
         self._ensure_rule_registry(agent)
         text = text.strip()
         if not text:
             return False
-        if any(r.get("text") == text for r in agent._rule_registry):
-            return False
+        for r in agent._rule_registry:
+            rt = (r.get("text") or "").strip()
+            if rt == text:
+                return False
+            if self._char_jaccard(rt, text) > 0.8:
+                # 高度相似 → 视为重复，保留原准则（不膨胀）
+                return False
         agent._rule_registry.append({
             "text": text, "source": source, "charge": charge,
             "round_added": round_number, "effectiveness": 0,
@@ -1931,9 +1964,14 @@ class SimulationEngine:
 
     # ── 心智理论（ToM）──
     async def _handle_relationship_change(self, agent: Any, round_number: int, client: Any) -> None:
-        """关系网络变化 → 更新对目标角色的认知判断（而非自我反思）。"""
+        """关系网络变化 → 更新对目标角色的认知判断（而非自我反思）。
+
+        仅对决策实体（tier1 智能体）做 ToM，排除"中国军事企业清单"等非决策实体。
+        """
         changed = self._pending_tom_updates.pop(agent.entity_id, [])
-        for target in changed[:2]:
+        decision_names = getattr(self, "_name_to_id", {})
+        candidates = [t for t in changed if t in decision_names and t != agent.name]
+        for target in candidates[:2]:
             await self._update_target_mental_model(agent, target, round_number, client)
 
     async def _update_target_mental_model(

@@ -29,6 +29,7 @@ _REPORT_PROMPT = """你是一位高级战略分析专家。你面前的资料，
 7. **区分事实与推测**：只有推演数据/因果归因支持的才作为判断陈述；不确定的用"可能/或将/存在风险"表述，不要写成既成事实。
 8. **避免极端断言**：禁止出现"完全孤立""社会崩溃""彻底失败"等表述——此类只能作为风险情景谨慎提及，不作为结论。
 9. **区分"自述意图"与"实际结算"（硬性规则）**：关键事件序列中，每条事件的前半段是参与者**自述的意图/rationale**，结尾括号内的数值变化（如 `（strength -3.0，morale +1.0）`）才是**本轮实际结算的结果**。叙述与因果判断必须以括号内实际结算为准——若某方宣称"军事打击/技术封锁"但括号内没有对应指标变化，只能表述为"试图施压/表态/未能达成"，严禁把未结算的意图写成既成事实。
+10. **指标时序一致性（硬性规则）**：全局态势数据中每个实体标注了「首值→末值（最低值）」。若某实体关键指标已从高位跌至低位（如军力 18→0），严禁在叙述中称其"占据主动/保持优势/稳占上风"，必须如实反映其衰落/逼近淘汰线；结论必须与数值时序严格一致。
 
 ## 推演基础信息
 - 标题: $title · 领域: $domain · 轮次: $round_count
@@ -302,11 +303,18 @@ def _build_quantified_summary(
             continue
         history = getattr(st, "history", []) or []
         deltas_by_metric: dict[str, float] = {}
-        for h in history[-30:]:
+        first_by_metric: dict[str, float] = {}
+        min_by_metric: dict[str, float] = {}
+        for h in history:
             m = h.get("metric", "")
             d = h.get("delta", 0)
-            if m:
-                deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
+            if not m:
+                continue
+            deltas_by_metric[m] = deltas_by_metric.get(m, 0) + float(d)
+            nv = float(h.get("new", h.get("old", 0)))
+            if m not in first_by_metric:
+                first_by_metric[m] = float(h.get("old", nv))
+            min_by_metric[m] = min(min_by_metric.get(m, nv), nv)
 
         # 选取最关键的指标（按与淘汰线的逼近程度排序）
         scored = []
@@ -331,7 +339,13 @@ def _build_quantified_summary(
                 ms_d = deltas_by_metric.get("market_share", 0)
                 if rnd_d > 3 or ms_d > 3:
                     qualifier = "（战略性投入，非危机）"
-            segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh}{qualifier})")
+            # 指标时序：首值→末值（最低值），供 LLM 判断真实走势，避免"指标归零仍称占据主动"
+            timeline = ""
+            if k in first_by_metric:
+                fv = first_by_metric[k]
+                mn = min_by_metric.get(k, v)
+                timeline = f" 首{fv:.0f}→末{v:.0f}(最低{mn:.0f})"
+            segs.append(f"{label}({level}·{trend} Δ{cum_delta:+.0f}{th_text}{near_thresh}{qualifier}{timeline})")
 
         parts.append(f"{name}: {'; '.join(segs) if segs else '无关键指标'}")
     return "\n".join(parts)

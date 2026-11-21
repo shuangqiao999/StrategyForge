@@ -197,8 +197,15 @@ class RuleEngine:
                        env: dict[str, str] | None = None,
                        state: Any = None) -> tuple[dict, dict]:
         intensity = max(0.0, min(1.0, float(intensity)))
-        self_d = {k: v * intensity for k, v in self.pack["self_effects"].get(action, {}).items()}
-        tgt_d = {k: v * intensity for k, v in self.pack["target_effects"].get(action, {}).items()}
+        # 指标白名单：只结算规则包 metrics 内指标（下划线前缀的特殊标记如 _intel_exposed 保留），
+        # 避免继承动作把跨域指标（如 chip_stock）写回 state。
+        _valid = set(self.pack.get("metrics", []))
+
+        def _ok(m: str) -> bool:
+            return m in _valid or m.startswith("_")
+
+        self_d = {k: v * intensity for k, v in self.pack["self_effects"].get(action, {}).items() if _ok(k)}
+        tgt_d = {k: v * intensity for k, v in self.pack["target_effects"].get(action, {}).items() if _ok(k)}
         # 状态依赖条件效应
         if state is not None:
             for key, cfg in self.pack.get("conditional_effects", {}).items():
@@ -209,7 +216,8 @@ class RuleEngine:
                 ok = self._eval_cond_cached(parsed, state) if parsed else self._eval_cond(cond, state)
                 if ok:
                     for k, v in cfg.get("self_effects", {}).items():
-                        self_d[k] = self_d.get(k, 0.0) + v * intensity
+                        if _ok(k):
+                            self_d[k] = self_d.get(k, 0.0) + v * intensity
         if env:
             for key, sel in (("weather_modifiers", env.get("weather")),
                              ("terrain_modifiers", env.get("terrain"))):

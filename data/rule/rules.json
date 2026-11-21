@@ -2146,7 +2146,8 @@
       "energy_resource",
       "grain_resource",
       "global_reputation",
-      "alliance_trust"
+      "alliance_trust",
+      "talent_pool"
     ],
     "initial_metrics": {
       "strength": 100,
@@ -2164,7 +2165,8 @@
       "energy_resource": 70,
       "grain_resource": 65,
       "global_reputation": 60,
-      "alliance_trust": 50
+      "alliance_trust": 50,
+      "talent_pool": 50
     },
     "thresholds": {
       "strength": 15,

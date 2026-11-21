@@ -268,10 +268,14 @@ def get_template(domain: str) -> dict[str, Any] | None:
 
 
 def _deep_merge(base: dict, child: dict) -> dict:
-    """深度合并：child 覆盖 base 的同名字段。metrics/actions 做并集去重。"""
+    """深度合并：child 覆盖 base 的同名字段。
+
+    - actions：并集去重（子域继承祖先全部动作）。
+    - metrics / initial_metrics：白名单覆盖（子域显式定义即整体覆盖，避免跨域指标污染）。
+    """
     result = dict(base)
     for key, val in child.items():
-        if key in ("metrics", "actions") and key in result:
+        if key == "actions" and key in result:
             # 并集去重：保留 base 中的项，child 中的同名项覆盖
             base_items = {item if isinstance(item, str) else item.get("name", item): item
                           for item in result[key]}
@@ -289,11 +293,14 @@ def _deep_merge(base: dict, child: dict) -> dict:
                 else:
                     merged.append(cv)
             result[key] = merged
+        elif key in ("metrics", "initial_metrics"):
+            # 白名单覆盖：子域显式给出即整体覆盖，不做并集
+            result[key] = val
         elif key == "ode_engine" and key in result:
             result[key]["equations"] = {**result[key].get("equations", {}),
                                          **val.get("equations", {})}
             result[key]["params"] = {**result[key].get("params", {}),
-                                      **val.get("params", {})}
+                                       **val.get("params", {})}
         elif isinstance(val, dict) and isinstance(result.get(key), dict):
             result[key] = _deep_merge(result[key], val)
         else:

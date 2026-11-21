@@ -178,22 +178,41 @@ class EntityRegistry:
             key=lambda e: -e.freq)
 
     def get_tier1(self) -> list[RegisteredEntity]:
-        """一级核心博弈者 → 生成独立智能体。"""
+        """一级核心博弈者 → 生成独立智能体（仅保留未被降级的）。"""
         return sorted(
-            [e for e in self.entities.values() if e.tier == 1],
+            [e for e in self.entities.values()
+             if e.tier == 1 and e.decision == "KEEP"],
             key=lambda e: -e.freq)
 
     def get_tier2(self) -> list[RegisteredEntity]:
-        """二级次级参与者 → 保留不生成智能体。"""
+        """二级次级参与者 → 保留不生成智能体（仅保留未被降级的）。"""
         return sorted(
-            [e for e in self.entities.values() if e.tier == 2],
+            [e for e in self.entities.values()
+             if e.tier == 2 and e.decision == "KEEP"],
             key=lambda e: -e.freq)
 
     def get_tier12(self) -> list[RegisteredEntity]:
         """全部保留实体（一级+二级），向后兼容旧 get_kept()。"""
         return sorted(
-            [e for e in self.entities.values() if e.tier in (1, 2)],
+            [e for e in self.entities.values()
+             if e.tier in (1, 2) and e.decision == "KEEP"],
             key=lambda e: -e.freq)
+
+    def _mark_discard(self, entity: "RegisteredEntity", reason: str) -> bool:
+        """统一弃用：置 DISCARD/tier=3 并回写 tier 计数（Layer3 降级后 tier1/tier2 列表同步）。"""
+        if entity.decision == "DISCARD":
+            return False
+        old_tier = entity.tier
+        entity.decision = "DISCARD"
+        entity.tier = 3
+        entity.reason = reason
+        self.kept -= 1
+        self.discarded += 1
+        if old_tier == 1 and self.tier1_count > 0:
+            self.tier1_count -= 1
+        elif old_tier == 2 and self.tier2_count > 0:
+            self.tier2_count -= 1
+        return True
 
     def get_by_type(self, etype: str) -> list[RegisteredEntity]:
         return [e for e in self.entities.values() if e.type == etype]
@@ -1173,10 +1192,7 @@ def _pre_merge_aliases(
         if source not in tgt_entity.aliases:
             tgt_entity.aliases.append(source)
         # 标记源为 DISCARD
-        src_entity.decision = "DISCARD"
-        src_entity.reason = f"代码别名合并→{target}"
-        registry.kept -= 1
-        registry.discarded += 1
+        registry._mark_discard(src_entity, f"代码别名合并→{target}")
         reason_key = "代码别名合并"
         registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
         merged_count += 1
@@ -1527,10 +1543,7 @@ async def _layer3_cross_validate(
             for a in src.aliases:
                 if a not in tgt.aliases and a != keep_name:
                     tgt.aliases.append(a)
-            src.decision = "DISCARD"
-            src.reason = f"L3合并→{keep_name}({reason})"
-            registry.kept -= 1
-            registry.discarded += 1
+            registry._mark_discard(src, f"L3合并→{keep_name}({reason})")
             reason_key = f"L3合并({reason[:30]})"
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
             merge_applied += 1
@@ -1547,10 +1560,7 @@ async def _layer3_cross_validate(
             continue
         entity = registry.entities.get(name)
         if entity and entity.decision == "KEEP":
-            entity.decision = "DISCARD"
-            entity.reason = f"L3({reason})"
-            registry.kept -= 1
-            registry.discarded += 1
+            registry._mark_discard(entity, f"L3({reason})")
             reason_key = f"L3({reason[:30]})"
             registry.discard_reasons[reason_key] = registry.discard_reasons.get(reason_key, 0) + 1
             downgrade_applied += 1
@@ -1624,10 +1634,7 @@ def _apply_layer3_result(registry: EntityRegistry, result: dict) -> None:
                 tgt.rich_description += "；" + src.rich_description
             if dn not in tgt.aliases:
                 tgt.aliases.append(dn)
-            src.decision = "DISCARD"
-            src.reason = f"L3合并→{keep_name}({reason})"
-            registry.kept -= 1
-            registry.discarded += 1
+            registry._mark_discard(src, f"L3合并→{keep_name}({reason})")
 
     # 执行 downgrade
     for item in downgrades:
@@ -1637,10 +1644,7 @@ def _apply_layer3_result(registry: EntityRegistry, result: dict) -> None:
         reason = str(item.get("reason", "缓存冗余"))[:40]
         entity = registry.entities.get(name)
         if entity and entity.decision == "KEEP":
-            entity.decision = "DISCARD"
-            entity.reason = f"L3({reason})"
-            registry.kept -= 1
-            registry.discarded += 1
+            registry._mark_discard(entity, f"L3({reason})")
 
 
 def _resolve_hierarchy(
@@ -1685,10 +1689,7 @@ def _resolve_hierarchy(
                 to_discard.append((e, f"人物(归入{country})"))
 
     for e, reason in to_discard:
-        e.decision = "DISCARD"
-        e.reason = reason
-        registry.kept -= 1
-        registry.discarded += 1
+        registry._mark_discard(e, reason)
 
     if to_discard and log_fn:
         log_fn("agents", f"兜底层级修正: {len(to_discard)} 个重叠实体降级")
