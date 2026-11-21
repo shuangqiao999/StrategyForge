@@ -64,6 +64,7 @@ $finance_rules
 - 提取具有独立战略决策权的实体（公司、主权国家、核心人物），不提取下属/部门/项目/产品
 - 如果文本只提了行业泛指而未提具体公司 → 不提取
 - 行业协会、联盟、论坛本身不提取，其成员公司才提取
+{entity_filter}
 
 ## 提取示例
 文本："A公司以26%份额领跑市场，B公司主力产品排名第二。原材料价格反弹至20万元/吨，多家企业成本承压。地区贸易联盟对新进入者加征反补贴税。"
@@ -84,6 +85,7 @@ async def extract_seed_metrics(
     metrics: list[str],
     client: Any,
     max_chars: int = 20000,
+    entity_names: list[str] | None = None,
 ) -> dict[str, dict[str, float]]:
     """Extract per-entity initial metrics from seed material via LLM.
 
@@ -92,12 +94,23 @@ async def extract_seed_metrics(
         metrics: List of metric names from the selected rule pack.
         client: DeductionLLMClient instance.
         max_chars: Max chars of source to send to LLM.
+        entity_names: 白名单——仅提取这些实体（通常为 tier1 决策实体），避免悬空 seed。
 
     Returns:
         {entity_name: {metric: value}}, empty dict on any failure.
     """
     if not source or not metrics:
         return {}
+
+    name_set = set(entity_names) if entity_names else None
+
+    # 实体白名单：只提取 tier1 决策实体，避免把非决策实体的指标也抽进来
+    entity_filter = ""
+    if name_set:
+        entity_filter = (
+            "\n- ★ 实体白名单（只提取以下实体名，忽略名单外的任何实体）：\n  "
+            + "、".join(sorted(name_set))
+        )
 
     # Conditionally inject finance-specific rules only when relevant metrics exist
     finance_keys = {"cash_flow", "market_share", "supply_chain"}
@@ -117,6 +130,7 @@ async def extract_seed_metrics(
         ),
         source=source[:max_chars],
         finance_rules=finance_rules,
+        entity_filter=entity_filter,
     )
 
     from strategy_forge.core.config import config
@@ -147,6 +161,8 @@ async def extract_seed_metrics(
         if not isinstance(entity, dict):
             continue
         name = str(entity.get("name", "")).strip()
+        if name_set is not None and name not in name_set:
+            continue  # 白名单外的实体，跳过
         entity_metrics = entity.get("metrics", {})
         if not name or not isinstance(entity_metrics, dict):
             continue

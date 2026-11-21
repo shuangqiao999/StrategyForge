@@ -641,7 +641,8 @@ class DeductionOrchestrator:
                     from strategy_forge.engine.seed_extractor import extract_seed_metrics
                     from strategy_forge.core.llm_client import DeductionLLMClient as LLMClient
                     seed_metrics = await extract_seed_metrics(
-                        self.session.source_material, re_engine.metrics(), LLMClient())
+                        self.session.source_material, re_engine.metrics(), LLMClient(),
+                        entity_names=[a.name for a in self._agents])
                     if seed_metrics:
                         detail = ", ".join(f"{n}({len(m)}指标)" for n, m in seed_metrics.items())
                         self._log("simulation", f"种子数据提取: {len(seed_metrics)} 个实体 — {detail}")

@@ -229,6 +229,10 @@ _REL_FOE_KW = ("敌", "对立", "对抗", "对手", "竞争", "冲突", "背叛"
                "rival", "enemy", "hostil", "oppos", "compet", "conflict",
                "betray", "threat", "sanction", "blockade", "contain", "attack")
 
+# 元指令模式：LLM 偶尔把 prompt 中的约束（"禁止/不应/不得…"）当作准则回吐，需在写入前丢弃。
+import re as _re
+_META_INSTRUCTION_RE = _re.compile(r'^(禁止|不应|不得|必须|应该|不要|请勿|严禁|不得)')
+
 
 class SimulationEngine:
     """多智能体并行模拟引擎 — 双路语义记忆。
@@ -1343,6 +1347,8 @@ class SimulationEngine:
                 text = rule_text
             if not text or "无需调整" in text or len(text) < 2:
                 return False
+            if _META_INSTRUCTION_RE.match(text):
+                return False  # 元指令回吐（"禁止/不应…"），不作为准则存库
             old_extra = agent.system_prompt_extra
             _src_map = {"emotional": "emotional", "deep": "deep", "reconstruct": "deep",
                         "internal": "internal"}
@@ -2110,6 +2116,8 @@ class SimulationEngine:
             text = extract_text(resp).strip()
             if not text or "无需调整" in text or "保留" in text or len(text) < 2:
                 return None
+            if _META_INSTRUCTION_RE.match(text):
+                return None  # 元指令回吐（"禁止/不应…"），不作为准则存库
             old_extra = agent.system_prompt_extra
             added = self._append_rule(agent, text, _source, round_number,
                                       charge=_charge, mode="quantified")

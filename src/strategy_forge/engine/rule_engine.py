@@ -43,6 +43,14 @@ class RuleEngine:
     def __init__(self, rule_pack: dict[str, Any]):
         self.pack = self._with_defaults(rule_pack)
         self.domain = self.pack.get("domain", "generic")
+        # P0-1: 阈值键校验——剔除不在本域 metrics 里的孤儿阈值（跨域继承污染，如 market_share）
+        _valid_metrics = set(self.pack.get("metrics", []))
+        _th = self.pack.get("thresholds", {}) or {}
+        _orphan = [k for k in _th if k not in _valid_metrics]
+        if _orphan:
+            logger.warning("[RuleEngine] 域 '%s' 剔除了 %d 个不在 metrics 里的阈值键: %s",
+                           self.domain, len(_orphan), ", ".join(sorted(_orphan)))
+            self.pack["thresholds"] = {k: v for k, v in _th.items() if k in _valid_metrics}
         # Pre-parse static condition strings → structured form for fast eval
         self._parsed_conditions: dict[str, list[list[tuple[str, str, float]]]] = {}
         for cfg in self.pack.get("auto_effects", {}).values():
