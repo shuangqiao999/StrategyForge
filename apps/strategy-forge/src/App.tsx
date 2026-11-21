@@ -3,13 +3,7 @@ import ForceGraph3D from "react-force-graph-3d";
 
 const API_BASE = import.meta.env.DEV
   ? "/api/forge"
-  : isTauri()
-    ? "http://127.0.0.1:8000/api/forge"
-    : "/api/forge";
-
-function isTauri(): boolean {
-  return !!(window as any).__TAURI_INTERNALS__;
-}
+  : "http://127.0.0.1:8000/api/forge";
 
 const lbl: React.CSSProperties = { fontSize: 13, color: "#cbd5e1", marginBottom: 4, display: "block" };
 const inp: React.CSSProperties = { height: 32, marginBottom: 8, width: "100%", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 6, padding: "0 8px", fontSize: 13 };
@@ -396,10 +390,22 @@ export default function App() {
   }, []);
 
   const fetchDomains = useCallback(async () => {
-    try {
-      const r = await fetch(`${API_BASE}/domains`);
-      if (r.ok) setDomains((await r.json()).domains || []);
-    } catch { /* ignore */ }
+    // 冷启动重试：后端(FastAPI)就绪前前端已挂载，首次 /domains 可能失败。
+    // 最多重试 10 次、每次间隔 500ms，就绪后即成功；失败记 console.error 便于诊断。
+    const maxRetries = 10;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const r = await fetch(`${API_BASE}/domains`);
+        if (r.ok) {
+          setDomains((await r.json()).domains || []);
+          return;
+        }
+        console.error("fetchDomains failed:", r.status, r.statusText);
+      } catch (e: any) {
+        console.error("fetchDomains failed:", e?.message);
+      }
+      await new Promise(res => setTimeout(res, 500));
+    }
   }, []);
 
   // 运行前把多动作设置写入会话 config_json（普通推演与优化器统一读取）
